@@ -103,8 +103,30 @@ fn deleting_can_be_undone_from_the_toast() {
         example
             .toasts
             .visible()
-            .any(|(_, toast)| toast.title.starts_with("Restored"))
+            .any(|(_, toast)| toast.title == "Restored crm-dedupe")
     );
+}
+
+#[test]
+fn undo_puts_several_jobs_back_in_their_places() {
+    let mut example = Example::default();
+    let order = |example: &Example| example.jobs.iter().map(|job| job.id).collect::<Vec<_>>();
+    let before = order(&example);
+    example.update(Message::Check(JobId(1042), true));
+    example.update(Message::Check(JobId(1045), true));
+    example.update(Message::DeleteSelected);
+    example.update(Message::Confirm);
+    assert_eq!(example.jobs.len(), before.len() - 2);
+
+    let Some((id, _)) = example
+        .toasts
+        .visible()
+        .find(|(_, toast)| toast.action.is_some())
+    else {
+        panic!("no undo toast");
+    };
+    example.update(Message::Toast(toast::Event::Action(id)));
+    assert_eq!(order(&example), before);
 }
 
 #[test]

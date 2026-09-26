@@ -127,6 +127,9 @@ pub enum Pending {
     ClearFinished,
 }
 
+/// A deleted job and its position in the list, so Undo can put it back.
+pub type Placed = (usize, Job);
+
 #[derive(Debug, Clone)]
 pub enum Message {
     Tabs(tabs::Event<Page>),
@@ -161,7 +164,7 @@ pub enum Message {
     Refresh,
     Feed(feed::Event),
     Toast(toast::Event),
-    Restore(Vec<Job>),
+    Restore(Vec<Placed>),
     Tick(Instant),
     Key(keys::Event),
 }
@@ -853,23 +856,25 @@ impl Example {
         let Some(pending) = self.pending.take() else {
             return;
         };
-        let (removed, kept): (Vec<Job>, Vec<Job>) = std::mem::take(&mut self.jobs)
+        // Each removed job keeps its place in the list so Undo can put it back.
+        let (removed, kept): (Vec<Placed>, Vec<Placed>) = std::mem::take(&mut self.jobs)
             .into_iter()
-            .partition(|job| match pending {
+            .enumerate()
+            .partition(|(_, job)| match pending {
                 Pending::Delete(id) => job.id == id,
                 Pending::DeleteSelected => job.checked,
                 Pending::ClearFinished => job.status.is_finished(),
             });
-        self.jobs = kept;
+        self.jobs = kept.into_iter().map(|(_, job)| job).collect();
         if self
             .cursor
-            .is_some_and(|id| removed.iter().any(|job| job.id == id))
+            .is_some_and(|id| removed.iter().any(|(_, job)| job.id == id))
         {
             self.cursor = None;
         }
 
         let title = match removed.as_slice() {
-            [job] => format!("Deleted {}", job.name),
+            [(_, job)] => format!("Deleted {}", job.name),
             jobs => format!("Deleted {} jobs", jobs.len()),
         };
         let _ = self.toasts.push_with(
@@ -881,11 +886,17 @@ impl Example {
         self.schedule();
     }
 
-    fn restore(&mut self, jobs: Vec<Job>) {
-        let restored = jobs.len();
-        self.jobs.extend(jobs);
-        self.jobs.sort_by_key(|job| std::cmp::Reverse(job.id));
-        self.notify(toast(format!("Restored {restored} jobs")));
+    /// Puts deleted jobs back where they were, earliest position first.
+    fn restore(&mut self, jobs: Vec<Placed>) {
+        let title = match jobs.as_slice() {
+            [(_, job)] => format!("Restored {}", job.name),
+            jobs => format!("Restored {} jobs", jobs.len()),
+        };
+        for (index, job) in jobs {
+            let index = index.min(self.jobs.len());
+            self.jobs.insert(index, job);
+        }
+        self.notify(toast(title));
         self.schedule();
     }
 
