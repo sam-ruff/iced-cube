@@ -62,11 +62,19 @@ pub mod text_size {
     pub const LG: f32 = 18.0;
 }
 
+/// How far the popover surface moves towards the foreground in dark
+/// themes. A card lifts by 0.04, so floating surfaces sit just above it.
+const POPOVER_LIFT: f32 = 0.06;
+
 /// Semantic colours resolved from a theme.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Tokens {
     pub background: Color,
     pub foreground: Color,
+    /// Floating surfaces: menus, popovers, lists and dialogs. The page
+    /// background in light themes, lifted towards the foreground in dark
+    /// ones so a menu over a card still reads as raised.
+    pub popover: Color,
     pub muted: Color,
     pub muted_foreground: Color,
     pub accent: Color,
@@ -91,9 +99,16 @@ impl Tokens {
         let background = ext.background.base.color;
         let foreground = ext.background.base.text;
 
+        let popover = if ext.is_dark {
+            mix(background, foreground, POPOVER_LIFT)
+        } else {
+            background
+        };
+
         Self {
             background,
             foreground,
+            popover,
             muted: ext.background.weak.color,
             muted_foreground: mix(foreground, background, 0.4),
             accent: ext.secondary.weak.color,
@@ -358,6 +373,18 @@ mod tests {
         assert_eq!(on(Color::WHITE), color!(0x09090b));
         assert_eq!(on(Color::BLACK), color!(0xfafafa));
         assert_eq!(on(color!(0xdc2626)), color!(0xfafafa));
+    }
+
+    #[test]
+    fn popover_is_the_background_in_light_and_lifted_in_dark() {
+        let light = Tokens::of(&light());
+        assert_eq!(light.popover, light.background);
+
+        let dark = Tokens::of(&dark());
+        let card = mix(dark.background, dark.foreground, 0.04);
+        let brightness = |colour: Color| colour.r + colour.g + colour.b;
+        assert!(brightness(dark.popover) > brightness(card));
+        assert!(brightness(dark.popover) < brightness(dark.foreground));
     }
 
     #[test]
