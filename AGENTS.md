@@ -38,7 +38,7 @@ cd site && npm run test:e2e                    # Playwright, mobile and desktop
 - Add dependencies with `cargo add` or `npm i <pkg>@latest` so the latest versions are used.
 - No `unwrap`/`expect` in library code. Use guard clauses (`let ... else`, early return) to keep nesting shallow.
 - Every component has a Cargo feature named after its docs page slug (`scroll-area`, `field`), listed in its group feature (`primitives`, `forms` and so on), which `full` and the defaults enable. Gate the module in the group's `mod.rs`, its re-exports in `lib.rs` and its system test (`#![cfg(feature = "...")]`). A component that uses another enables that feature, and an iced feature or optional dependency only one component needs belongs to that component's feature. `theme`, `icon` and `keys` are always built.
-- Conventional commits (`feat(button): ...`, `fix(theme): ...`). The `commit-msg` hook checks the format. `feat` releases a minor, `fix`/`perf`/`refactor` a patch. While on 0.x a breaking change releases a minor.
+- Conventional commits (`feat(button): ...`, `fix(theme): ...`). The `commit-msg` hook checks the format. While on 0.0.x every releasing commit (`feat`, `fix`, `perf`, `refactor`, and breaking changes) releases a patch. Moving to 0.1.0 is a deliberate change to `.releaserc.json`.
 - Published text (README, rustdoc, site, commit messages) must not mention other UI libraries by name.
 - Never use iced's generic font families (`Font::DEFAULT` with a changed weight, `Font::MONOSPACE`) in components or stories. They resolve to whatever the system has, so snapshots differ between machines and wasm previews miss glyphs. Use `theme::font()` or `theme::semibold()`, which follow the font the app registers with `theme::set_font`.
 
