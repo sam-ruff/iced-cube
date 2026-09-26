@@ -1,0 +1,40 @@
+[package]
+name = "gallery"
+version = "0.0.0"
+description = "Live examples for iced-cube, native and in the browser"
+publish = false
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "manifest"
+path = "src/bin/manifest.rs"
+
+[[bin]]
+name = "keymaps"
+path = "src/bin/keymaps.rs"
+
+[dependencies]
+futures-timer = "3.0.4"
+iced = { version = "0.14.0", default-features = false, features = ["svg", "advanced", "wgpu", "crisp", "web-colors"] }
+iced-cube = { path = "../iced-cube", default-features = false }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+iced = { version = "0.14.0", default-features = false, features = ["x11", "wayland", "thread-pool", "tiny-skia"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+console_error_panic_hook = "0.1.7"
+futures-timer = { version = "3.0.4", features = ["wasm-bindgen"] }
+iced = { version = "0.14.0", default-features = false, features = ["webgl"] }
+js-sys = "0.3.106"
+wasm-bindgen = "0.2.129"
+web-sys = { version = "0.3.106", features = ["Window", "Location", "UrlSearchParams", "MessageEvent"] }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+iced_test = "0.14.0"

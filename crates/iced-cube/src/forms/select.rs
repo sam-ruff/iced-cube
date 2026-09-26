@@ -1,0 +1,396 @@
+//! A dropdown for choosing one value from a list.
+
+use std::borrow::Cow;
+
+use iced::keyboard::key::Named;
+use iced::overlay::menu;
+use iced::widget::pick_list::{self, Handle, Status};
+use iced::widget::text::LineHeight;
+use iced::widget::{container, stack, svg};
+use iced::{Alignment, Background, Border, Color, Element, Length, Padding, Shadow, Theme, Vector};
+
+use crate::icon::tinted;
+use crate::inert::inert;
+use crate::keys::{self, Chord, Keymap};
+use crate::theme::{Tokens, fade, mix, radius, space, text_size};
+
+/// Height of the closed select in logical pixels.
+pub const HEIGHT: f32 = 36.0;
+
+const CHEVRON_SIZE: f32 = 16.0;
+const LINE_HEIGHT: f32 = 20.0;
+
+/// A select builder. Convert it into an [`Element`] to render.
+///
+/// A select without a message is rendered disabled.
+pub struct Select<'a, T: Clone, Message> {
+    options: Cow<'a, [T]>,
+    selected: Option<T>,
+    placeholder: Option<String>,
+    width: Length,
+    on_select: Option<Box<dyn Fn(T) -> Message + 'a>>,
+}
+
+impl<T: Clone + std::fmt::Debug, Message> std::fmt::Debug for Select<'_, T, Message> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Select")
+            .field("options", &self.options)
+            .field("selected", &self.selected)
+            .field("placeholder", &self.placeholder)
+            .field("enabled", &self.on_select.is_some())
+            .finish()
+    }
+}
+
+/// Creates a select over `options`, showing `selected` when it is set.
+/// Options are labelled with their `Display` text.
+pub fn select<'a, T, Message>(
+    options: impl Into<Cow<'a, [T]>>,
+    selected: Option<T>,
+) -> Select<'a, T, Message>
+where
+    T: ToString + PartialEq + Clone,
+{
+    Select {
+        options: options.into(),
+        selected,
+        placeholder: None,
+        width: Length::Fixed(200.0),
+        on_select: None,
+    }
+}
+
+impl<'a, T: Clone, Message> Select<'a, T, Message> {
+    /// Text shown while nothing is selected.
+    pub fn placeholder(mut self, placeholder: impl Into<String>) -> Self {
+        self.placeholder = Some(placeholder.into());
+        self
+    }
+
+    pub fn width(mut self, width: impl Into<Length>) -> Self {
+        self.width = width.into();
+        self
+    }
+
+    /// Sets the message emitted with the chosen option.
+    pub fn on_select(mut self, on_select: impl Fn(T) -> Message + 'a) -> Self {
+        self.on_select = Some(Box::new(on_select));
+        self
+    }
+
+    /// Sets the message emitted with the chosen option. `None` disables the
+    /// select.
+    pub fn on_select_maybe(mut self, on_select: Option<impl Fn(T) -> Message + 'a>) -> Self {
+        self.on_select = on_select.map(|f| Box::new(f) as Box<dyn Fn(T) -> Message + 'a>);
+        self
+    }
+
+    pub fn is_enabled(&self) -> bool {
+        self.on_select.is_some()
+    }
+}
+
+impl<'a, T, Message> From<Select<'a, T, Message>> for Element<'a, Message>
+where
+    T: ToString + PartialEq + Clone + 'a,
+    Message: Clone + 'a,
+{
+    fn from(select: Select<'a, T, Message>) -> Self {
+        let enabled = select.is_enabled();
+        let placeholder = select.placeholder.unwrap_or_default();
+        let options = select.options;
+        let selected = select.selected;
+
+        let list: Element<'a, Message> = match select.on_select {
+            Some(on_select) => field(options, selected, placeholder, on_select, true).into(),
+            None => inert(field(options, selected, placeholder, |_| (), false).into()),
+        };
+
+        let chevron = tinted(crate::lucide!(ChevronDown), CHEVRON_SIZE, None).style(
+            move |theme: &Theme, _| svg::Style {
+                color: Some(style(&Tokens::of(theme), Status::Active, enabled).handle_color),
+            },
+        );
+
+        stack![
+            container(list).width(select.width),
+            container(chevron)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_x(Alignment::End)
+                .align_y(Alignment::Center)
+                .padding(Padding::default().right(space::MD)),
+        ]
+        .into()
+    }
+}
+
+type PickList<'a, T, Message> =
+    iced::widget::PickList<'a, T, Cow<'a, [T]>, T, Message, Theme, iced::Renderer>;
+
+fn field<'a, T, Message>(
+    options: Cow<'a, [T]>,
+    selected: Option<T>,
+    placeholder: String,
+    on_select: impl Fn(T) -> Message + 'a,
+    enabled: bool,
+) -> PickList<'a, T, Message>
+where
+    T: ToString + PartialEq + Clone + 'a,
+    Message: Clone,
+{
+    let vertical = (HEIGHT - LINE_HEIGHT) / 2.0;
+    iced::widget::pick_list(options, selected, on_select)
+        .placeholder(placeholder)
+        .width(Length::Fill)
+        .padding(Padding {
+            top: vertical,
+            bottom: vertical,
+            left: space::MD,
+            right: space::MD + CHEVRON_SIZE + space::SM,
+        })
+        .text_size(text_size::SM)
+        .text_line_height(LineHeight::Absolute(LINE_HEIGHT.into()))
+        .handle(Handle::None)
+        .style(move |theme, status| style(&Tokens::of(theme), status, enabled))
+        .menu_style(|theme| menu_style(&Tokens::of(theme)))
+}
+
+/// The iced pick list style for a status.
+pub fn style(tokens: &Tokens, status: Status, enabled: bool) -> pick_list::Style {
+    let border = match status {
+        Status::Active => tokens.border,
+        Status::Hovered => mix(tokens.border, tokens.foreground, 0.3),
+        Status::Opened { .. } => mix(tokens.border, tokens.foreground, 0.6),
+    };
+    let style = pick_list::Style {
+        text_color: tokens.foreground,
+        placeholder_color: tokens.muted_foreground,
+        handle_color: tokens.muted_foreground,
+        background: Background::Color(tokens.background),
+        border: Border {
+            color: border,
+            width: 1.0,
+            radius: radius::MD.into(),
+        },
+    };
+
+    if enabled {
+        return style;
+    }
+    pick_list::Style {
+        text_color: fade(tokens.foreground, 0.5),
+        placeholder_color: fade(tokens.muted_foreground, 0.5),
+        handle_color: fade(tokens.muted_foreground, 0.5),
+        background: Background::Color(tokens.muted),
+        border: Border {
+            color: fade(tokens.border, 0.5),
+            ..style.border
+        },
+    }
+}
+
+/// The style of the open menu.
+pub fn menu_style(tokens: &Tokens) -> menu::Style {
+    menu::Style {
+        background: Background::Color(tokens.background),
+        border: Border {
+            color: tokens.border,
+            width: 1.0,
+            radius: radius::MD.into(),
+        },
+        text_color: tokens.foreground,
+        selected_text_color: tokens.accent_foreground,
+        selected_background: Background::Color(tokens.accent),
+        shadow: Shadow {
+            color: fade(Color::BLACK, if tokens.is_dark { 0.5 } else { 0.1 }),
+            offset: Vector::new(0.0, 4.0),
+            blur_radius: 12.0,
+        },
+    }
+}
+
+/// What a select keyboard shortcut does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Action {
+    Next,
+    Previous,
+}
+
+impl Action {
+    /// The option to select after this action, to send through the
+    /// select's `on_select` message. Stops at the ends of the list, and
+    /// returns `None` when the selection would not change. With nothing
+    /// selected, `Next` picks the first option and `Previous` the last.
+    pub fn apply<T: PartialEq + Clone>(self, options: &[T], selected: Option<&T>) -> Option<T> {
+        let current = selected.and_then(|value| options.iter().position(|option| option == value));
+        let target = match (self, current) {
+            (Action::Next, None) => 0,
+            (Action::Previous, None) => options.len().checked_sub(1)?,
+            (Action::Next, Some(index)) => index + 1,
+            (Action::Previous, Some(index)) => index.checked_sub(1)?,
+        };
+        options.get(target).cloned()
+    }
+}
+
+impl keys::Action for Action {
+    const ALL: &'static [Self] = &[Action::Next, Action::Previous];
+
+    fn defaults() -> Keymap<Self> {
+        default_keymap()
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Action::Next => "Next",
+            Action::Previous => "Previous",
+        }
+    }
+
+    fn description(self) -> &'static str {
+        match self {
+            Action::Next => "Selects the next option, stopping at the last.",
+            Action::Previous => "Selects the previous option, stopping at the first.",
+        }
+    }
+}
+
+/// The default select shortcuts:
+///
+/// | Keys | Action |
+/// | --- | --- |
+/// | `ArrowDown` | [`Action::Next`] |
+/// | `ArrowUp` | [`Action::Previous`] |
+///
+/// These change the value without opening the menu. Shortcuts are
+/// app-wide, so an app with several selects routes them to the one it
+/// considers current.
+pub fn default_keymap() -> Keymap<Action> {
+    Keymap::new()
+        .bind(Chord::named(Named::ArrowDown), Action::Next)
+        .bind(Chord::named(Named::ArrowUp), Action::Previous)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::theme::{dark, light};
+
+    fn press(keymap: &Keymap<Action>, chord: &str) -> Option<Action> {
+        let chord: Chord = chord.parse().unwrap();
+        keymap.resolve(chord.key(), chord.modifiers())
+    }
+
+    #[test]
+    fn default_keymap_and_overrides() {
+        let keymap = default_keymap();
+        assert_eq!(press(&keymap, "ArrowDown"), Some(Action::Next));
+        assert_eq!(press(&keymap, "ArrowUp"), Some(Action::Previous));
+        let custom = keymap
+            .bind("J".parse().unwrap(), Action::Next)
+            .unbind(&"ArrowDown".parse().unwrap());
+        assert_eq!(press(&custom, "j"), Some(Action::Next));
+        assert_eq!(press(&custom, "ArrowDown"), None);
+    }
+
+    #[test]
+    fn next_and_previous_stop_at_the_ends() {
+        let options = ["a", "b", "c"];
+        assert_eq!(Action::Next.apply(&options, Some(&"a")), Some("b"));
+        assert_eq!(Action::Next.apply(&options, Some(&"c")), None);
+        assert_eq!(Action::Previous.apply(&options, Some(&"b")), Some("a"));
+        assert_eq!(Action::Previous.apply(&options, Some(&"a")), None);
+    }
+
+    #[test]
+    fn without_a_selection_next_and_previous_pick_an_end() {
+        let options = ["a", "b", "c"];
+        assert_eq!(Action::Next.apply(&options, None), Some("a"));
+        assert_eq!(Action::Previous.apply(&options, None), Some("c"));
+        assert_eq!(Action::Next.apply(&options, Some(&"z")), Some("a"));
+        let empty: [&str; 0] = [];
+        assert_eq!(Action::Next.apply(&empty, None), None);
+        assert_eq!(Action::Previous.apply(&empty, None), None);
+    }
+
+    const STATES: [Status; 4] = [
+        Status::Active,
+        Status::Hovered,
+        Status::Opened { is_hovered: false },
+        Status::Opened { is_hovered: true },
+    ];
+
+    #[test]
+    fn default_builder_has_no_selection_and_is_disabled() {
+        let s: Select<'_, &str, ()> = select(vec!["a", "b"], None);
+        assert_eq!(s.options.len(), 2);
+        assert!(s.selected.is_none());
+        assert!(s.placeholder.is_none());
+        assert_eq!(s.width, Length::Fixed(200.0));
+        assert!(!s.is_enabled());
+    }
+
+    #[test]
+    fn builder_sets_placeholder_and_message() {
+        const OPTIONS: &[u8] = &[1, 2, 3];
+        let s: Select<'_, u8, u8> = select(OPTIONS, Some(2))
+            .placeholder("Pick a number")
+            .on_select(|v| v);
+        assert_eq!(s.placeholder.as_deref(), Some("Pick a number"));
+        assert!(s.is_enabled());
+        assert!(matches!(s.options, Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn on_select_maybe_enables_only_with_a_message() {
+        let enabled: Select<'_, u8, u8> = select(vec![1, 2], None).on_select_maybe(Some(|v| v));
+        assert!(enabled.is_enabled());
+        let disabled: Select<'_, u8, u8> =
+            select(vec![1, 2], None).on_select_maybe(None::<fn(u8) -> u8>);
+        assert!(!disabled.is_enabled());
+    }
+
+    #[test]
+    fn hover_and_open_strengthen_the_border() {
+        for theme in [light(), dark()] {
+            let tokens = Tokens::of(&theme);
+            let borders = STATES.map(|status| style(&tokens, status, true).border.color);
+            assert_ne!(borders[0], borders[1]);
+            assert_ne!(borders[1], borders[2]);
+            assert_eq!(borders[2], borders[3]);
+        }
+    }
+
+    #[test]
+    fn placeholder_is_muted() {
+        for theme in [light(), dark()] {
+            let tokens = Tokens::of(&theme);
+            let style = style(&tokens, Status::Active, true);
+            assert_eq!(style.placeholder_color, tokens.muted_foreground);
+            assert_ne!(style.placeholder_color, style.text_color);
+        }
+    }
+
+    #[test]
+    fn disabled_fades_text_and_uses_a_muted_background() {
+        for theme in [light(), dark()] {
+            let tokens = Tokens::of(&theme);
+            for status in STATES {
+                let disabled = style(&tokens, status, false);
+                assert!((disabled.text_color.a - tokens.foreground.a * 0.5).abs() < 1e-6);
+                assert_eq!(disabled.background, Background::Color(tokens.muted));
+            }
+        }
+    }
+
+    #[test]
+    fn menu_highlights_with_accent() {
+        for theme in [light(), dark()] {
+            let tokens = Tokens::of(&theme);
+            let menu = menu_style(&tokens);
+            assert_eq!(menu.selected_background, Background::Color(tokens.accent));
+            assert_eq!(menu.border.width, 1.0);
+        }
+    }
+}

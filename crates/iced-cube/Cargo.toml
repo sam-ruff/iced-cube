@@ -1,0 +1,32 @@
+[package]
+name = "iced-cube"
+version = "0.0.1"
+description = "Themeable application components for the iced GUI library, with Lucide icons"
+readme = "README.md"
+keywords = ["iced", "gui", "components", "ui", "widgets"]
+categories = ["gui"]
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage = "https://sam-ruff.github.io/iced-cube/"
+documentation = "https://docs.rs/iced-cube"
+
+[features]
+default = ["x11", "wayland", "thread-pool"]
+x11 = ["iced/x11"]
+wayland = ["iced/wayland"]
+thread-pool = ["iced/thread-pool"]
+tokio = ["iced/tokio"]
+
+[dependencies]
+iced = { version = "0.14.0", default-features = false, features = ["svg", "advanced", "canvas"] }
+lucide-static-svg = "1.48.0"
+num-traits = "0.2.19"
+
+[dev-dependencies]
+futures = "0.3.34"
+iced = { version = "0.14.0", default-features = false, features = ["svg", "advanced", "tiny-skia"] }
+iced_test = "0.14.0"
+
+[lints]
+workspace = true

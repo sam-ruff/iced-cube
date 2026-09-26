@@ -1,0 +1,166 @@
+---
+import { allComponents, sections } from "../lib/nav";
+
+const nav = await sections();
+const path = Astro.url.pathname;
+---
+
+<div class="scrim" data-menu-scrim hidden></div>
+<nav class="sidebar" id="sidebar" aria-label="Documentation" data-pagefind-ignore>
+  {
+    nav.map((section, index) => (
+      <div class="section">
+        {index === 1 && (
+          <ul class="all">
+            <li>
+              <a href={allComponents.href} aria-current={path === allComponents.href ? "page" : undefined}>
+                {allComponents.title}
+              </a>
+            </li>
+          </ul>
+        )}
+        <p class="title">{section.title}</p>
+        <ul>
+          {section.links.map((link) => (
+            <li>
+              <a href={link.href} aria-current={path === link.href ? "page" : undefined}>
+                {link.title}
+              </a>
+            </li>
+          ))}
+        </ul>
+      </div>
+    ))
+  }
+</nav>
+
+<script>
+  const toggle = document.querySelector<HTMLButtonElement>("[data-menu-toggle]");
+  const sidebar = document.getElementById("sidebar");
+  const scrim = document.querySelector<HTMLElement>("[data-menu-scrim]");
+
+  function setOpen(open: boolean): void {
+    if (!sidebar || !scrim || !toggle) return;
+    sidebar.classList.toggle("open", open);
+    scrim.hidden = !open;
+    toggle.setAttribute("aria-expanded", String(open));
+    toggle.setAttribute("aria-label", open ? "Close navigation" : "Open navigation");
+    document.body.style.overflow = open ? "hidden" : "";
+    // Everything except the header and the drawer is out of reach while it is open.
+    for (const element of document.querySelectorAll<HTMLElement>("main, footer, .skip")) {
+      element.inert = open;
+    }
+    if (open) sidebar.querySelector<HTMLAnchorElement>("a")?.focus();
+  }
+
+  function close(): void {
+    setOpen(false);
+    toggle?.focus();
+  }
+
+  toggle?.addEventListener("click", () => setOpen(!sidebar?.classList.contains("open")));
+  scrim?.addEventListener("click", close);
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || event.defaultPrevented) return;
+    if (document.querySelector("dialog[open]")) return;
+    if (sidebar?.classList.contains("open")) close();
+  });
+  matchMedia("(min-width: 1024px)").addEventListener("change", () => setOpen(false));
+
+  // Scrolling the sidebar directly keeps the page's focus start at the skip link.
+  const current = sidebar?.querySelector<HTMLElement>('[aria-current="page"]');
+  if (sidebar && current && sidebar.scrollHeight > sidebar.clientHeight) {
+    sidebar.scrollTop = current.offsetTop - sidebar.clientHeight / 2;
+  }
+</script>
+
+<style>
+  .sidebar {
+    position: sticky;
+    top: var(--header-h);
+    height: calc(100dvh - var(--header-h));
+    overflow-y: auto;
+    padding: 24px 12px 48px 16px;
+    border-right: 1px solid var(--border);
+    overscroll-behavior: contain;
+  }
+
+  .section + .section {
+    margin-top: 20px;
+  }
+
+  .title {
+    margin: 0 0 4px;
+    padding: 0 8px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--fg);
+  }
+
+  ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .all {
+    margin-bottom: 20px;
+  }
+
+  a {
+    display: block;
+    padding: 5px 8px;
+    border-radius: var(--radius-sm);
+    font-size: 14px;
+    color: var(--fg-muted);
+    text-decoration: none;
+    transition: color 150ms var(--ease), background 150ms var(--ease);
+  }
+
+  a:hover {
+    color: var(--fg);
+    background: var(--muted);
+  }
+
+  a[aria-current="page"] {
+    color: var(--fg);
+    font-weight: 550;
+    background: var(--muted);
+  }
+
+  .scrim {
+    position: fixed;
+    inset: var(--header-h) 0 0 0;
+    z-index: 30;
+    background: rgb(0 0 0 / 0.4);
+  }
+
+  @media (max-width: 1023px) {
+    .sidebar {
+      position: fixed;
+      z-index: 35;
+      top: var(--header-h);
+      left: 0;
+      width: min(300px, 85vw);
+      background: var(--bg);
+      transform: translateX(-100%);
+      visibility: hidden;
+      transition: transform 200ms var(--ease), visibility 0s linear 200ms;
+    }
+
+    .sidebar.open {
+      transform: none;
+      visibility: visible;
+      box-shadow: var(--shadow-lg);
+      transition: transform 200ms var(--ease);
+    }
+
+    :global([data-theme="dark"]) .sidebar {
+      background: var(--surface);
+    }
+
+    :global([data-theme="dark"]) .scrim {
+      background: rgb(0 0 0 / 0.6);
+    }
+  }
+</style>

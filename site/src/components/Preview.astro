@@ -1,0 +1,325 @@
+---
+import { Code } from "astro:components";
+import Icon from "./Icon.astro";
+import { story as findStory, posterName } from "../lib/stories";
+import { href } from "../lib/paths";
+
+interface Props {
+  id: string;
+  height?: number;
+}
+
+const { id, height = 280 } = Astro.props;
+const story = findStory(id);
+const key = id.replaceAll("/", "-");
+const snapshots = href("/snapshots/");
+const standalone = `${href("/preview/")}?story=${encodeURIComponent(id)}`;
+const name = `${story.title} example`;
+// Scroll areas need the wheel inside the preview; every other preview lets the page scroll.
+const wheel = story.component === "scroll-area";
+---
+
+<div class="preview" data-preview-root>
+  <div class="bar" data-pagefind-ignore>
+    <div class="tabs" role="tablist" aria-label={name}>
+      <button type="button" role="tab" id={`tab-preview-${key}`} aria-controls={`panel-preview-${key}`} aria-selected="true" data-tab="preview">
+        Preview
+      </button>
+      <button type="button" role="tab" id={`tab-code-${key}`} aria-controls={`panel-code-${key}`} aria-selected="false" tabindex="-1" data-tab="code">
+        Code
+      </button>
+    </div>
+    <div class="tools">
+      <button type="button" class="copy" data-copy hidden>
+        <span class="copy-icon"><Icon name="Copy" size={14} /></span>
+        <span class="check-icon"><Icon name="Check" size={14} /></span>
+        <span class="copy-label">Copy</span><span class="visually-hidden"> {story.title} code</span>
+      </button>
+      <button type="button" class="tool" data-reset aria-label={`Restart ${story.title} preview`} title="Restart preview">
+        <Icon name="RotateCcw" size={15} />
+      </button>
+      <a class="tool" href={standalone} target="_blank" rel="noopener" aria-label={`Open ${story.title} preview in a new tab`} title="Open in new tab">
+        <Icon name="ExternalLink" size={15} />
+      </a>
+    </div>
+    <span class="visually-hidden" role="status" data-copy-status></span>
+  </div>
+
+  <div class="panel" role="tabpanel" tabindex="0" id={`panel-preview-${key}`} aria-labelledby={`tab-preview-${key}`} data-panel="preview">
+    <div class="frame" style={`height:${height}px`} data-story={id} data-title={story.title} data-wheel={wheel ? "true" : undefined}>
+      <img
+        class="poster light"
+        alt={`${story.title}: ${story.description}`}
+        src={`${snapshots}${posterName(id, "light")}`}
+        width="720"
+        height={height}
+        loading="lazy"
+        decoding="async"
+      />
+      <img
+        class="poster dark"
+        alt={`${story.title}: ${story.description}`}
+        src={`${snapshots}${posterName(id, "dark")}`}
+        width="720"
+        height={height}
+        loading="lazy"
+        decoding="async"
+      />
+      <div class="status" data-status>
+        <span class="dot"></span>
+        <span data-status-text>Static preview</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel code" role="tabpanel" tabindex="0" id={`panel-code-${key}`} aria-labelledby={`tab-code-${key}`} data-panel="code" data-pagefind-ignore hidden>
+    <Code code={story.source} lang="rust" themes={{ light: "github-light", dark: "github-dark-default" }} defaultColor={false} />
+    <p class="file">
+      <a href={`https://github.com/sam-ruff/iced-cube/blob/main/crates/gallery/${story.file}`}>{`crates/gallery/${story.file}`}</a>
+    </p>
+  </div>
+</div>
+
+<script>
+  import "../scripts/preview";
+</script>
+
+<style>
+  .preview {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--surface);
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+  }
+
+  .bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 6px 6px 6px 8px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-subtle);
+  }
+
+  :global([data-theme="dark"]) .bar {
+    background: var(--surface);
+  }
+
+  .tabs {
+    display: inline-flex;
+    padding: 3px;
+    gap: 2px;
+    border-radius: var(--radius);
+    background: var(--muted);
+  }
+
+  .tabs button {
+    height: 28px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--fg-muted);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 550;
+    cursor: pointer;
+    transition: color 150ms var(--ease), background 150ms var(--ease), box-shadow 150ms var(--ease);
+  }
+
+  .tabs button:hover {
+    color: var(--fg);
+  }
+
+  .tabs button[aria-selected="true"] {
+    background: var(--bg);
+    color: var(--fg);
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.08);
+  }
+
+  :global([data-theme="dark"]) .tabs button[aria-selected="true"] {
+    background: #2e2e35;
+    box-shadow: none;
+  }
+
+  .tools {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+  }
+
+  .tool {
+    display: inline-grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--fg-subtle);
+    cursor: pointer;
+    transition: color 150ms var(--ease), background 150ms var(--ease);
+  }
+
+  .tool:hover {
+    color: var(--fg);
+    background: var(--muted);
+  }
+
+  .panel:focus-visible {
+    outline-offset: -2px;
+  }
+
+  .frame {
+    position: relative;
+    background: var(--bg);
+    overflow: hidden;
+  }
+
+  .frame :global(iframe) {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    opacity: 0;
+    transition: opacity 200ms var(--ease);
+  }
+
+  .frame:global(.live) :global(iframe) {
+    opacity: 1;
+  }
+
+  .poster {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    transition: opacity 200ms var(--ease);
+  }
+
+  /* Only the poster for the current theme is displayed, so only it is fetched. */
+  :global([data-theme="light"]) .poster.dark,
+  :global([data-theme="dark"]) .poster.light {
+    display: none;
+  }
+
+  .frame:global(.live) .poster {
+    opacity: 0;
+  }
+
+  .status {
+    position: absolute;
+    z-index: 1;
+    left: 12px;
+    bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 8px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--bg) 85%, transparent);
+    color: var(--fg-subtle);
+    font-size: 11px;
+    pointer-events: none;
+    transition: opacity 300ms var(--ease);
+  }
+
+  .frame:global(.live) .status {
+    opacity: 0;
+    transition-delay: 1.5s;
+  }
+
+  .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--fg-subtle);
+  }
+
+  .frame:global(.loading) .dot {
+    background: #f59e0b;
+    animation: pulse 1s ease-in-out infinite;
+  }
+
+  .frame:global(.live) .dot {
+    background: #22c55e;
+  }
+
+  .frame:global(.failed) .dot {
+    background: #dc2626;
+  }
+
+  @keyframes pulse {
+    50% {
+      opacity: 0.3;
+    }
+  }
+
+  .code {
+    max-height: 480px;
+    overflow: auto;
+    background: var(--code-bg);
+  }
+
+  .copy {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 30px;
+    padding: 0 10px;
+    margin-right: 4px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg);
+    color: var(--fg-muted);
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+    transition: color 150ms var(--ease), border-color 150ms var(--ease);
+  }
+
+  .copy[hidden] {
+    display: none;
+  }
+
+  .copy:hover {
+    color: var(--fg);
+    border-color: var(--border-strong);
+  }
+
+  .copy .check-icon,
+  .copy:global(.copied) .copy-icon {
+    display: none;
+  }
+
+  .copy:global(.copied) .check-icon {
+    display: inline-grid;
+    color: #16a34a;
+  }
+
+  .copy-icon,
+  .check-icon {
+    display: inline-grid;
+  }
+
+  .file {
+    margin: 0;
+    padding: 8px 20px 12px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--fg-subtle);
+  }
+
+  .file a {
+    color: inherit;
+  }
+
+  .file a:hover {
+    color: var(--fg);
+  }
+</style>

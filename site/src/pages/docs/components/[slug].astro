@@ -1,0 +1,406 @@
+---
+import { render } from "astro:content";
+import Docs from "../../../layouts/Docs.astro";
+import Preview from "../../../components/Preview.astro";
+import Icon from "../../../components/Icon.astro";
+import { components, componentHref, guides, type Component } from "../../../lib/nav";
+import { story } from "../../../lib/stories";
+import { keymapFor } from "../../../lib/keymaps";
+import { href } from "../../../lib/paths";
+
+interface PagerLink {
+  title: string;
+  href: string;
+}
+
+export async function getStaticPaths() {
+  const all = await components();
+  const link = (entry: Component | undefined): PagerLink | undefined =>
+    entry && { title: entry.data.title, href: componentHref(entry) };
+  const lastGuide = guides.at(-1);
+
+  return all.map((entry, index) => ({
+    params: { slug: entry.id },
+    props: {
+      entry,
+      related: entry.data.related.map((slug) => {
+        const found = all.find((other) => other.id === slug);
+        if (!found) throw new Error(`${entry.id}: unknown related page "${slug}"`);
+        return found;
+      }),
+      prev: index === 0 ? lastGuide : link(all[index - 1]),
+      next: link(all[index + 1]),
+    },
+  }));
+}
+
+interface Props {
+  entry: Component;
+  related: Component[];
+  prev: PagerLink | undefined;
+  next: PagerLink | undefined;
+}
+
+const { entry, related, prev, next } = Astro.props;
+const { data } = entry;
+const { Content } = await render(entry);
+
+const hero = story(data.hero);
+const examples = data.stories.filter((id) => id !== data.hero).map((id) => story(id));
+const exampleId = (text: string) => `example-${text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
+const imports = data.imports ?? `use iced_cube::${data.module};`;
+const bindings = keymapFor(entry.id);
+const hasKeyboard = bindings.length > 0 || data.keyboard.length > 0;
+
+/** Escapes text and turns `backticked` spans into inline code. */
+const inline = (text: string) =>
+  text
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replace(/`([^`]+)`/g, "<code>$1</code>");
+
+const toc = [
+  { id: "usage", title: "Usage" },
+  ...(examples.length > 0 ? [{ id: "examples", title: "Examples" }] : []),
+  ...examples.map((example) => ({ id: exampleId(example.title), title: example.title, depth: 3 })),
+  ...(data.api.length > 0 ? [{ id: "api", title: "API" }] : []),
+  ...(hasKeyboard ? [{ id: "keyboard", title: "Keyboard" }] : []),
+];
+
+const pager = {
+  ...(prev ? { prev } : {}),
+  ...(next ? { next } : {}),
+};
+---
+
+<Docs title={data.title} description={data.description} toc={toc} pager={pager}>
+  <p class="eyebrow">{data.group}</p>
+  <h1>{data.title}</h1>
+  <p class="lead">{data.description}</p>
+  <div class="meta">
+    <pre class="imports"><code>{imports.trim()}</code></pre>
+    <a href={`https://docs.rs/iced-cube/latest/iced_cube/${data.module.replaceAll("::", "/")}/index.html`}>
+      API reference <Icon name="ArrowUpRight" size={14} />
+    </a>
+  </div>
+
+  <figure class="hero">
+    <Preview id={data.hero} height={hero.height} />
+    <figcaption><strong>{hero.title}.</strong> {hero.description}</figcaption>
+  </figure>
+
+  <section class="prose">
+    <h2 id="usage">Usage</h2>
+    <Content />
+  </section>
+
+  {
+    related.length > 0 && (
+      <nav class="related" aria-label="Related components" data-related>
+        <span>See also</span>
+        <ul>
+          {related.map((other) => (
+            <li>
+              <a href={componentHref(other)}>{other.data.title}</a>
+            </li>
+          ))}
+        </ul>
+      </nav>
+    )
+  }
+
+  {
+    examples.length > 0 && (
+      <section>
+        <h2 id="examples" class="section-title">Examples</h2>
+        {examples.map((example) => (
+          <div class="example">
+            <h3 id={exampleId(example.title)}>{example.title}</h3>
+            <p class="muted">{example.description}</p>
+            <Preview id={example.id} height={example.height} />
+          </div>
+        ))}
+      </section>
+    )
+  }
+
+  {
+    data.api.length > 0 && (
+      <section>
+        <h2 id="api" class="section-title">API</h2>
+        <div class="table-wrap" tabindex="0" role="region" aria-labelledby="api">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Item</th>
+                <th scope="col">Description</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.api.map((item) => (
+                <tr>
+                  <td>
+                    <code>{item.name}</code>
+                  </td>
+                  <td set:html={inline(item.description)} />
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    )
+  }
+
+  {
+    hasKeyboard && (
+      <section>
+        <h2 id="keyboard" class="section-title">Keyboard</h2>
+        {bindings.length > 0 && (
+          <p class="muted">
+            Default shortcuts. Every one can be changed or removed with a keymap; see{" "}
+            <a href={href("/docs/keyboard/")}>Keyboard shortcuts</a>.
+          </p>
+        )}
+        <div class="table-wrap" tabindex="0" role="region" aria-labelledby="keyboard">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Keys</th>
+                <th scope="col">{bindings.length > 0 ? "Action" : "Behaviour"}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {bindings.map((binding) => (
+                <tr>
+                  <td>
+                    {binding.keys.map((keys, index) => (
+                      <>
+                        {index > 0 && <span class="or"> or </span>}
+                        <kbd>{keys}</kbd>
+                      </>
+                    ))}
+                  </td>
+                  <td>
+                    <code>{binding.action}</code> <span set:html={inline(binding.description)} />
+                  </td>
+                </tr>
+              ))}
+              {data.keyboard.map((item) => (
+                <tr>
+                  <td>
+                    <kbd>{item.keys}</kbd>
+                  </td>
+                  <td set:html={inline(item.action)} />
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    )
+  }
+</Docs>
+
+<style>
+  .eyebrow {
+    margin: 0 0 8px;
+    font-size: 13px;
+    font-weight: 550;
+    color: var(--accent);
+  }
+
+  .lead {
+    margin: 12px 0 16px;
+    font-size: 18px;
+    color: var(--fg-muted);
+  }
+
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 16px;
+    margin-bottom: 32px;
+    font-size: 13px;
+  }
+
+  .imports {
+    margin: 0;
+    padding: 4px 8px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--muted);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-size: 12px;
+    line-height: 1.6;
+  }
+
+  .hero {
+    margin: 0;
+  }
+
+  .hero figcaption {
+    margin-top: 10px;
+    font-size: 14px;
+    color: var(--fg-muted);
+  }
+
+  .hero figcaption strong {
+    font-weight: 550;
+    color: var(--fg);
+  }
+
+  .related {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 8px 12px;
+    margin-top: 24px;
+    font-size: 14px;
+  }
+
+  .related span {
+    font-weight: 550;
+  }
+
+  .related ul {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .related a {
+    display: inline-block;
+    padding: 2px 10px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    color: var(--fg-muted);
+    text-decoration: none;
+    transition: color 150ms var(--ease), border-color 150ms var(--ease);
+  }
+
+  .related a:hover {
+    color: var(--fg);
+    border-color: var(--border-strong);
+  }
+
+  .meta a {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    color: var(--fg-muted);
+    text-decoration: none;
+  }
+
+  .meta a:hover {
+    color: var(--fg);
+  }
+
+  .section-title {
+    margin: 48px 0 16px;
+  }
+
+  .example {
+    margin-bottom: 40px;
+  }
+
+  .example h3 {
+    margin-bottom: 4px;
+  }
+
+  .muted {
+    color: var(--fg-muted);
+    font-size: 15px;
+    margin-bottom: 12px;
+  }
+
+  .table-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+  }
+
+  th,
+  td {
+    text-align: left;
+    vertical-align: top;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  th {
+    font-weight: 550;
+    background: var(--bg-subtle);
+  }
+
+  tr:last-child td {
+    border-bottom: 0;
+  }
+
+  td:first-child {
+    white-space: nowrap;
+  }
+
+  td:last-child {
+    color: var(--fg-muted);
+  }
+
+  .or {
+    font-size: 12px;
+    color: var(--fg-subtle);
+  }
+
+  .muted a {
+    color: var(--accent);
+    text-underline-offset: 3px;
+  }
+
+  /* Stack each row on narrow screens so descriptions keep a readable width. */
+  @media (max-width: 640px) {
+    table,
+    thead,
+    tbody,
+    tr,
+    td {
+      display: block;
+    }
+
+    thead {
+      display: none;
+    }
+
+    tr {
+      border-bottom: 1px solid var(--border);
+    }
+
+    tr:last-child {
+      border-bottom: 0;
+    }
+
+    td {
+      border: 0;
+    }
+
+    td:first-child {
+      white-space: normal;
+      overflow-wrap: anywhere;
+      padding-bottom: 0;
+    }
+
+    td:last-child {
+      padding-top: 4px;
+    }
+  }
+</style>

@@ -1,0 +1,206 @@
+---
+import Icon from "./Icon.astro";
+import { sections } from "../lib/nav";
+import { href } from "../lib/paths";
+
+const index = (await sections()).flatMap((section) =>
+  section.links.map((link) => ({ ...link, section: section.title })),
+);
+---
+
+<dialog class="search" data-search aria-label="Search documentation">
+  <div class="panel">
+    <div class="field">
+      <Icon name="Search" size={18} />
+      <input
+        type="text"
+        placeholder="Search components and guides..."
+        aria-label="Search components and guides"
+        autocomplete="off"
+        spellcheck="false"
+        role="combobox"
+        aria-expanded="false"
+        aria-controls="search-results"
+        aria-autocomplete="list"
+        data-search-input
+      />
+      <kbd class="esc">Esc</kbd>
+      <button type="button" class="close" data-search-close>Close</button>
+    </div>
+    <ul class="results" id="search-results" role="listbox" aria-label="Results" data-search-results></ul>
+    <p class="empty" data-search-empty hidden>No results. Try a component name such as "button".</p>
+    <span class="visually-hidden" role="status" data-search-status></span>
+    <div class="footer">
+      <span><kbd>&uarr;</kbd> <kbd>&darr;</kbd> to move</span>
+      <span><kbd>Enter</kbd> to open</span>
+    </div>
+  </div>
+  <script type="application/json" data-search-index set:html={JSON.stringify(index)} />
+  <script type="application/json" data-pagefind-url set:html={JSON.stringify(href("/pagefind/pagefind.js"))} />
+</dialog>
+
+<script>
+  import "../scripts/search";
+</script>
+
+<style>
+  .search {
+    width: min(640px, calc(100vw - 32px));
+    max-height: min(520px, calc(100dvh - 96px));
+    margin: 12vh auto auto;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--surface);
+    color: var(--fg);
+    box-shadow: var(--shadow-lg);
+    overflow: hidden;
+  }
+
+  .search[open] {
+    animation: pop 160ms var(--ease);
+  }
+
+  .search::backdrop {
+    background: rgb(0 0 0 / 0.4);
+    backdrop-filter: blur(2px);
+  }
+
+  @keyframes pop {
+    from {
+      opacity: 0;
+      transform: translateY(-6px) scale(0.98);
+    }
+  }
+
+  .panel {
+    display: flex;
+    flex-direction: column;
+    max-height: inherit;
+  }
+
+  .field {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 16px;
+    border-bottom: 1px solid var(--border);
+    color: var(--fg-subtle);
+  }
+
+  .field input {
+    flex: 1;
+    height: 52px;
+    border: 0;
+    outline: none;
+    background: transparent;
+    color: var(--fg);
+    font: inherit;
+    font-size: 16px;
+  }
+
+  .field input::-webkit-search-cancel-button {
+    display: none;
+  }
+
+  .results {
+    list-style: none;
+    margin: 0;
+    padding: 8px;
+    overflow-y: auto;
+  }
+
+  .results :global(.group) {
+    padding: 8px 8px 4px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--fg-subtle);
+  }
+
+  .results :global(ul) {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .results :global([role="option"]) {
+    border-radius: var(--radius-sm);
+  }
+
+  .results :global([role="option"] a) {
+    display: block;
+    padding: 8px 12px;
+    text-decoration: none;
+    cursor: pointer;
+  }
+
+  .results :global([role="option"] strong) {
+    display: block;
+    font-size: 14px;
+    font-weight: 550;
+  }
+
+  .results :global([role="option"] span) {
+    display: block;
+    font-size: 13px;
+    color: var(--fg-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .results :global([role="option"] mark) {
+    background: color-mix(in srgb, var(--accent) 22%, transparent);
+    color: var(--fg);
+    border-radius: 2px;
+  }
+
+  .close {
+    display: none;
+    height: 32px;
+    padding: 0 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg);
+    color: var(--fg);
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+  }
+
+  .results :global([role="option"][aria-selected="true"]) {
+    background: var(--muted);
+  }
+
+  .empty {
+    padding: 24px 16px;
+    margin: 0;
+    text-align: center;
+    color: var(--fg-muted);
+    font-size: 14px;
+  }
+
+  .footer {
+    display: flex;
+    gap: 16px;
+    padding: 10px 16px;
+    border-top: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--fg-subtle);
+  }
+
+  @media (max-width: 767px), (pointer: coarse) {
+    .search {
+      margin-top: 16px;
+    }
+
+    .footer,
+    .esc {
+      display: none;
+    }
+
+    .close {
+      display: inline-block;
+    }
+  }
+</style>

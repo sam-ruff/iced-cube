@@ -1,0 +1,146 @@
+---
+layout: ../../layouts/Guide.astro
+title: Theming
+description: Light and dark themes, semantic tokens and custom palettes.
+---
+
+## Built-in themes
+
+`iced_cube::theme::light()` and `iced_cube::theme::dark()` return ordinary `iced::Theme` values with a neutral palette. Switch between them from your application's `theme` function. To use your own colours, see [Custom palettes](#custom-palettes) below.
+
+## Tokens
+
+Components never hard-code colours. They resolve semantic tokens from the active theme:
+
+```rust
+use iced_cube::theme::Tokens;
+
+let tokens = Tokens::of(&theme);
+let border = tokens.border;
+let text = tokens.muted_foreground;
+```
+
+Tokens include `background`, `foreground`, `muted`, `muted_foreground`, `accent`, `border`, `ring`, `primary`, `secondary`, `destructive`, `success` and `warning`, each with a matching foreground where it makes sense.
+
+Because tokens come from iced's extended palette, any iced theme works, including the built-in ones such as `Theme::Dracula` or a `Theme::custom` palette of your own. `secondary` and `accent` are read from the extended palette's secondary colours, which iced derives from the background and text for its own themes.
+
+## Spacing, radius and type
+
+Shared constants keep layouts consistent:
+
+- `theme::space`: `XS` (4), `SM` (8), `MD` (12), `LG` (16), `XL` (24)
+- `theme::radius`: `SM` (4), `MD` (6), `LG` (8), `FULL`
+- `theme::text_size`: `XS` (12), `SM` (14), `MD` (16), `LG` (18)
+
+## Changing one component
+
+Components have no per-instance style option. Their look comes from the theme alone, so a palette change reaches every one of them at once.
+
+When one spot in your app needs something different, build it from a plain iced widget and start from the component's own style. Each component module has a pure `style` function that takes `Tokens` (and the variant or status where it has one) and returns an ordinary iced style, which you can adjust before returning it:
+
+```rust
+use iced::widget::{button as iced_button, container, text};
+use iced::{Element, Theme};
+use iced_cube::card;
+use iced_cube::primitives::button::{self, Variant};
+use iced_cube::theme::{Tokens, radius};
+
+fn pill_button(label: &str) -> iced::widget::Button<'_, Message> {
+    iced_button(text(label).size(14))
+        .padding([8, 20])
+        .style(|theme: &Theme, status| {
+            let mut style = button::style(&Tokens::of(theme), Variant::Primary, status);
+            style.border.radius = radius::FULL.into();
+            style
+        })
+}
+
+fn highlighted_panel<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
+    container(content)
+        .padding(16)
+        .style(|theme: &Theme| {
+            let tokens = Tokens::of(theme);
+            let mut style = card::style(&tokens);
+            style.border.color = tokens.primary;
+            style
+        })
+        .into()
+}
+```
+
+Because the styles still read from `Tokens`, these widgets follow light, dark and custom themes like everything else. You lose the component's builder conveniences, such as sizes and icons, so keep this for the odd exception.
+
+## Custom palettes
+
+`theme::Config` builds a theme from your own colours. Start from `Config::light()` or `Config::dark()`, change the colours you care about and call `build()`. Anything you leave alone keeps the default, so `Config::light().build()` is exactly `theme::light()`.
+
+```rust
+use iced::widget::column;
+use iced::{Element, Theme, color};
+use iced_cube::theme::Config;
+use iced_cube::{button, switch};
+
+#[derive(Debug, Clone)]
+enum Message {
+    Dark(bool),
+}
+
+#[derive(Default)]
+struct App {
+    dark: bool,
+}
+
+fn brand(dark: bool) -> Theme {
+    let config = if dark {
+        Config::dark()
+            .primary(color!(0x818cf8))
+            .accent(color!(0x1e1b4b))
+    } else {
+        Config::light()
+            .primary(color!(0x4f46e5))
+            .accent(color!(0xeef2ff))
+    };
+    config
+        .name("Brand")
+        .destructive(color!(0xe11d48))
+        .build()
+}
+
+impl App {
+    fn update(&mut self, message: Message) {
+        let Message::Dark(dark) = message;
+        self.dark = dark;
+    }
+
+    fn view(&self) -> Element<'_, Message> {
+        column![
+            button("Save"),
+            switch(self.dark).label("Dark mode").on_toggle(Message::Dark),
+        ]
+        .spacing(12)
+        .into()
+    }
+
+    fn theme(&self) -> Theme {
+        brand(self.dark)
+    }
+}
+
+fn main() -> iced::Result {
+    iced::application(App::default, App::update, App::view)
+        .theme(App::theme)
+        .run()
+}
+```
+
+The setters are `primary`, `secondary`, `accent`, `destructive`, `success`, `warning`, `background`, `foreground` and `border`. Text on coloured surfaces, such as a primary button's label, is picked for you with `theme::on`, which chooses near-black or near-white for contrast. `secondary`, `accent` and `border` default to shades of the background, so they follow a new background unless you set them.
+
+Whether components use their light or dark styling follows the background colour, so a dark background built from `Config::light()` still gets dark shadows and hover states.
+
+To see a brand palette on buttons, a badge, a switch and a progress bar, run the gallery's theme example:
+
+```sh
+cargo run -p gallery -- theme/custom
+```
+
+`build()` fills in iced's extended palette, so plain iced widgets pick up the same colours. If you need the palettes themselves, `config.palette()` and `config.extended()` return them without building a theme.

@@ -1,0 +1,78 @@
+---
+import Docs from "./Docs.astro";
+import { componentHref, components, guides } from "../lib/nav";
+
+interface Props {
+  frontmatter: { title: string; description: string };
+  headings: { depth: number; slug: string; text: string }[];
+  url?: string;
+}
+
+const { frontmatter, headings } = Astro.props;
+const toc = headings.filter((heading) => heading.depth === 2).map((heading) => ({ id: heading.slug, title: heading.text }));
+
+const path = Astro.url.pathname;
+const index = guides.findIndex((guide) => guide.href === path);
+const prev = index > 0 ? guides[index - 1] : undefined;
+const [firstComponent] = await components();
+const afterGuides = firstComponent && { title: firstComponent.data.title, href: componentHref(firstComponent) };
+const next = index < 0 ? undefined : (guides[index + 1] ?? afterGuides);
+const pager = {
+  ...(prev ? { prev: { title: prev.title, href: prev.href } } : {}),
+  ...(next ? { next: { title: next.title, href: next.href } } : {}),
+};
+---
+
+<Docs title={frontmatter.title} description={frontmatter.description} toc={toc} pager={pager}>
+  <p class="eyebrow">Getting started</p>
+  <h1>{frontmatter.title}</h1>
+  <p class="lead">{frontmatter.description}</p>
+  <article class="prose">
+    <slot />
+  </article>
+</Docs>
+
+<script>
+  for (const pre of document.querySelectorAll<HTMLPreElement>(".prose pre.astro-code")) {
+    const wrapper = document.createElement("div");
+    wrapper.className = "code-block";
+    pre.replaceWith(wrapper);
+    wrapper.append(pre);
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "copy-code";
+    button.textContent = "Copy";
+    button.setAttribute("aria-label", "Copy code");
+    button.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(pre.textContent ?? "");
+        button.textContent = "Copied";
+      } catch {
+        window.getSelection()?.selectAllChildren(pre);
+        button.textContent = "Selected";
+      }
+      button.classList.add("copied");
+      window.setTimeout(() => {
+        button.textContent = "Copy";
+        button.classList.remove("copied");
+      }, 1600);
+    });
+    wrapper.append(button);
+  }
+</script>
+
+<style>
+  .eyebrow {
+    margin: 0 0 8px;
+    font-size: 13px;
+    font-weight: 550;
+    color: var(--accent);
+  }
+
+  .lead {
+    margin: 12px 0 32px;
+    font-size: 18px;
+    color: var(--fg-muted);
+  }
+</style>

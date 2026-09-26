@@ -1,0 +1,131 @@
+---
+import { GROUPS } from "../content.config";
+import { components, componentHref } from "../lib/nav";
+import { posterName, story } from "../lib/stories";
+import { href } from "../lib/paths";
+
+const all = await components();
+const groups = GROUPS.map((group) => ({ group, entries: all.filter((entry) => entry.data.group === group) })).filter(
+  (item) => item.entries.length > 0,
+);
+const snapshots = href("/snapshots/");
+---
+
+{
+  groups.map(({ group, entries }) => (
+    <section class="group" aria-labelledby={`group-${group.toLowerCase()}`}>
+      <h2 id={`group-${group.toLowerCase()}`}>{group}</h2>
+      <ul class="grid">
+        {entries.map((entry) => (
+          <li>
+            <a class="card" href={componentHref(entry)}>
+              <span class="thumb" style={`aspect-ratio: 720 / ${story(entry.data.hero).height}`}>
+                {(["light", "dark"] as const).map((theme) => (
+                  <img class={theme} src={`${snapshots}${posterName(entry.data.hero, theme)}`} alt="" loading="lazy" decoding="async" />
+                ))}
+              </span>
+              <span class="body">
+                <strong>{entry.data.title}</strong>
+                <span>{entry.data.description}</span>
+              </span>
+            </a>
+          </li>
+        ))}
+      </ul>
+    </section>
+  ))
+}
+
+<style>
+  .group + .group {
+    margin-top: 40px;
+  }
+
+  h2 {
+    margin-bottom: 16px;
+  }
+
+  .grid {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 16px;
+  }
+
+  .card {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--surface);
+    text-decoration: none;
+    overflow: hidden;
+    transition: border-color 150ms var(--ease), transform 150ms var(--ease), box-shadow 150ms var(--ease);
+  }
+
+  .card:hover {
+    border-color: var(--border-strong);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .thumb {
+    display: block;
+    max-height: 180px;
+    width: 100%;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    overflow: hidden;
+  }
+
+  .thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+
+  :global([data-theme="light"]) .thumb .dark,
+  :global([data-theme="dark"]) .thumb .light {
+    display: none;
+  }
+
+  .body {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 12px 14px 14px;
+  }
+
+  .body strong {
+    font-size: 15px;
+    font-weight: 600;
+  }
+
+  .body span {
+    font-size: 13px;
+    color: var(--fg-muted);
+    line-height: 1.5;
+  }
+
+  @media (max-width: 639px) {
+    .grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .body {
+      padding: 10px 12px 12px;
+    }
+
+    .body span {
+      display: none;
+    }
+
+    .body strong {
+      font-size: 14px;
+    }
+  }
+</style>

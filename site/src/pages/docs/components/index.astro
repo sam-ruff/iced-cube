@@ -1,0 +1,18 @@
+---
+import Docs from "../../../layouts/Docs.astro";
+import ComponentGrid from "../../../components/ComponentGrid.astro";
+---
+
+<Docs title="Components" description="Every component in iced-cube, with live previews and example code." wide>
+  <h1>Components</h1>
+  <p class="lead">Every component has live previews running the real Rust code, compiled to WebAssembly, alongside the source for each example.</p>
+  <ComponentGrid />
+</Docs>
+
+<style>
+  .lead {
+    margin: 12px 0 32px;
+    font-size: 18px;
+    color: var(--fg-muted);
+  }
+</style>

@@ -1,0 +1,14 @@
+/target
+node_modules/
+/site/dist/
+/site/.astro/
+/site/public/wasm/
+/site/src/generated/
+/site/public/snapshots/
+/site/test-results/
+/site/playwright-report/
+
+# Maintainer-local files, never committed
+/OTHER.md
+/JOURNAL.md
+/iced-component-catalogue.md

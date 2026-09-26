@@ -1,0 +1,3 @@
+[env]
+# Headless tests and snapshots render on the CPU so results match across machines.
+ICED_TEST_BACKEND = "tiny-skia"

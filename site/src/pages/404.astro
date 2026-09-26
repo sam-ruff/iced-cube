@@ -1,0 +1,122 @@
+---
+import Base from "../layouts/Base.astro";
+import Icon from "../components/Icon.astro";
+import { href } from "../lib/paths";
+
+const popular = [
+  { title: "Button", slug: "button" },
+  { title: "Input", slug: "input" },
+  { title: "Tabs", slug: "tabs" },
+  { title: "Toast", slug: "toast" },
+];
+---
+
+<Base title="Page not found" description="This page does not exist.">
+  <main id="main" class="missing" tabindex="-1">
+    <Icon name="Box" size={40} />
+    <h1>This cube is empty</h1>
+    <p>The page you were looking for does not exist. It may have moved, or the link may be wrong.</p>
+    <div class="actions">
+      <a class="btn primary" href={href("/docs/components/")}>Browse components</a>
+      <button class="btn" type="button" data-search-open><Icon name="Search" size={16} /> Search the docs</button>
+    </div>
+    <p class="popular-label">Popular pages</p>
+    <ul class="popular">
+      {
+        popular.map((page) => (
+          <li>
+            <a href={href(`/docs/components/${page.slug}/`)}>{page.title}</a>
+          </li>
+        ))
+      }
+    </ul>
+  </main>
+</Base>
+
+<style>
+  .missing {
+    max-width: 520px;
+    margin: 0 auto;
+    padding: 96px 16px;
+    text-align: center;
+  }
+
+  .missing > :global(svg) {
+    color: var(--accent);
+  }
+
+  h1 {
+    margin: 16px 0 12px;
+  }
+
+  p {
+    color: var(--fg-muted);
+  }
+
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 12px;
+    margin-top: 24px;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 40px;
+    padding: 0 18px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg);
+    color: var(--fg);
+    font: inherit;
+    font-size: 14px;
+    font-weight: 550;
+    text-decoration: none;
+    cursor: pointer;
+  }
+
+  .btn:hover {
+    background: var(--muted);
+  }
+
+  .btn.primary {
+    background: var(--fg);
+    border-color: var(--fg);
+    color: var(--bg);
+  }
+
+  .popular-label {
+    margin: 40px 0 8px;
+    font-size: 13px;
+    font-weight: 550;
+    color: var(--fg);
+  }
+
+  .popular {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .popular a {
+    display: inline-block;
+    padding: 2px 12px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    font-size: 14px;
+    color: var(--fg-muted);
+    text-decoration: none;
+  }
+
+  .popular a:hover {
+    color: var(--fg);
+    border-color: var(--border-strong);
+  }
+</style>

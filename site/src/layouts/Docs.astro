@@ -1,0 +1,267 @@
+---
+import Base from "./Base.astro";
+import Sidebar from "../components/Sidebar.astro";
+import Icon from "../components/Icon.astro";
+
+export interface TocItem {
+  id: string;
+  title: string;
+  /** 2 for sections, 3 for entries nested under the previous section. */
+  depth?: number;
+}
+
+interface Props {
+  title: string;
+  description: string;
+  toc?: TocItem[];
+  pager?: { prev?: { title: string; href: string }; next?: { title: string; href: string } };
+  /** Lets the content use the full width, for pages without a table of contents. */
+  wide?: boolean;
+}
+
+const { title, description, toc = [], pager, wide = false } = Astro.props;
+---
+
+<Base title={title} description={description}>
+  <div class="shell">
+    <Sidebar />
+    <main id="main" class:list={["main", { "no-toc": toc.length === 0 }]} tabindex="-1" data-pagefind-body>
+      <div class:list={["content", { wide }]}>
+        <slot />
+        {
+          pager && (
+            <nav class="pager" aria-label="Previous and next pages" data-pagefind-ignore>
+              {pager.prev ? (
+                <a class="prev" href={pager.prev.href}>
+                  <span class="label">
+                    <Icon name="ChevronLeft" size={14} /> Previous
+                  </span>
+                  {pager.prev.title}
+                </a>
+              ) : (
+                <span class="spacer" />
+              )}
+              {pager.next ? (
+                <a class="next" href={pager.next.href}>
+                  <span class="label">
+                    Next <Icon name="ChevronRight" size={14} />
+                  </span>
+                  {pager.next.title}
+                </a>
+              ) : (
+                <span class="spacer" />
+              )}
+            </nav>
+          )
+        }
+        <footer class="footer" data-pagefind-ignore>
+          MIT or Apache-2.0. Icons from Lucide (ISC). <a href="https://github.com/sam-ruff/iced-cube">Source on GitHub</a>.
+        </footer>
+      </div>
+      {
+        toc.length > 0 && (
+          <aside class="toc" aria-label="On this page" data-pagefind-ignore>
+            <p>On this page</p>
+            <ul>
+              {toc.map((item) => (
+                <li class:list={{ nested: item.depth === 3 }}>
+                  <a href={`#${item.id}`}>{item.title}</a>
+                </li>
+              ))}
+            </ul>
+          </aside>
+        )
+      }
+    </main>
+  </div>
+</Base>
+
+<script>
+  // Highlights the table of contents entry for the section being read.
+  const links = new Map(
+    [...document.querySelectorAll<HTMLAnchorElement>(".toc a")].map((link) => [link.hash.slice(1), link]),
+  );
+  const headings = [...links.keys()]
+    .map((id) => document.getElementById(id))
+    .filter((heading): heading is HTMLElement => heading !== null);
+
+  function update(): void {
+    const line = innerHeight * 0.3;
+    let current: HTMLElement | undefined;
+    for (const heading of headings) {
+      if (heading.getBoundingClientRect().top <= line) current = heading;
+    }
+    for (const [id, link] of links) {
+      if (id === current?.id) link.setAttribute("aria-current", "location");
+      else link.removeAttribute("aria-current");
+    }
+  }
+
+  if (headings.length > 0) {
+    let queued = false;
+    addEventListener(
+      "scroll",
+      () => {
+        if (queued) return;
+        queued = true;
+        requestAnimationFrame(() => {
+          queued = false;
+          update();
+        });
+      },
+      { passive: true },
+    );
+    update();
+  }
+</script>
+
+<style>
+  .shell {
+    max-width: 1440px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+  }
+
+  .main {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 200px;
+    gap: 48px;
+    padding: 40px 32px 48px;
+    min-width: 0;
+  }
+
+  .main.no-toc {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .content {
+    max-width: var(--content-max);
+    width: 100%;
+    min-width: 0;
+  }
+
+  .content.wide {
+    max-width: 1040px;
+  }
+
+  .toc {
+    position: sticky;
+    top: calc(var(--header-h) + 40px);
+    align-self: start;
+    font-size: 13px;
+  }
+
+  .toc p {
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+
+  .toc ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    border-left: 1px solid var(--border);
+  }
+
+  .toc a {
+    display: block;
+    padding: 4px 12px;
+    margin-left: -1px;
+    border-left: 1px solid transparent;
+    color: var(--fg-muted);
+    text-decoration: none;
+    transition: color 150ms var(--ease), border-color 150ms var(--ease);
+  }
+
+  .toc .nested a {
+    padding-left: 24px;
+  }
+
+  .toc a:hover {
+    color: var(--fg);
+    border-left-color: var(--border-strong);
+  }
+
+  .toc a[aria-current] {
+    color: var(--fg);
+    font-weight: 550;
+    border-left-color: var(--accent);
+  }
+
+  .pager {
+    display: flex;
+    gap: 16px;
+    margin-top: 64px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border);
+  }
+
+  .pager a,
+  .pager .spacer {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .pager a {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 12px 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    text-decoration: none;
+    font-weight: 550;
+    transition: border-color 150ms var(--ease), background 150ms var(--ease);
+  }
+
+  .pager a:hover {
+    border-color: var(--border-strong);
+    background: var(--bg-subtle);
+  }
+
+  .pager .label {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--fg-subtle);
+  }
+
+  .pager .next {
+    align-items: flex-end;
+    text-align: right;
+  }
+
+  .footer {
+    margin-top: 48px;
+    font-size: 13px;
+    color: var(--fg-subtle);
+  }
+
+  .footer a {
+    color: inherit;
+    text-underline-offset: 3px;
+  }
+
+  @media (max-width: 1279px) {
+    .main {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .toc {
+      display: none;
+    }
+  }
+
+  @media (max-width: 1023px) {
+    .shell {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .main {
+      padding: 24px 16px 40px;
+    }
+  }
+</style>

@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Enforces conventional commit subjects, which drive semantic-release.
+set -euo pipefail
+
+subject="$(head -n1 "$1")"
+pattern='^(feat|fix|perf|refactor|test|docs|style|build|ci|chore|revert)(\([a-z0-9_/-]+\))?!?: .+'
+
+if [[ "$subject" =~ ^(Merge|Revert\ \") ]] || [[ "$subject" =~ $pattern ]]; then
+  exit 0
+fi
+
+echo "Commit subject must follow conventional commits, for example:" >&2
+echo "  feat(button): add loading state" >&2
+echo "  fix(theme): correct dark border colour" >&2
+exit 1

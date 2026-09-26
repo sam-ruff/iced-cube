@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Blocks maintainer-local files and private terms, then checks formatting and lints.
+set -euo pipefail
+
+root="$(git rev-parse --show-toplevel)"
+private_files=(OTHER.md JOURNAL.md iced-component-catalogue.md)
+
+staged="$(git diff --cached --name-only --diff-filter=ACMR)"
+for file in "${private_files[@]}"; do
+  if grep -qx "$file" <<<"$staged"; then
+    echo "Refusing to commit $file: it is maintainer-local." >&2
+    exit 1
+  fi
+done
+
+# Terms listed in OTHER.md between the blocked-terms markers must never be published.
+if [ -f "$root/OTHER.md" ]; then
+  terms="$(sed -n '/<!-- blocked-terms:start -->/,/<!-- blocked-terms:end -->/p' "$root/OTHER.md" | grep -v '<!--' | grep -v '^\s*$' || true)"
+  if [ -n "$terms" ]; then
+    hits="$(git diff --cached -U0 --diff-filter=ACMR | grep '^+' | grep -v '^+++' | grep -iwF -f <(printf '%s\n' "$terms") || true)"
+    if [ -n "$hits" ]; then
+      echo "Staged changes contain blocked terms from OTHER.md:" >&2
+      echo "$hits" >&2
+      exit 1
+    fi
+  fi
+fi
+
+if grep -q '\.rs$' <<<"$staged"; then
+  cargo fmt --all -- --check
+  cargo clippy --workspace --all-targets --all-features --quiet -- -D warnings
+fi

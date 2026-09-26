@@ -1,0 +1,297 @@
+---
+import Base from "../layouts/Base.astro";
+import Icon from "../components/Icon.astro";
+import Preview from "../components/Preview.astro";
+import ComponentGrid from "../components/ComponentGrid.astro";
+import { href } from "../lib/paths";
+import { components } from "../lib/nav";
+
+const count = (await components()).length;
+---
+
+<Base title="iced-cube: components for iced" description="Themeable application components for iced, the Rust GUI library, with Lucide icons and live examples.">
+  <main id="main" class="home" tabindex="-1">
+    <section class="hero">
+      <p class="pill"><Icon name="Sparkles" size={14} /> {count} {count === 1 ? "component" : "components"} for iced 0.14</p>
+      <h1>Components for iced applications</h1>
+      <p class="tagline">
+        Buttons, form controls, tabs, toasts and feedback for iced desktop apps. Themeable, tested, and running live in your browser.
+      </p>
+      <div class="ctas">
+        <a class="btn primary" href={href("/docs/installation/")}>Get started <Icon name="ArrowRight" size={16} /></a>
+        <a class="btn" href={href("/docs/components/")}>Browse components</a>
+      </div>
+      <div class="install">
+        <code>cargo add iced@0.14 iced-cube</code>
+        <button type="button" data-copy-text="cargo add iced@0.14 iced-cube" aria-label="Copy install command">
+          <Icon name="Copy" size={15} />
+        </button>
+        <span class="visually-hidden" role="status" data-copy-text-status></span>
+      </div>
+    </section>
+
+    <section class="showcase" aria-label="Live example">
+      <Preview id="showcase/settings" height={400} />
+    </section>
+
+    <section class="features">
+      <div>
+        <Icon name="Palette" size={20} />
+        <h2>One set of tokens</h2>
+        <p>Every colour comes from the active theme, so light, dark and custom palettes stay consistent.</p>
+      </div>
+      <div>
+        <Icon name="Radio" size={20} />
+        <h2>Background work through channels</h2>
+        <p>Components fed by background work use subscriptions that own a channel. No shared mutexes.</p>
+      </div>
+      <div>
+        <Icon name="FlaskConical" size={20} />
+        <h2>Tested</h2>
+        <p>Unit tests, headless interaction tests and image snapshots in both themes for every component.</p>
+      </div>
+    </section>
+
+    <section class="all" aria-labelledby="all-components">
+      <div class="all-head">
+        <h2 id="all-components">All components</h2>
+        <a href={href("/docs/components/")}>View all <Icon name="ArrowRight" size={14} /></a>
+      </div>
+      <ComponentGrid />
+    </section>
+  </main>
+  <footer class="footer">
+    <p>MIT or Apache-2.0. Icons from Lucide (ISC).</p>
+  </footer>
+</Base>
+
+<script>
+  for (const button of document.querySelectorAll<HTMLButtonElement>("[data-copy-text]")) {
+    button.addEventListener("click", async () => {
+      const status = button.parentElement?.querySelector("[data-copy-text-status]");
+      try {
+        await navigator.clipboard.writeText(button.dataset["copyText"] ?? "");
+        button.classList.add("copied");
+        if (status) status.textContent = "Install command copied";
+      } catch {
+        const code = button.parentElement?.querySelector("code");
+        if (code) window.getSelection()?.selectAllChildren(code);
+        if (status) status.textContent = "Command selected, copy it with your keyboard";
+      }
+      window.setTimeout(() => {
+        button.classList.remove("copied");
+        if (status) status.textContent = "";
+      }, 1400);
+    });
+  }
+</script>
+
+<style>
+  .home {
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: 0 16px 96px;
+  }
+
+  .hero {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: 72px 0 40px;
+  }
+
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0 0 20px;
+    padding: 4px 12px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    font-size: 13px;
+    color: var(--fg-muted);
+    background: var(--bg-subtle);
+  }
+
+  .pill :global(svg) {
+    color: var(--accent);
+  }
+
+  h1 {
+    font-size: clamp(34px, 6vw, 56px);
+    letter-spacing: -0.035em;
+    max-width: 14ch;
+  }
+
+  .tagline {
+    margin: 20px 0 28px;
+    max-width: 56ch;
+    font-size: 18px;
+    color: var(--fg-muted);
+  }
+
+  .ctas {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 12px;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 44px;
+    padding: 0 20px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    font-size: 15px;
+    font-weight: 550;
+    text-decoration: none;
+    background: var(--bg);
+    transition: background 150ms var(--ease), border-color 150ms var(--ease), transform 150ms var(--ease);
+  }
+
+  .btn:hover {
+    background: var(--muted);
+    border-color: var(--border-strong);
+  }
+
+  .btn:active {
+    transform: translateY(1px);
+  }
+
+  .btn.primary {
+    background: var(--fg);
+    border-color: var(--fg);
+    color: var(--bg);
+  }
+
+  .btn.primary:hover {
+    background: color-mix(in srgb, var(--fg) 88%, var(--bg));
+  }
+
+  .install {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 24px;
+    padding: 4px 4px 4px 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--code-bg);
+    font-size: 14px;
+  }
+
+  .install code {
+    font-size: 14px;
+    background: none;
+    border: 0;
+    padding: 0;
+  }
+
+  .all-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+
+  .all-head h2 {
+    font-size: 26px;
+  }
+
+  .all-head a {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 14px;
+    color: var(--fg-muted);
+    text-decoration: none;
+  }
+
+  .all-head a:hover {
+    color: var(--fg);
+  }
+
+  .all :global(.group h2) {
+    font-size: 17px;
+  }
+
+  .install code::before {
+    content: "$ ";
+    color: var(--fg-subtle);
+  }
+
+  .install button {
+    display: inline-grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--fg-subtle);
+    cursor: pointer;
+  }
+
+  .install button:hover {
+    color: var(--fg);
+    background: var(--muted);
+  }
+
+  .install button:global(.copied) {
+    color: #16a34a;
+  }
+
+  .showcase {
+    max-width: 760px;
+    margin: 16px auto 72px;
+  }
+
+  .features {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 32px;
+    margin-bottom: 72px;
+  }
+
+  .features :global(svg) {
+    color: var(--accent);
+  }
+
+  .features h2 {
+    font-size: 17px;
+    margin: 12px 0 8px;
+  }
+
+  .features p {
+    color: var(--fg-muted);
+    font-size: 15px;
+  }
+
+  .footer {
+    border-top: 1px solid var(--border);
+    padding: 24px 16px;
+    text-align: center;
+    font-size: 13px;
+    color: var(--fg-subtle);
+  }
+
+  .footer p {
+    margin: 0;
+  }
+
+  @media (max-width: 767px) {
+    .hero {
+      padding-top: 40px;
+    }
+
+    .features {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 24px;
+    }
+  }
+</style>

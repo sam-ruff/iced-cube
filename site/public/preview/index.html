@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en-GB">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>iced-cube preview</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #ffffff;
+      }
+
+      html[data-theme="dark"],
+      html[data-theme="dark"] body {
+        background: #09090b;
+      }
+
+      canvas {
+        outline: none;
+        touch-action: pan-y pinch-zoom;
+      }
+
+      html[data-wheel="true"] canvas {
+        touch-action: none;
+      }
+    </style>
+    <script>
+      (() => {
+        const params = new URLSearchParams(location.search);
+        const embedded = parent !== window;
+        const root = document.documentElement;
+        root.dataset.theme = params.get("theme") === "dark" ? "dark" : "light";
+        root.dataset.wheel = String(!embedded || params.get("wheel") === "1");
+
+        const notify = (message) => {
+          if (embedded) parent.postMessage(message, "*");
+        };
+
+        addEventListener("message", (event) => {
+          if (event.data && event.data.type === "theme") root.dataset.theme = event.data.value;
+        });
+
+        if (!embedded) return;
+
+        // These run in the capture phase, before the canvas's own listeners, so
+        // the page keeps scrolling and keyboard users can always leave the preview.
+        addEventListener(
+          "keydown",
+          (event) => {
+            if (event.key === "Tab" || event.key === "Escape") {
+              event.preventDefault();
+              event.stopImmediatePropagation();
+              notify({ type: "exit", back: event.key === "Tab" && event.shiftKey });
+            } else if ((event.key === "k" && (event.ctrlKey || event.metaKey)) || event.key === "/") {
+              event.preventDefault();
+              event.stopImmediatePropagation();
+              notify({ type: "search" });
+            }
+          },
+          true,
+        );
+
+        if (root.dataset.wheel !== "true") {
+          const release = (event) => event.stopImmediatePropagation();
+          addEventListener("wheel", release, { capture: true, passive: true });
+          addEventListener("touchstart", release, { capture: true, passive: true });
+          addEventListener("touchmove", release, { capture: true, passive: true });
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <script type="module">
+      import init from "../wasm/gallery.js";
+
+      const notify = (message) => {
+        if (parent !== window) parent.postMessage(message, "*");
+      };
+
+      new MutationObserver((_, observer) => {
+        if (!document.querySelector("canvas")) return;
+        observer.disconnect();
+        // Give iced one frame to draw before revealing it.
+        requestAnimationFrame(() => requestAnimationFrame(() => notify({ type: "ready" })));
+      }).observe(document.body, { childList: true });
+
+      try {
+        const module = await WebAssembly.compileStreaming(fetch(new URL("../wasm/gallery_bg.wasm", import.meta.url)));
+        notify({ type: "fetched" });
+        await init({ module_or_path: module });
+      } catch (error) {
+        // winit uses a thrown exception to hand control to the browser event loop.
+        if (!String(error).includes("Using exceptions for control flow")) {
+          console.error(error);
+          notify({ type: "error", error: String(error) });
+        }
+      }
+    </script>
+  </body>
+</html>

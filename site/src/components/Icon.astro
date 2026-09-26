@@ -1,0 +1,17 @@
+---
+import * as lucide from "lucide-static";
+
+interface Props {
+  name: keyof typeof lucide;
+  size?: number;
+  class?: string;
+}
+
+const { name, size = 16, class: className } = Astro.props;
+const svg = String(lucide[name])
+  .replace(/width="\d+"/, `width="${size}"`)
+  .replace(/height="\d+"/, `height="${size}"`)
+  .replace("<svg", `<svg aria-hidden="true" focusable="false"${className ? ` class="${className}"` : ""}`);
+---
+
+<Fragment set:html={svg} />
