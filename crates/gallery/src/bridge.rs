@@ -31,6 +31,16 @@ pub fn subscription() -> Subscription<Event> {
     Subscription::none()
 }
 
+/// Tells the hosting page how tall the preview needs to be, as
+/// `{ "type": "size", "height": <px> }`.
+#[cfg(target_arch = "wasm32")]
+pub fn report_height(height: f32) {
+    web::post_height(height);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn report_height(_height: f32) {}
+
 #[cfg(target_arch = "wasm32")]
 mod web {
     use iced::futures::channel::mpsc;
@@ -71,6 +81,17 @@ mod web {
         on_message.forget();
 
         receiver.boxed()
+    }
+
+    pub fn post_height(height: f32) {
+        let Some(parent) = web_sys::window().and_then(|window| window.parent().ok().flatten())
+        else {
+            return;
+        };
+        let message = js_sys::Object::new();
+        let _ = js_sys::Reflect::set(&message, &"type".into(), &"size".into());
+        let _ = js_sys::Reflect::set(&message, &"height".into(), &f64::from(height).into());
+        let _ = parent.post_message(&message, "*");
     }
 }
 

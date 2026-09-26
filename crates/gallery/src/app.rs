@@ -1,7 +1,7 @@
 //! The gallery program.
 
-use iced::widget::{column, container, row, rule, scrollable, text};
-use iced::{Element, Length, Subscription, Task, Theme};
+use iced::widget::{column, container, row, rule, scrollable, sensor, text};
+use iced::{Element, Length, Size, Subscription, Task, Theme};
 use iced_cube::primitives::button::Variant;
 use iced_cube::theme::{self, Tokens};
 use iced_cube::{button, lucide};
@@ -58,6 +58,7 @@ pub enum Message {
     Select(&'static str),
     ToggleTheme,
     Host(bridge::Event),
+    Measured(Size),
 }
 
 #[derive(Debug)]
@@ -66,6 +67,7 @@ pub struct Gallery {
     theme: ThemeChoice,
     selected: &'static str,
     story: AnyStory,
+    needed_height: Option<f32>,
 }
 
 impl Gallery {
@@ -80,7 +82,14 @@ impl Gallery {
             theme,
             selected: meta.id,
             story: open(meta.id),
+            needed_height: None,
         }
+    }
+
+    /// The window height the open story needs at the current width, once it
+    /// has been measured.
+    pub fn needed_height(&self) -> Option<f32> {
+        self.needed_height
     }
 
     pub fn selected(&self) -> &'static str {
@@ -100,12 +109,17 @@ impl Gallery {
             }
             Message::ToggleTheme => self.theme = self.theme.toggled(),
             Message::Host(bridge::Event::Theme(choice)) => self.theme = choice,
+            Message::Measured(size) => {
+                let height = size.height + 2.0 * self.padding();
+                self.needed_height = Some(height);
+                bridge::report_height(height);
+            }
         }
         Task::none()
     }
 
     pub fn view(&self) -> Element<'_, Message> {
-        let story = container(self.story.view().map(Message::Story))
+        let story = container(full_height(self.story.view().map(Message::Story)))
             .padding(self.padding())
             .center(Length::Fill)
             .style(|theme: &Theme| container::Style {
@@ -174,6 +188,21 @@ impl Gallery {
     }
 }
 
+/// Lays a shrink-height story out at its full height and reports that height,
+/// so a narrow preview whose rows wrap can ask the page for a taller frame.
+/// Until it gets one, the story scrolls instead of being cut off.
+fn full_height(story: Element<'_, Message>) -> Element<'_, Message> {
+    if story.as_widget().size().height != Length::Shrink {
+        return story;
+    }
+    scrollable(sensor(container(story).center_x(Length::Fill)).on_resize(Message::Measured))
+        .direction(scrollable::Direction::Vertical(
+            scrollable::Scrollbar::hidden(),
+        ))
+        .width(Length::Fill)
+        .into()
+}
+
 fn open(id: &str) -> AnyStory {
     AnyStory::new(id).unwrap_or_else(|| {
         // Ids come from ALL, so this only guards against a registry typo.
@@ -226,6 +255,21 @@ mod tests {
         }
         let plain = Gallery::new(Mode::Single, Some("button/variants"), ThemeChoice::Light);
         assert_eq!(plain.padding(), STORY_PADDING);
+    }
+
+    #[test]
+    fn measured_height_includes_the_padding() {
+        let mut gallery = Gallery::new(Mode::Single, Some("card/stats"), ThemeChoice::Light);
+        assert_eq!(gallery.needed_height(), None);
+        let _ = gallery.update(Message::Measured(Size::new(280.0, 500.0)));
+        assert_eq!(gallery.needed_height(), Some(500.0 + 2.0 * STORY_PADDING));
+    }
+
+    #[test]
+    fn edge_stories_report_their_height_without_padding() {
+        let mut gallery = Gallery::new(Mode::Single, Some("dialog/default"), ThemeChoice::Light);
+        let _ = gallery.update(Message::Measured(Size::new(280.0, 320.0)));
+        assert_eq!(gallery.needed_height(), Some(320.0));
     }
 
     #[test]

@@ -141,3 +141,20 @@ test("preview frames use each story's height", async ({ page }) => {
   const tall = page.locator('[data-story="toast/variants"]').first();
   await expect(tall).toHaveCSS("height", "340px");
 });
+
+// Stat cards sit in one row on desktop and stack on a phone, so the frame
+// grows to the height the story reports.
+test("a preview whose cards wrap grows to fit them", async ({ page, isMobile }) => {
+  await page.goto("docs/components/card/");
+  const frame = page.locator('[data-story="card/stats"]').first();
+  await frame.scrollIntoViewIfNeeded();
+  await expect(frame).toHaveClass(/live/, { timeout: 30_000 });
+
+  if (!isMobile) {
+    await expect(frame).toHaveCSS("height", "280px");
+    return;
+  }
+  await expect
+    .poll(async () => (await frame.boundingBox())?.height ?? 0, { timeout: 10_000 })
+    .toBeGreaterThan(400);
+});

@@ -1,3 +1,4 @@
+import { frameHeight } from "../lib/frame";
 import { plan } from "../lib/pool";
 import { currentTheme, type Theme } from "./theme";
 
@@ -11,7 +12,7 @@ const previewUrl = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/preview/`;
 const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
 
 type Frame = HTMLElement;
-type PreviewMessage = { type?: string; back?: boolean };
+type PreviewMessage = { type?: string; back?: boolean; height?: unknown };
 
 const frames = [...document.querySelectorAll<Frame>("[data-story]")].filter((frame) => !frame.dataset["bound"]);
 const wanted = new Set<Frame>();
@@ -134,6 +135,12 @@ window.addEventListener("message", (event: MessageEvent<PreviewMessage>) => {
     case "exit":
       leave(entry.iframe, event.data.back === true);
       break;
+    case "size": {
+      // Stories whose rows wrap on a narrow screen report the height they need.
+      const base = Number(frame.dataset["height"]);
+      if (Number.isFinite(base)) frame.style.height = `${frameHeight(base, event.data.height)}px`;
+      break;
+    }
     case "search":
       document.querySelector<HTMLElement>("[data-search-open]")?.click();
       break;

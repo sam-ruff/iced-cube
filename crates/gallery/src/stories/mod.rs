@@ -259,7 +259,7 @@ crate::stories! {
     ScrollAreaBoth => scroll_area::both {
         id: "scroll-area/both", component: "scroll-area", title: "Both directions",
         description: "A grid that overflows both ways.",
-        file: "scroll_area/both.rs",
+        file: "scroll_area/both.rs", height: 300,
     }
     StackGaps => stack::gaps {
         id: "stack/gaps", component: "stack", title: "Gaps",
