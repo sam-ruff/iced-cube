@@ -1,4 +1,4 @@
-use iced::widget::{column, row, text};
+use iced::widget::{column, container, row, text};
 use iced::{Alignment, Element};
 use iced_cube::overlay::dialog::{Size, dialog};
 use iced_cube::primitives::button::Variant;
@@ -71,7 +71,7 @@ impl Example {
         ]
         .spacing(16);
 
-        dialog(base)
+        dialog(container(base).padding(24))
             .open(self.open)
             .title("Edit profile")
             .description("Tab and Shift+Tab move between the fields. Escape cancels.")

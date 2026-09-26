@@ -49,12 +49,12 @@ use iced::mouse::ScrollDelta;
 use iced::widget::text::LineHeight;
 use iced::widget::text_input::{self, Status};
 use iced::widget::{self, Column, container, mouse_area, stack};
-use iced::{Alignment, Color, Element, Length, Padding, Theme};
+use iced::{Alignment, Element, Length, Padding};
 
-use crate::icon::tinted;
+use crate::icon::{opacity, themed};
 use crate::keys::{self, Chord, Keymap};
 use crate::overlay::anchored::{Align, Placement, Side, anchored};
-use crate::overlay::menu::{self, DISABLED_ICON_OPACITY, Parts, RowStatus, Trailing};
+use crate::overlay::menu::{self, Parts, RowStatus, Trailing};
 use crate::primitives::input::{self, Size};
 use crate::theme::{Tokens, space};
 
@@ -547,11 +547,12 @@ fn field<'a, Message: Clone + 'a>(
         input = input.on_input(on_input);
     }
 
-    let chevron = tinted(crate::lucide!(ChevronsUpDown), metrics.icon, None)
-        .style(move |theme: &Theme, _| widget::svg::Style {
-            color: Some(chevron_colour(&Tokens::of(theme))),
-        })
-        .opacity(chevron_opacity(enabled));
+    let chevron = themed(
+        crate::lucide!(ChevronsUpDown),
+        metrics.icon,
+        opacity(enabled),
+        |theme| Tokens::of(theme).muted_foreground,
+    );
 
     stack![
         input,
@@ -620,18 +621,6 @@ pub fn style(tokens: &Tokens, status: Status, open: bool) -> text_input::Style {
         status => status,
     };
     input::style(tokens, status, false)
-}
-
-/// The colour of the chevron at the end of the field. It stays opaque;
-/// [`chevron_opacity`] fades it when the combobox is disabled.
-pub fn chevron_colour(tokens: &Tokens) -> Color {
-    tokens.muted_foreground
-}
-
-/// The chevron's svg opacity. iced ignores the alpha of an svg tint, so a
-/// disabled chevron fades through its opacity instead.
-pub fn chevron_opacity(enabled: bool) -> f32 {
-    if enabled { 1.0 } else { DISABLED_ICON_OPACITY }
 }
 
 #[cfg(test)]
@@ -876,13 +865,16 @@ mod tests {
     }
 
     #[test]
-    fn disabled_chevron_fades_through_its_opacity() {
+    fn disabled_field_uses_the_shared_disabled_background() {
         for theme in [light(), dark()] {
             let tokens = Tokens::of(&theme);
-            assert_eq!(chevron_colour(&tokens), tokens.muted_foreground);
-            assert_eq!(chevron_colour(&tokens).a, 1.0, "svg tints ignore alpha");
+            for open in [false, true] {
+                let disabled = style(&tokens, Status::Disabled, open);
+                assert_eq!(
+                    disabled.background,
+                    iced::Background::Color(tokens.disabled_field())
+                );
+            }
         }
-        assert_eq!(chevron_opacity(true), 1.0);
-        assert!(chevron_opacity(false) < 1.0);
     }
 }

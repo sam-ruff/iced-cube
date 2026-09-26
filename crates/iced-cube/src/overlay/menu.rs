@@ -6,10 +6,10 @@
 //! surface edge. [`row_style`] resolves their colours for a [`RowStatus`].
 
 use iced::widget::text::LineHeight;
-use iced::widget::{Row, container, row, svg, text};
+use iced::widget::{Row, container, row, text};
 use iced::{Alignment, Background, Border, Color, Element, Length, Padding, Theme};
 
-use crate::icon::{Glyph, tinted};
+use crate::icon::{self, Glyph, themed};
 use crate::theme::{Tokens, fade, radius, space, text_size};
 
 /// Padding inside a row: 6 pixels above and below, 8 at the sides.
@@ -25,9 +25,6 @@ pub const LINE_HEIGHT: f32 = 20.0;
 pub const LABEL_LINE_HEIGHT: f32 = 16.0;
 /// Size of leading icons, check marks and chevrons.
 pub const ICON_SIZE: f32 = 16.0;
-/// Opacity of icons in disabled rows. iced ignores the alpha of an svg
-/// tint, so icons fade through the svg's own opacity.
-pub const DISABLED_ICON_OPACITY: f32 = 0.5;
 
 /// How a row is drawn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -43,14 +40,14 @@ impl RowStatus {
     pub const ALL: [RowStatus; 3] = [RowStatus::Idle, RowStatus::Highlighted, RowStatus::Disabled];
 }
 
-/// The colours of one row.
+/// The colours of one row. Icons are drawn with an opaque tint; a disabled
+/// row fades them with [`icon::opacity`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RowStyle {
     pub background: Option<Color>,
     pub text: Color,
-    /// The leading icon, drawn at [`icon_opacity`](Self::icon_opacity).
+    /// The leading icon.
     pub icon: Color,
-    pub icon_opacity: f32,
     /// The shortcut hint.
     pub hint: Color,
 }
@@ -63,28 +60,24 @@ pub fn row_style(tokens: &Tokens, status: RowStatus, destructive: bool) -> RowSt
             background: None,
             text: tokens.muted_foreground,
             icon: tokens.muted_foreground,
-            icon_opacity: DISABLED_ICON_OPACITY,
             hint: fade(tokens.muted_foreground, 0.5),
         },
         (RowStatus::Idle, false) => RowStyle {
             background: None,
             text: tokens.foreground,
             icon: tokens.muted_foreground,
-            icon_opacity: 1.0,
             hint: tokens.muted_foreground,
         },
         (RowStatus::Highlighted, false) => RowStyle {
             background: Some(tokens.accent),
             text: tokens.accent_foreground,
             icon: tokens.muted_foreground,
-            icon_opacity: 1.0,
             hint: tokens.muted_foreground,
         },
         (RowStatus::Idle, true) => RowStyle {
             background: None,
             text: tokens.destructive,
             icon: tokens.destructive,
-            icon_opacity: 1.0,
             hint: tokens.muted_foreground,
         },
         (RowStatus::Highlighted, true) => RowStyle {
@@ -94,7 +87,6 @@ pub fn row_style(tokens: &Tokens, status: RowStatus, destructive: bool) -> RowSt
             )),
             text: tokens.destructive,
             icon: tokens.destructive,
-            icon_opacity: 1.0,
             hint: tokens.muted_foreground,
         },
     }
@@ -185,12 +177,10 @@ fn glyph<'a, Message: 'a>(
     pick: fn(&RowStyle) -> Color,
     opacity: f32,
 ) -> Element<'a, Message> {
-    tinted(glyph, ICON_SIZE, None)
-        .style(move |theme: &Theme, _| svg::Style {
-            color: Some(pick(&colours(theme))),
-        })
-        .opacity(opacity)
-        .into()
+    themed(glyph, ICON_SIZE, opacity, move |theme| {
+        pick(&colours(theme))
+    })
+    .into()
 }
 
 /// A row's content, without its padding or background. The label takes
@@ -201,11 +191,7 @@ pub(crate) fn content<'a, Message: 'a>(
     destructive: bool,
 ) -> Row<'a, Message> {
     let colours = move |theme: &Theme| row_style(&Tokens::of(theme), status, destructive);
-    let opacity = if status == RowStatus::Disabled {
-        DISABLED_ICON_OPACITY
-    } else {
-        1.0
-    };
+    let opacity = icon::opacity(status != RowStatus::Disabled);
 
     let mut content = row![].spacing(space::SM).align_y(Alignment::Center);
     let leading: Option<Element<'a, Message>> = match parts.leading {
@@ -389,7 +375,6 @@ mod tests {
             assert_eq!(highlighted.text, tokens.accent_foreground);
             assert_eq!(idle.icon, tokens.muted_foreground);
             assert_eq!(idle.hint, tokens.muted_foreground);
-            assert_eq!(idle.icon_opacity, 1.0);
         }
     }
 
@@ -402,7 +387,6 @@ mod tests {
                 assert_eq!(style.background, None);
                 assert_eq!(style.text, tokens.muted_foreground);
                 assert_eq!(style.icon.a, tokens.muted_foreground.a, "icons stay opaque");
-                assert_eq!(style.icon_opacity, DISABLED_ICON_OPACITY);
                 assert!(style.hint.a < tokens.muted_foreground.a);
             }
         }

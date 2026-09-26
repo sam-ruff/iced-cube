@@ -1,4 +1,4 @@
-use iced::widget::{column, text};
+use iced::widget::{column, container, text};
 use iced::{Alignment, Element, Subscription};
 use iced_cube::keys::{self, Chord};
 use iced_cube::navigation::command::{self, Event, Output, State, command, group, item};
@@ -105,7 +105,7 @@ impl Example {
         .spacing(12)
         .align_x(Alignment::Center);
 
-        dialog(base)
+        dialog(container(base).padding(24))
             .open(self.open)
             .title("Command palette")
             .body(

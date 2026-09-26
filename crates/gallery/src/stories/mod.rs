@@ -354,7 +354,7 @@ crate::stories! {
     CommandPalette => command::palette {
         id: "command/palette", component: "command", title: "Command palette",
         description: "The list in a dialog, opened by a button or Ctrl+K. Escape clears the query, then closes the palette; Ctrl+K passes through the dialog to close it too.",
-        file: "command/palette.rs", height: 460, subscription: true,
+        file: "command/palette.rs", height: 460, subscription: true, edge: true,
     }
     AccordionSingle => accordion::single {
         id: "accordion/single", component: "accordion", title: "Single",
@@ -444,7 +444,7 @@ crate::stories! {
     DropdownMenuInDialog => dropdown_menu::in_dialog {
         id: "dropdown-menu/in-dialog", component: "dropdown-menu", title: "In a dialog",
         description: "A menu inside a dialog. A click outside or Escape closes only the menu; the next one closes the dialog.",
-        file: "dropdown_menu/in_dialog.rs", height: 400,
+        file: "dropdown_menu/in_dialog.rs", height: 400, edge: true,
     }
     ContextMenuDefault => context_menu::default {
         id: "context-menu/default", component: "context-menu", title: "Default",

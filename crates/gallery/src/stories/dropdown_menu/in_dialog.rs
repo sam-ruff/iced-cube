@@ -94,7 +94,8 @@ impl Example {
             button("Share")
                 .variant(Variant::Outline)
                 .on_press(Message::Open),
-        );
+        )
+        .padding(24);
 
         dialog(base)
             .open(self.open)

@@ -1,4 +1,4 @@
-use iced::widget::{row, text};
+use iced::widget::{container, row, text};
 use iced::{Alignment, Element};
 use iced_cube::button;
 use iced_cube::overlay::dialog::alert_dialog;
@@ -55,7 +55,7 @@ impl Example {
         .align_y(Alignment::Center);
 
         alert_dialog(
-            base,
+            container(base).padding(24),
             "Delete this project?",
             "This permanently deletes the project and its files. It cannot be undone.",
         )

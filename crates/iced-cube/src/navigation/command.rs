@@ -70,10 +70,10 @@ use iced::widget::text_input::{self, Status};
 use iced::widget::{self, Column, column, container, mouse_area, stack, text};
 use iced::{Alignment, Background, Border, Color, Element, Length, Padding, Subscription, Theme};
 
-use crate::icon::{Glyph, tinted};
+use crate::icon::{Glyph, opacity, themed};
 use crate::keys::{self, Chord, Keymap};
 use crate::overlay::anchored::{anchored, surface_style};
-use crate::overlay::menu::{self, DISABLED_ICON_OPACITY, Parts, ROW_PADDING, RowStatus};
+use crate::overlay::menu::{self, Parts, ROW_PADDING, RowStatus};
 use crate::theme::{Tokens, fade, space, text_size};
 
 /// How many result batches a producer can send before it has to wait.
@@ -890,11 +890,12 @@ fn search_field<'a, Message: Clone + 'a>(
         input = input.on_input(on_input);
     }
 
-    let icon = tinted(crate::lucide!(Search), menu::ICON_SIZE, None)
-        .style(move |theme: &Theme, _| widget::svg::Style {
-            color: Some(icon_colour(&Tokens::of(theme))),
-        })
-        .opacity(icon_opacity(enabled));
+    let icon = themed(
+        crate::lucide!(Search),
+        menu::ICON_SIZE,
+        opacity(enabled),
+        |theme| Tokens::of(theme).muted_foreground,
+    );
 
     stack![
         input,
@@ -1022,18 +1023,6 @@ pub fn divider_style(tokens: &Tokens) -> container::Style {
         background: Some(Background::Color(tokens.border)),
         ..container::Style::default()
     }
-}
-
-/// The colour of the search icon. It stays opaque; [`icon_opacity`] fades
-/// it when the list is disabled.
-pub fn icon_colour(tokens: &Tokens) -> Color {
-    tokens.muted_foreground
-}
-
-/// The search icon's svg opacity. iced ignores the alpha of an svg tint,
-/// so a disabled icon fades through its opacity instead.
-pub fn icon_opacity(enabled: bool) -> f32 {
-    if enabled { 1.0 } else { DISABLED_ICON_OPACITY }
 }
 
 #[cfg(test)]
@@ -1452,15 +1441,13 @@ mod tests {
     }
 
     #[test]
-    fn dividers_and_icons_use_tokens() {
+    fn dividers_use_the_border_token() {
         for theme in [light(), dark()] {
             let tokens = Tokens::of(&theme);
             assert_eq!(
                 divider_style(&tokens).background,
                 Some(Background::Color(tokens.border))
             );
-            assert_eq!(icon_colour(&tokens), tokens.muted_foreground);
-            assert_eq!(icon_colour(&tokens).a, 1.0, "svg tints ignore alpha");
         }
     }
 }

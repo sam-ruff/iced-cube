@@ -1,4 +1,4 @@
-use iced::widget::{row, text};
+use iced::widget::{container, row, text};
 use iced::{Alignment, Element};
 use iced_cube::button;
 use iced_cube::overlay::dialog::dialog;
@@ -53,7 +53,7 @@ impl Example {
         .spacing(12)
         .align_y(Alignment::Center);
 
-        dialog(base)
+        dialog(container(base).padding(24))
             .open(self.open)
             .title("Publish this post?")
             .description("Subscribers get an email as soon as it goes live.")
