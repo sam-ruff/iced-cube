@@ -1,0 +1,204 @@
+---
+import "@fontsource-variable/inter";
+import "../styles/global.css";
+import { siLinux } from "simple-icons";
+import Icon from "../components/Icon.astro";
+import Logo from "../components/Logo.astro";
+import { href } from "../lib/paths";
+
+const releases = "https://github.com/sam-ruff/iced-cube/releases/latest/download";
+const downloads = [
+  { os: "Linux", file: "iced-cube-demo-linux-x86_64.tar.gz", logo: "linux" },
+  { os: "Windows", file: "iced-cube-demo-windows-x86_64.zip", logo: "windows" },
+] as const;
+const preview = href("/preview/");
+---
+
+<!doctype html>
+<html lang="en-GB">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Demo - iced-cube</title>
+    <meta name="description" content="Every iced-cube component working together in one app, live in the browser and as a desktop download." />
+    <link rel="icon" href={href("/favicon.svg")} type="image/svg+xml" />
+    <script is:inline>
+      (() => {
+        let stored = null;
+        try {
+          stored = localStorage.getItem("theme");
+        } catch {}
+        const dark = stored ? stored === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+        document.documentElement.dataset.theme = dark ? "dark" : "light";
+      })();
+    </script>
+  </head>
+  <body>
+    <header class="bar">
+      <a class="home" href={href("/")} aria-label="iced-cube home"><Logo /></a>
+      <p class="title"><strong>Demo</strong><span class="sep" aria-hidden="true">-</span><span class="lead">download the desktop versions</span></p>
+      <nav class="downloads" aria-label="Desktop downloads">
+        {
+          downloads.map(({ os, file, logo }) => (
+            <a class="download" href={`${releases}/${file}`} aria-label={`Download the demo for ${os}`}>
+              {logo === "linux" ? (
+                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false">
+                  <path d={siLinux.path} fill="currentColor" />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false">
+                  <path d="M2 2h9.5v9.5H2zM12.5 2H22v9.5h-9.5zM2 12.5h9.5V22H2zM12.5 12.5H22V22h-9.5z" fill="currentColor" />
+                </svg>
+              )}
+              <span>{os}</span>
+            </a>
+          ))
+        }
+      </nav>
+      <button type="button" class="icon-btn" data-demo-theme aria-label="Switch theme">
+        <Icon name="SunMoon" size={16} />
+      </button>
+    </header>
+    <main>
+      <iframe id="demo" title="iced-cube demo app" data-src={preview}></iframe>
+    </main>
+
+    <script>
+      const frame = document.querySelector<HTMLIFrameElement>("#demo");
+      const root = document.documentElement;
+      const theme = () => (root.dataset["theme"] === "dark" ? "dark" : "light");
+
+      if (frame) {
+        const params = new URLSearchParams({ story: "showcase/demo", theme: theme(), wheel: "1", keys: "own" });
+        frame.src = `${frame.dataset["src"]}?${params}`;
+        frame.addEventListener("load", () => frame.focus());
+      }
+
+      document.querySelector("[data-demo-theme]")?.addEventListener("click", () => {
+        const next = theme() === "dark" ? "light" : "dark";
+        root.dataset["theme"] = next;
+        try {
+          localStorage.setItem("theme", next);
+        } catch {
+          // Private windows may refuse storage; the choice then lasts for this page.
+        }
+        frame?.contentWindow?.postMessage({ type: "theme", value: next }, "*");
+      });
+    </script>
+  </body>
+</html>
+
+<style>
+  html,
+  body {
+    height: 100%;
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-sans);
+  }
+
+  body {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    height: 52px;
+    padding: 0 16px;
+    border-bottom: 1px solid var(--border);
+    flex: none;
+  }
+
+  .home {
+    display: inline-flex;
+    color: inherit;
+  }
+
+  .title {
+    margin: 0;
+    font-size: 14px;
+    display: flex;
+    gap: 6px;
+    min-width: 0;
+    white-space: nowrap;
+  }
+
+  .sep,
+  .lead {
+    color: var(--fg-muted);
+  }
+
+  .downloads {
+    display: flex;
+    gap: 8px;
+    margin-left: auto;
+  }
+
+  .download,
+  .icon-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 32px;
+    padding: 0 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    color: var(--fg);
+    font: inherit;
+    font-size: 13px;
+    text-decoration: none;
+    cursor: pointer;
+  }
+
+  .icon-btn {
+    padding: 0;
+    width: 32px;
+    justify-content: center;
+  }
+
+  .download:hover,
+  .icon-btn:hover {
+    background: var(--muted);
+  }
+
+  .download:focus-visible,
+  .icon-btn:focus-visible,
+  .home:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  main {
+    flex: 1;
+    min-height: 0;
+  }
+
+  iframe {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border: 0;
+  }
+
+  @media (max-width: 640px) {
+    .lead,
+    .sep {
+      display: none;
+    }
+
+    .download span {
+      display: none;
+    }
+
+    .download {
+      padding: 0;
+      width: 32px;
+      justify-content: center;
+    }
+  }
+</style>

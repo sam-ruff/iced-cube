@@ -44,7 +44,8 @@
           if (event.data && event.data.type === "theme") root.dataset.theme = event.data.value;
         });
 
-        if (!embedded) return;
+        // A full-page host such as the demo lets the app keep every key.
+        if (!embedded || params.get("keys") === "own") return;
 
         // These run in the capture phase, before the canvas's own listeners, so
         // the page keeps scrolling and keyboard users can always leave the preview.

@@ -1,0 +1,63 @@
+name: Desktop demo
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to attach the demo to, such as v0.0.2
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_PROFILE_RELEASE_STRIP: symbols
+
+jobs:
+  build:
+    name: Build and attach
+    runs-on: [self-hosted, sophie]
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag }}
+          persist-credentials: false
+      - name: Toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --target x86_64-pc-windows-gnu
+          rustup default stable
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends mingw-w64 zip
+      - name: Linux
+        run: |
+          cargo build --locked --release -p gallery --bin iced-cube-demo
+          mkdir -p dist/iced-cube-demo-linux-x86_64
+          cp target/release/iced-cube-demo dist/iced-cube-demo-linux-x86_64/
+          tar -C dist -czf dist/iced-cube-demo-linux-x86_64.tar.gz iced-cube-demo-linux-x86_64
+      - name: Windows
+        run: |
+          cargo build --locked --release -p gallery --bin iced-cube-demo --target x86_64-pc-windows-gnu
+          mkdir -p dist/iced-cube-demo-windows-x86_64
+          cp target/x86_64-pc-windows-gnu/release/iced-cube-demo.exe dist/iced-cube-demo-windows-x86_64/
+          (cd dist && zip -qr iced-cube-demo-windows-x86_64.zip iced-cube-demo-windows-x86_64)
+        env:
+          RUSTFLAGS: -C target-feature=+crt-static
+      - name: Attach to the release
+        run: |
+          gh release upload "$TAG" --clobber \
+            dist/iced-cube-demo-linux-x86_64.tar.gz \
+            dist/iced-cube-demo-windows-x86_64.zip
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag }}

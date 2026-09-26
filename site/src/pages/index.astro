@@ -20,6 +20,9 @@ const count = (await components()).length;
       <div class="ctas">
         <a class="btn primary" href={href("/docs/installation/")}>Get started <Icon name="ArrowRight" size={16} /></a>
         <a class="btn" href={href("/docs/components/")}>Browse components</a>
+        <a class="btn" href={href("/demo/")} target="_blank" rel="noopener">
+          Open the demo <Icon name="ExternalLink" size={14} /><span class="visually-hidden">(opens in a new tab)</span>
+        </a>
       </div>
       <div class="install">
         <code>cargo add iced@0.14 iced-cube</code>

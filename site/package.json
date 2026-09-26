@@ -28,6 +28,7 @@
     "binaryen": "^132.0.0",
     "pagefind": "^1.5.2",
     "pngjs": "^7.0.0",
+    "simple-icons": "^16.32.0",
     "typescript": "^6.0.3"
   }
 }

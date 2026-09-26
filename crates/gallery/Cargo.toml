@@ -15,6 +15,10 @@ path = "src/bin/manifest.rs"
 name = "keymaps"
 path = "src/bin/keymaps.rs"
 
+[[bin]]
+name = "iced-cube-demo"
+path = "src/bin/demo.rs"
+
 [dependencies]
 futures-timer = "3.0.4"
 iced = { version = "0.14.0", default-features = false, features = ["svg", "advanced", "wgpu", "crisp", "web-colors"] }
