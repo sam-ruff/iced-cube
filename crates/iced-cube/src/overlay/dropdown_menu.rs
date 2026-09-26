@@ -880,12 +880,8 @@ where
 {
     let highlighted = state.highlighted_at(depth);
     let submenu_open = state.depth() > depth + 1;
-    let indented = entries.iter().any(|entry| {
-        matches!(
-            entry.as_item().map(|item| &item.kind),
-            Some(Kind::Checkbox(_) | Kind::Radio(_))
-        )
-    });
+    let indented = has_marks(entries);
+    let slot = reserves_slot(entries);
 
     let rows = entries
         .iter()
@@ -895,7 +891,7 @@ where
             Entry::Label(label) => menu::group_label(label, indented),
             Entry::Item(item) => {
                 let is_highlighted = highlighted == Some(index);
-                let row = item_row(item, is_highlighted, indented, on_event);
+                let row = item_row(item, is_highlighted, slot, on_event);
                 let Some(children) = item.submenu().filter(|_| is_highlighted && submenu_open)
                 else {
                     return row;
@@ -917,10 +913,41 @@ where
     menu::surface(column(rows).width(width)).into()
 }
 
+/// Whether a menu level has checkbox or radio items, whose group labels
+/// then line up with the item labels.
+fn has_marks<Id>(entries: &[Entry<Id>]) -> bool {
+    entries.iter().any(|entry| {
+        matches!(
+            entry.as_item().map(|item| &item.kind),
+            Some(Kind::Checkbox(_) | Kind::Radio(_))
+        )
+    })
+}
+
+/// Whether every row of a menu level gets a leading slot, so labels line
+/// up: when any item has a check mark, a radio dot or an icon.
+fn reserves_slot<Id>(entries: &[Entry<Id>]) -> bool {
+    has_marks(entries)
+        || entries
+            .iter()
+            .any(|entry| entry.as_item().is_some_and(|item| item.icon.is_some()))
+}
+
+/// What fills an item's leading slot: its mark while checked, otherwise
+/// its icon, otherwise nothing.
+fn leading<Id>(item: &Item<Id>, slot: bool) -> Leading {
+    match (&item.kind, slot) {
+        (_, false) => Leading::None,
+        (Kind::Checkbox(true), true) => Leading::Check,
+        (Kind::Radio(true), true) => Leading::Dot,
+        (_, true) => Leading::Empty,
+    }
+}
+
 fn item_row<'a, Id, Message>(
     item: &'a Item<Id>,
     highlighted: bool,
-    indented: bool,
+    slot: bool,
     on_event: Option<&dyn Fn(Event<Id>) -> Message>,
 ) -> Element<'a, Message>
 where
@@ -933,12 +960,7 @@ where
         (true, true) => RowStatus::Highlighted,
         (true, false) => RowStatus::Idle,
     };
-    let leading = match (&item.kind, indented) {
-        (_, false) => Leading::None,
-        (Kind::Checkbox(true), true) => Leading::Check,
-        (Kind::Radio(true), true) => Leading::Dot,
-        (_, true) => Leading::Empty,
-    };
+    let leading = leading(item, slot);
     let trailing = if item.submenu().is_some() {
         Trailing::Chevron
     } else {
@@ -1482,5 +1504,52 @@ mod tests {
         assert_eq!(menu.width, 300.0);
         assert!(menu.keymap.is_empty());
         assert!(menu.on_event.is_some());
+    }
+
+    #[test]
+    fn a_slot_is_reserved_for_marks_or_icons() {
+        let plain: Vec<Entry<u8>> = vec![item(COPY, "Copy"), separator()];
+        assert!(!reserves_slot(&plain) && !has_marks(&plain));
+
+        let icons: Vec<Entry<u8>> = vec![
+            item(COPY, "Copy").icon(crate::lucide!(Copy)),
+            item(PASTE, "Paste"),
+        ];
+        assert!(reserves_slot(&icons) && !has_marks(&icons));
+
+        let marks: Vec<Entry<u8>> = vec![item(COPY, "Copy"), radio_item(SMALL, "Small", false)];
+        assert!(reserves_slot(&marks) && has_marks(&marks));
+    }
+
+    #[test]
+    fn the_slot_holds_the_mark_while_checked_and_the_icon_otherwise() {
+        let entries: Vec<Entry<u8>> = vec![
+            checkbox_item(GRID, "Grid", true).icon(crate::lucide!(Grid3x3)),
+            checkbox_item(GRID, "Grid", false).icon(crate::lucide!(Grid3x3)),
+            radio_item(SMALL, "Small", true),
+            radio_item(LARGE, "Large", false),
+            item(COPY, "Copy").icon(crate::lucide!(Copy)),
+        ];
+        let slots: Vec<Leading> = entries
+            .iter()
+            .filter_map(Entry::as_item)
+            .map(|item| leading(item, true))
+            .collect();
+        assert_eq!(
+            slots,
+            [
+                Leading::Check,
+                Leading::Empty,
+                Leading::Dot,
+                Leading::Empty,
+                Leading::Empty
+            ]
+        );
+        let unslotted = entries.iter().filter_map(Entry::as_item);
+        assert!(
+            unslotted
+                .map(|item| leading(item, false))
+                .all(|l| l == Leading::None)
+        );
     }
 }

@@ -125,10 +125,14 @@ pub fn separator_style(tokens: &Tokens) -> container::Style {
 #[cfg(any(feature = "command", feature = "dropdown-menu"))]
 const INDICATOR_WIDTH: f32 = ICON_SIZE + space::SM;
 
-/// What sits in front of a row's label, in menus with check marks.
+/// What sits in front of a row's label. Menus that reserve a leading slot
+/// give every row one, so all labels line up: a check mark or radio dot
+/// when checked, otherwise the row's icon, otherwise nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Leading {
+    /// No slot. The icon, if any, still comes first.
     None,
+    /// The slot holds the icon, or stays empty without one.
     #[cfg(feature = "dropdown-menu")]
     Empty,
     #[cfg(feature = "dropdown-menu")]
@@ -194,10 +198,13 @@ pub(crate) fn content<'a, Message: 'a>(
     let opacity = icon::opacity(status != RowStatus::Disabled);
 
     let mut content = row![].spacing(space::SM).align_y(Alignment::Center);
+    let icon = parts
+        .icon
+        .map(|icon| glyph(icon, colours, |style| style.icon, opacity));
     let leading: Option<Element<'a, Message>> = match parts.leading {
-        Leading::None => None,
+        Leading::None => icon,
         #[cfg(feature = "dropdown-menu")]
-        Leading::Empty => Some(iced::widget::space().into()),
+        Leading::Empty => Some(icon.unwrap_or_else(|| iced::widget::space().into())),
         #[cfg(feature = "dropdown-menu")]
         Leading::Check => Some(glyph(
             crate::lucide!(Check),
@@ -210,9 +217,6 @@ pub(crate) fn content<'a, Message: 'a>(
     };
     if let Some(leading) = leading {
         content = content.push(container(leading).center_x(ICON_SIZE).center_y(ICON_SIZE));
-    }
-    if let Some(icon) = parts.icon {
-        content = content.push(glyph(icon, colours, |style| style.icon, opacity));
     }
     content = content.push(
         text(parts.label.to_owned())

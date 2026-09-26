@@ -6,7 +6,7 @@ use iced::{Element, Length, Point, event};
 use iced_cube::Chord;
 use iced_cube::overlay::dropdown_menu::{
     Event, Output, State, checkbox_item, default_keymap, dropdown_menu, group_label, item,
-    separator, submenu,
+    radio_item, separator, submenu,
 };
 use iced_test::simulator::{self, Simulator};
 
@@ -277,6 +277,42 @@ fn checkbox_items_toggle_through_the_state() {
         state.update(Event::Activate(GRID)),
         Some(Output::Toggled(GRID, true))
     );
+}
+
+#[test]
+fn labels_line_up_when_marks_and_icons_mix() {
+    let mut state = State::new([
+        item(COPY, "Copy").icon(iced_cube::lucide!(Copy)),
+        item(PASTE, "Paste"),
+        checkbox_item(GRID, "Show grid", true),
+        checkbox_item(EMAIL, "Show rulers", false),
+        radio_item(LINK, "Compact", true).icon(iced_cube::lucide!(Rows3)),
+    ]);
+    let _ = state.update(Event::Open);
+    let mut ui = simulator::simulator(view(&state));
+    let starts: Vec<f32> = ["Copy", "Paste", "Show grid", "Show rulers", "Compact"]
+        .into_iter()
+        .map(|label| ui.find(label).expect("item is rendered").bounds().x)
+        .collect();
+    assert!(
+        starts
+            .windows(2)
+            .all(|pair| (pair[0] - pair[1]).abs() < 0.5),
+        "{starts:?}"
+    );
+}
+
+#[test]
+fn icon_menus_line_up_rows_without_an_icon() {
+    let mut state = State::new([
+        item(COPY, "Copy").icon(iced_cube::lucide!(Copy)),
+        item(PASTE, "Paste"),
+    ]);
+    let _ = state.update(Event::Open);
+    let mut ui = simulator::simulator(view(&state));
+    let copy = ui.find("Copy").expect("item is rendered").bounds().x;
+    let paste = ui.find("Paste").expect("item is rendered").bounds().x;
+    assert!((copy - paste).abs() < 0.5, "{copy} {paste}");
 }
 
 #[test]
