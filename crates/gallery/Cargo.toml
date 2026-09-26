@@ -38,3 +38,4 @@ workspace = true
 
 [dev-dependencies]
 iced_test = "0.14.0"
+png = "0.18.1"

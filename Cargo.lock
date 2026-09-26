@@ -868,6 +868,7 @@ dependencies = [
  "iced-cube",
  "iced_test",
  "js-sys",
+ "png 0.18.1",
  "serde",
  "serde_json",
  "wasm-bindgen",
