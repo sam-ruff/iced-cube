@@ -35,7 +35,7 @@ pub mod keys;
 pub mod layout;
 pub mod navigation;
 pub mod overlay;
-#[cfg(feature = "combobox")]
+#[cfg(any(feature = "combobox", feature = "command"))]
 mod popup;
 pub mod primitives;
 pub mod theme;
@@ -68,6 +68,8 @@ pub use layout::card;
 #[cfg(feature = "stack")]
 pub use layout::{hstack, vstack};
 
+#[cfg(feature = "command")]
+pub use navigation::command;
 #[cfg(feature = "tabs")]
 pub use navigation::{tab, tabs};
 

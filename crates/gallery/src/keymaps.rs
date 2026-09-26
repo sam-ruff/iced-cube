@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use iced_cube::forms::{combobox, select};
 use iced_cube::keys::{Action, Keymap};
 use iced_cube::layout::accordion;
-use iced_cube::navigation::tabs;
+use iced_cube::navigation::{command, tabs};
 use iced_cube::overlay::toast;
 use iced_cube::primitives::{checkbox, slider, switch};
 use serde::Serialize;
@@ -37,6 +37,7 @@ pub fn all() -> BTreeMap<&'static str, Vec<Binding>> {
         ("accordion", bindings::<accordion::Action>()),
         ("checkbox", bindings::<checkbox::Action>()),
         ("combobox", bindings::<combobox::Action>()),
+        ("command", bindings::<command::Action>()),
         ("select", bindings::<select::Action>()),
         ("slider", bindings::<slider::Action>()),
         ("switch", bindings::<switch::Action>()),

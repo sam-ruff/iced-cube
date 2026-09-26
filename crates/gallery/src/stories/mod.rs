@@ -11,6 +11,7 @@ pub mod button;
 pub mod card;
 pub mod checkbox;
 pub mod combobox;
+pub mod command;
 pub mod input;
 pub mod label;
 pub mod progress;
@@ -309,6 +310,21 @@ crate::stories! {
         id: "tabs/keyboard", component: "tabs", title: "Keyboard shortcuts",
         description: "Key presses resolve through the default keymap, skipping disabled tabs. In the browser, use the arrow keys, Home and End: browsers keep Ctrl+Tab for themselves.",
         file: "tabs/keyboard.rs", height: 200, subscription: true,
+    }
+    CommandInline => command::inline {
+        id: "command/inline", component: "command", title: "Inline",
+        description: "Grouped actions with icons, shortcut hints, keywords and a disabled row.",
+        file: "command/inline.rs", height: 380,
+    }
+    CommandKeyboard => command::keyboard {
+        id: "command/keyboard", component: "command", title: "Keyboard shortcuts",
+        description: "The default keymap with Ctrl+N and Ctrl+P added. The list handles keys while its field has focus; the app routes the rest through keys::subscription.",
+        file: "command/keyboard.rs", height: 400, subscription: true,
+    }
+    CommandAsyncSearch => command::async_search {
+        id: "command/async-search", component: "command", title: "Async results",
+        description: "A background task streams file matches through the channel, tagged with their query. It waits with futures-timer, so it also runs in the browser.",
+        file: "command/async_search.rs", height: 380, subscription: true,
     }
     AccordionSingle => accordion::single {
         id: "accordion/single", component: "accordion", title: "Single",
