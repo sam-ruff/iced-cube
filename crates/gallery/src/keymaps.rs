@@ -6,7 +6,7 @@ use iced_cube::forms::{combobox, select};
 use iced_cube::keys::{Action, Keymap};
 use iced_cube::layout::accordion;
 use iced_cube::navigation::{command, tabs};
-use iced_cube::overlay::{dialog, toast};
+use iced_cube::overlay::{dialog, popover, toast};
 use iced_cube::primitives::{checkbox, slider, switch};
 use serde::Serialize;
 
@@ -39,6 +39,7 @@ pub fn all() -> BTreeMap<&'static str, Vec<Binding>> {
         ("combobox", bindings::<combobox::Action>()),
         ("command", bindings::<command::Action>()),
         ("dialog", bindings::<dialog::Action>()),
+        ("popover", bindings::<popover::Action>()),
         ("select", bindings::<select::Action>()),
         ("slider", bindings::<slider::Action>()),
         ("switch", bindings::<switch::Action>()),

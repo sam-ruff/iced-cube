@@ -16,6 +16,7 @@ pub mod dialog;
 pub mod icon_button;
 pub mod input;
 pub mod label;
+pub mod popover;
 pub mod progress;
 pub mod radio;
 pub mod scroll_area;
@@ -387,6 +388,21 @@ crate::stories! {
         id: "dialog/destructive", component: "dialog", title: "Destructive confirmation",
         description: "An alert dialog with Cancel and a destructive action. Clicking the scrim does nothing.",
         file: "dialog/destructive.rs", height: 320,
+    }
+    PopoverSettings => popover::settings {
+        id: "popover/settings", component: "popover", title: "Settings form",
+        description: "A small form in a popover that closes on Escape or a click outside.",
+        file: "popover/settings.rs", height: 360,
+    }
+    PopoverPlacement => popover::placement {
+        id: "popover/placement", component: "popover", title: "Side and alignment",
+        description: "A popover on each side of its trigger, aligned to the start, centre or end.",
+        file: "popover/placement.rs", height: 280,
+    }
+    PopoverKeyboard => popover::keyboard {
+        id: "popover/keyboard", component: "popover", title: "Keyboard shortcuts",
+        description: "Escape closes the popover, and an added binding toggles it with I.",
+        file: "popover/keyboard.rs", height: 280, subscription: true,
     }
     ThemeCustom => theme::custom {
         id: "theme/custom", component: "theme", title: "Custom palette",
