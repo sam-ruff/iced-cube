@@ -384,17 +384,17 @@ crate::stories! {
     DialogDefault => dialog::default {
         id: "dialog/default", component: "dialog", title: "Default",
         description: "A trigger button opens the dialog. Escape, the close button or a click on the scrim dismisses it.",
-        file: "dialog/default.rs", height: 320,
+        file: "dialog/default.rs", height: 320, edge: true,
     }
     DialogForm => dialog::form {
         id: "dialog/form", component: "dialog", title: "Form and keyboard",
         description: "Fields inside a small dialog. Tab and Shift+Tab move focus between them through the default keymap, without leaving the dialog.",
-        file: "dialog/form.rs", height: 420,
+        file: "dialog/form.rs", height: 420, edge: true,
     }
     DialogDestructive => dialog::destructive {
         id: "dialog/destructive", component: "dialog", title: "Destructive confirmation",
         description: "An alert dialog with Cancel and a destructive action. Clicking the scrim does nothing.",
-        file: "dialog/destructive.rs", height: 320,
+        file: "dialog/destructive.rs", height: 320, edge: true,
     }
     PopoverSettings => popover::settings {
         id: "popover/settings", component: "popover", title: "Settings form",

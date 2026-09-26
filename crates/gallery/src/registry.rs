@@ -21,6 +21,8 @@ pub struct Meta {
     pub source: &'static str,
     /// Height of the preview frame and snapshot in logical pixels.
     pub height: u32,
+    /// Whether the story fills the preview edge to edge, with no gallery padding.
+    pub edge: bool,
 }
 
 /// Declares the story registry: an `AnyStory` enum wrapping every example,
@@ -31,6 +33,8 @@ pub struct Meta {
 /// - `subscription: true` for a story with `subscription(&self) -> Subscription<Message>`.
 /// - `theme: true` for a story with `theme(&self) -> Option<Theme>`, which
 ///   replaces the gallery theme while the story is open.
+/// - `edge: true` drops the gallery padding so the story fills the preview,
+///   for full-window layers such as a dialog's scrim.
 #[macro_export]
 macro_rules! stories {
     ($(
@@ -39,7 +43,8 @@ macro_rules! stories {
             description: $description:literal, file: $file:literal
             $(, height: $height:literal)?
             $(, subscription: $subscription:tt)?
-            $(, theme: $theme:tt)? $(,)?
+            $(, theme: $theme:tt)?
+            $(, edge: $edge:literal)? $(,)?
         }
     )*) => {
         /// Metadata for every story, in declaration order.
@@ -52,6 +57,7 @@ macro_rules! stories {
                 file: concat!("src/stories/", $file),
                 source: include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/stories/", $file)),
                 height: $crate::story_height!($($height)?),
+                edge: $crate::story_edge!($($edge)?),
             },
         )*];
 
@@ -117,6 +123,18 @@ macro_rules! story_height {
     };
     () => {
         $crate::registry::DEFAULT_HEIGHT
+    };
+}
+
+/// Expands to whether a story fills the preview, which defaults to false.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! story_edge {
+    ($edge:literal) => {
+        $edge
+    };
+    () => {
+        false
     };
 }
 

@@ -9,6 +9,9 @@ use iced_cube::{button, lucide};
 use crate::bridge;
 use crate::stories::{ALL, AnyMessage, AnyStory};
 
+/// Space between the preview frame and a story that is not edge to edge.
+const STORY_PADDING: f32 = 24.0;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ThemeChoice {
     #[default]
@@ -103,7 +106,7 @@ impl Gallery {
 
     pub fn view(&self) -> Element<'_, Message> {
         let story = container(self.story.view().map(Message::Story))
-            .padding(24)
+            .padding(self.padding())
             .center(Length::Fill)
             .style(|theme: &Theme| container::Style {
                 background: Some(Tokens::of(theme).background.into()),
@@ -150,6 +153,12 @@ impl Gallery {
         .width(240);
 
         row![sidebar, rule::vertical(1), story].into()
+    }
+
+    /// Space around the open story, or none for an edge-to-edge story.
+    pub fn padding(&self) -> f32 {
+        let edge = ALL.iter().any(|meta| meta.id == self.selected && meta.edge);
+        if edge { 0.0 } else { STORY_PADDING }
     }
 
     /// The open story's own theme, or the light or dark gallery theme.
@@ -207,6 +216,16 @@ mod tests {
         let custom = Gallery::new(Mode::Single, Some("theme/custom"), ThemeChoice::Dark);
         assert_ne!(custom.theme().to_string(), theme::dark().to_string());
         assert_ne!(custom.theme().to_string(), theme::light().to_string());
+    }
+
+    #[test]
+    fn edge_stories_drop_the_gallery_padding() {
+        for id in ["dialog/default", "dialog/form", "dialog/destructive"] {
+            let gallery = Gallery::new(Mode::Single, Some(id), ThemeChoice::Light);
+            assert_eq!(gallery.padding(), 0.0, "{id}");
+        }
+        let plain = Gallery::new(Mode::Single, Some("button/variants"), ThemeChoice::Light);
+        assert_eq!(plain.padding(), STORY_PADDING);
     }
 
     #[test]
