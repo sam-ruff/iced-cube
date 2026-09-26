@@ -3,8 +3,13 @@
 //! It uses the dropdown menu's entries, rows and navigation: build the
 //! entries with [`dropdown_menu::item`](crate::overlay::dropdown_menu::item)
 //! and friends. [`State`] adds where the menu opened. From the keyboard,
-//! Shift+F10 or the Menu key opens it at the area's top left corner, as
-//! desktop apps do.
+//! Shift+F10 or the Menu key opens it just below the area, aligned with its
+//! start, as desktop apps do.
+//!
+//! One [`State`] can serve many areas, such as every row of a list: give
+//! each area a key with [`keyed`], and the open events carry the key of the
+//! area they came from. [`State::target`] tells the app which row a chosen
+//! item belongs to.
 //!
 //! Keyboard shortcuts resolve through a [`Keymap`] of [`Action`]s; see
 //! [`default_keymap`]. The open menu handles its own keys; the app routes
@@ -26,31 +31,34 @@ use crate::keys::{self, Chord, Keymap};
 use crate::overlay::anchored::{Align, Placement, Side, anchored};
 use crate::overlay::dropdown_menu::{self, Entry, Output, WIDTH};
 
-/// Changes to a context menu.
+/// Changes to a context menu. `Key` names the area an open event came from;
+/// it is `()` for a menu with a single area.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Event<Id> {
-    /// A right-click at this point, relative to the area's top left corner.
-    /// Opens the menu there with nothing highlighted.
-    Open(Point),
-    /// Opens the menu at the area's top left corner on its first item.
-    OpenFromKeyboard,
+pub enum Event<Id, Key = ()> {
+    /// A right-click on the area `Key` at this point, relative to the area's
+    /// top left corner. Opens the menu there with nothing highlighted.
+    Open(Key, Point),
+    /// Opens the menu below the area `Key` on its first item.
+    OpenFromKeyboard(Key),
     /// Navigation and choosing, as in a dropdown menu. Ignored while closed.
     Menu(dropdown_menu::Event<Id>),
 }
 
-/// The menu and where it opened.
+/// The menu, which area it opened on and where.
 #[derive(Debug, Clone, PartialEq)]
-pub struct State<Id> {
+pub struct State<Id, Key = ()> {
     menu: dropdown_menu::State<Id>,
-    position: Point,
+    position: Option<Point>,
+    target: Option<Key>,
 }
 
-impl<Id: Copy + PartialEq> State<Id> {
+impl<Id: Copy + PartialEq, Key: Clone + PartialEq> State<Id, Key> {
     /// A closed menu. Item ids must be unique across submenus.
     pub fn new(entries: impl IntoIterator<Item = Entry<Id>>) -> Self {
         Self {
             menu: dropdown_menu::State::new(entries),
-            position: Point::ORIGIN,
+            position: None,
+            target: None,
         }
     }
 
@@ -63,8 +71,20 @@ impl<Id: Copy + PartialEq> State<Id> {
         self.menu.is_open()
     }
 
-    /// Where the menu opened, relative to the area's top left corner.
-    pub fn position(&self) -> Point {
+    /// Whether the menu is open on the area `key`.
+    pub fn is_open_on(&self, key: &Key) -> bool {
+        self.is_open() && self.target.as_ref() == Some(key)
+    }
+
+    /// The area the menu last opened on. It stays set after the menu closes,
+    /// so the app can tell which row a chosen item belongs to.
+    pub fn target(&self) -> Option<&Key> {
+        self.target.as_ref()
+    }
+
+    /// Where a right-click opened the menu, relative to the area's top left
+    /// corner, or `None` when it opened from the keyboard below the area.
+    pub fn position(&self) -> Option<Point> {
         self.position
     }
 
@@ -81,16 +101,19 @@ impl<Id: Copy + PartialEq> State<Id> {
         self.menu.set_disabled(id, disabled);
     }
 
-    /// Applies an event and returns what was chosen, if anything.
-    pub fn update(&mut self, event: Event<Id>) -> Option<Output<Id>> {
+    /// Applies an event and returns what was chosen, if anything. Opening
+    /// on another area moves the menu there and resets it.
+    pub fn update(&mut self, event: Event<Id, Key>) -> Option<Output<Id>> {
         match event {
-            Event::Open(position) => {
-                self.position = position;
+            Event::Open(key, position) => {
+                self.target = Some(key);
+                self.position = Some(position);
                 let _ = self.menu.update(dropdown_menu::Event::Close);
                 self.menu.update(dropdown_menu::Event::Open)
             }
-            Event::OpenFromKeyboard => {
-                self.position = Point::ORIGIN;
+            Event::OpenFromKeyboard(key) => {
+                self.target = Some(key);
+                self.position = None;
                 let _ = self.menu.update(dropdown_menu::Event::Close);
                 self.menu.update(dropdown_menu::Event::First)
             }
@@ -100,10 +123,17 @@ impl<Id: Copy + PartialEq> State<Id> {
     }
 
     /// Turns a key press into an event: first through `keymap`, then, while
-    /// the menu is open, as typeahead for a letter or digit.
-    pub fn key_event(&self, keymap: &Keymap<Action>, key: &keys::Event) -> Option<Event<Id>> {
+    /// the menu is open, as typeahead for a letter or digit. `target` is the
+    /// area the opening chord opens the menu on, such as the focused row;
+    /// pass `()` for a menu with a single area.
+    pub fn key_event(
+        &self,
+        keymap: &Keymap<Action>,
+        key: &keys::Event,
+        target: Key,
+    ) -> Option<Event<Id, Key>> {
         if let Some(action) = keymap.resolve_event(key) {
-            return action.event(self);
+            return action.event(self, target);
         }
         if !self.is_open() {
             return None;
@@ -146,11 +176,15 @@ impl Action {
 
     /// The [`Event`] this action sends to `state`, or `None` when it does
     /// nothing: only [`Action::Open`] works while the menu is closed, and
-    /// only the others while it is open.
-    pub fn event<Id: Copy + PartialEq>(self, state: &State<Id>) -> Option<Event<Id>> {
+    /// only the others while it is open. [`Action::Open`] opens on `target`.
+    pub fn event<Id: Copy + PartialEq, Key: Clone + PartialEq>(
+        self,
+        state: &State<Id, Key>,
+        target: Key,
+    ) -> Option<Event<Id, Key>> {
         let open = state.is_open();
         match self.menu_action() {
-            None => (!open).then_some(Event::OpenFromKeyboard),
+            None => (!open).then_some(Event::OpenFromKeyboard(target)),
             Some(_) if !open => None,
             Some(action) => action.event(state.menu()).map(Event::Menu),
         }
@@ -200,7 +234,7 @@ impl keys::Action for Action {
 
     fn description(self) -> &'static str {
         match self {
-            Action::Open => "Opens the menu at the top left corner of the area.",
+            Action::Open => "Opens the menu below the area, on its first item.",
             Action::Next => "Highlights the next enabled item, wrapping.",
             Action::Previous => "Highlights the previous enabled item, wrapping.",
             Action::Activate => "Chooses the highlighted item or opens its submenu.",
@@ -230,19 +264,28 @@ pub fn default_keymap() -> Keymap<Action> {
         })
 }
 
+/// Gap between an area and a menu opened from the keyboard below it.
+pub const KEYBOARD_GAP: f32 = 4.0;
+
+type OnEvent<'a, Id, Key, Message> = dyn Fn(Event<Id, Key>) -> Message + 'a;
+
 /// A context menu builder. Convert it into an [`Element`] to render.
-pub struct ContextMenu<'a, Id, Message> {
-    state: &'a State<Id>,
+pub struct ContextMenu<'a, Id, Message, Key = ()> {
+    state: &'a State<Id, Key>,
+    key: Key,
     content: Element<'a, Message>,
     width: f32,
     keymap: Keymap<Action>,
-    on_event: Option<Box<dyn Fn(Event<Id>) -> Message + 'a>>,
+    on_event: Option<Box<OnEvent<'a, Id, Key, Message>>>,
 }
 
-impl<Id: std::fmt::Debug, Message> std::fmt::Debug for ContextMenu<'_, Id, Message> {
+impl<Id: std::fmt::Debug, Message, Key: std::fmt::Debug> std::fmt::Debug
+    for ContextMenu<'_, Id, Message, Key>
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ContextMenu")
             .field("state", self.state)
+            .field("key", &self.key)
             .field("width", &self.width)
             .field("keymap", &self.keymap)
             .finish_non_exhaustive()
@@ -255,8 +298,20 @@ pub fn context_menu<'a, Id, Message>(
     state: &'a State<Id>,
     content: impl Into<Element<'a, Message>>,
 ) -> ContextMenu<'a, Id, Message> {
+    keyed(state, (), content)
+}
+
+/// Makes `content` one of many areas sharing the menu of `state`, such as
+/// a row in a list. The menu shows on this area only while it is open on
+/// `key`, and the open events it sends carry `key`.
+pub fn keyed<'a, Id, Key, Message>(
+    state: &'a State<Id, Key>,
+    key: Key,
+    content: impl Into<Element<'a, Message>>,
+) -> ContextMenu<'a, Id, Message, Key> {
     ContextMenu {
         state,
+        key,
         content: content.into(),
         width: WIDTH,
         keymap: default_keymap(),
@@ -264,7 +319,7 @@ pub fn context_menu<'a, Id, Message>(
     }
 }
 
-impl<'a, Id, Message> ContextMenu<'a, Id, Message> {
+impl<'a, Id, Message, Key> ContextMenu<'a, Id, Message, Key> {
     /// Width of the menu and its submenus.
     pub fn width(mut self, width: f32) -> Self {
         self.width = width;
@@ -277,30 +332,44 @@ impl<'a, Id, Message> ContextMenu<'a, Id, Message> {
         self
     }
 
-    pub fn on_event(mut self, on_event: impl Fn(Event<Id>) -> Message + 'a) -> Self {
+    pub fn on_event(mut self, on_event: impl Fn(Event<Id, Key>) -> Message + 'a) -> Self {
         self.on_event = Some(Box::new(on_event));
         self
     }
 }
 
-impl<'a, Id, Message> From<ContextMenu<'a, Id, Message>> for Element<'a, Message>
+/// Where the panel goes: at the right-click point, or just below the area,
+/// aligned with its start, when the menu opened from the keyboard.
+pub fn placement(position: Option<Point>) -> Placement {
+    let gap = if position.is_some() {
+        0.0
+    } else {
+        KEYBOARD_GAP
+    };
+    Placement::new(Side::Bottom, Align::Start).gap(gap)
+}
+
+impl<'a, Id, Message, Key> From<ContextMenu<'a, Id, Message, Key>> for Element<'a, Message>
 where
     Id: Copy + PartialEq + 'a,
+    Key: Clone + PartialEq + 'a,
     Message: Clone + 'a,
 {
-    fn from(menu: ContextMenu<'a, Id, Message>) -> Self {
+    fn from(menu: ContextMenu<'a, Id, Message, Key>) -> Self {
         let ContextMenu {
             state,
+            key,
             content,
             width,
             keymap,
             on_event,
         } = menu;
 
-        let on_event: Option<Rc<dyn Fn(Event<Id>) -> Message + 'a>> = on_event.map(Rc::from);
+        let open = state.is_open_on(&key);
+        let on_event: Option<Rc<OnEvent<'a, Id, Key, Message>>> = on_event.map(Rc::from);
 
         let panel = match &on_event {
-            _ if !state.is_open() => None,
+            _ if !open => None,
             Some(on_event) => {
                 let on_menu = |event: dropdown_menu::Event<Id>| on_event(Event::Menu(event));
                 Some(dropdown_menu::panel(state.menu(), Some(&on_menu), width))
@@ -311,22 +380,25 @@ where
         let area = Area {
             content,
             on_open: on_event.clone().map(|on_event| {
-                Box::new(move |point| on_event(Event::Open(point)))
+                let key = key.clone();
+                Box::new(move |point| on_event(Event::Open(key.clone(), point)))
                     as Box<dyn Fn(Point) -> Message + 'a>
             }),
         };
-        let anchored = anchored(Element::new(area))
+        let mut anchored = anchored(Element::new(area))
             .content(panel)
-            .at(state.position())
-            .placement(Placement::new(Side::Bottom, Align::Start).gap(0.0))
+            .placement(placement(state.position()))
             .dismiss_on_anchor_press(true)
             .dismiss_keys([]);
-        let Some(on_event) = on_event.filter(|_| state.is_open()) else {
+        if let Some(position) = state.position() {
+            anchored = anchored.at(position);
+        }
+        let Some(on_event) = on_event.filter(|_| open) else {
             return anchored.into();
         };
         anchored
             .on_dismiss(on_event(Event::Menu(dropdown_menu::Event::Close)))
-            .on_key(move |key| state.key_event(&keymap, key).map(&*on_event))
+            .on_key(move |press| state.key_event(&keymap, press, key.clone()).map(&*on_event))
             .into()
     }
 }
@@ -471,42 +543,102 @@ mod tests {
         ])
     }
 
+    fn rows() -> State<u8, &'static str> {
+        State::new([item(1, "Open"), item(3, "Rename"), item(6, "Delete")])
+    }
+
     #[test]
-    fn starts_closed_at_the_origin() {
+    fn starts_closed_with_no_target() {
         let state = state();
         assert!(!state.is_open());
-        assert_eq!(state.position(), Point::ORIGIN);
+        assert_eq!(state.position(), None);
+        assert_eq!(state.target(), None);
+        assert!(!state.is_open_on(&()));
         assert_eq!(state.menu().entries().len(), 6);
     }
 
     #[test]
     fn right_click_opens_at_the_point_without_a_highlight() {
         let mut state = state();
-        assert_eq!(state.update(Event::Open(Point::new(40.0, 30.0))), None);
+        assert_eq!(state.update(Event::Open((), Point::new(40.0, 30.0))), None);
         assert!(state.is_open());
-        assert_eq!(state.position(), Point::new(40.0, 30.0));
+        assert!(state.is_open_on(&()));
+        assert_eq!(state.position(), Some(Point::new(40.0, 30.0)));
         assert_eq!(state.menu().highlighted(), None);
     }
 
     #[test]
     fn a_second_right_click_moves_the_menu_and_resets_it() {
         let mut state = state();
-        let _ = state.update(Event::Open(Point::new(40.0, 30.0)));
+        let _ = state.update(Event::Open((), Point::new(40.0, 30.0)));
         let _ = state.update(Event::Menu(dropdown_menu::Event::Highlight(4)));
         assert_eq!(state.menu().depth(), 2);
-        let _ = state.update(Event::Open(Point::new(5.0, 6.0)));
-        assert_eq!(state.position(), Point::new(5.0, 6.0));
+        let _ = state.update(Event::Open((), Point::new(5.0, 6.0)));
+        assert_eq!(state.position(), Some(Point::new(5.0, 6.0)));
         assert_eq!(state.menu().depth(), 1);
         assert_eq!(state.menu().highlighted(), None);
     }
 
     #[test]
-    fn keyboard_opens_at_the_origin_on_the_first_item() {
+    fn keyboard_opens_below_the_area_on_the_first_item() {
         let mut state = state();
-        let _ = state.update(Event::Open(Point::new(40.0, 30.0)));
-        let _ = state.update(Event::OpenFromKeyboard);
-        assert_eq!(state.position(), Point::ORIGIN);
+        let _ = state.update(Event::Open((), Point::new(40.0, 30.0)));
+        let _ = state.update(Event::OpenFromKeyboard(()));
+        assert_eq!(state.position(), None);
         assert_eq!(state.menu().highlighted(), Some(1));
+    }
+
+    #[test]
+    fn keyboard_placement_sits_below_the_area_and_pointer_placement_at_the_point() {
+        let below = placement(None);
+        assert_eq!(
+            below,
+            Placement::new(Side::Bottom, Align::Start).gap(KEYBOARD_GAP)
+        );
+        let at_pointer = placement(Some(Point::new(3.0, 4.0)));
+        assert_eq!(
+            at_pointer,
+            Placement::new(Side::Bottom, Align::Start).gap(0.0)
+        );
+    }
+
+    #[test]
+    fn one_state_serves_many_rows() {
+        let mut state = rows();
+        let _ = state.update(Event::Open("a.txt", Point::new(10.0, 8.0)));
+        assert!(state.is_open_on(&"a.txt"));
+        assert!(!state.is_open_on(&"b.txt"));
+
+        let _ = state.update(Event::OpenFromKeyboard("b.txt"));
+        assert!(state.is_open_on(&"b.txt"));
+        assert!(!state.is_open_on(&"a.txt"));
+        assert_eq!(state.target(), Some(&"b.txt"));
+    }
+
+    #[test]
+    fn the_target_outlives_the_menu_so_a_choice_knows_its_row() {
+        let mut state = rows();
+        let _ = state.update(Event::Open("b.txt", Point::ORIGIN));
+        assert_eq!(
+            state.update(Event::Menu(dropdown_menu::Event::Activate(6))),
+            Some(Output::Activated(6))
+        );
+        assert!(!state.is_open());
+        assert!(!state.is_open_on(&"b.txt"));
+        assert_eq!(state.target(), Some(&"b.txt"));
+    }
+
+    #[test]
+    fn the_opening_chord_opens_on_the_row_it_is_given() {
+        let state = rows();
+        let open = keys::Event {
+            key: Key::Named(Named::F10),
+            modifiers: Modifiers::SHIFT,
+        };
+        assert_eq!(
+            state.key_event(&default_keymap(), &open, "c.txt"),
+            Some(Event::OpenFromKeyboard("c.txt"))
+        );
     }
 
     #[test]
@@ -523,7 +655,7 @@ mod tests {
     #[test]
     fn choosing_items_returns_outputs_and_closes() {
         let mut state = state();
-        let _ = state.update(Event::Open(Point::ORIGIN));
+        let _ = state.update(Event::Open((), Point::ORIGIN));
         assert_eq!(
             state.update(Event::Menu(dropdown_menu::Event::Activate(6))),
             Some(Output::Toggled(6, false))
@@ -575,18 +707,21 @@ mod tests {
     #[test]
     fn open_works_only_while_closed_and_the_rest_only_while_open() {
         let mut state = state();
-        assert_eq!(Action::Open.event(&state), Some(Event::OpenFromKeyboard));
-        assert_eq!(Action::Next.event(&state), None);
-        assert_eq!(Action::Activate.event(&state), None);
-
-        let _ = state.update(Event::OpenFromKeyboard);
-        assert_eq!(Action::Open.event(&state), None);
         assert_eq!(
-            Action::Next.event(&state),
+            Action::Open.event(&state, ()),
+            Some(Event::OpenFromKeyboard(()))
+        );
+        assert_eq!(Action::Next.event(&state, ()), None);
+        assert_eq!(Action::Activate.event(&state, ()), None);
+
+        let _ = state.update(Event::OpenFromKeyboard(()));
+        assert_eq!(Action::Open.event(&state, ()), None);
+        assert_eq!(
+            Action::Next.event(&state, ()),
             Some(Event::Menu(dropdown_menu::Event::Next))
         );
         assert_eq!(
-            Action::Close.event(&state),
+            Action::Close.event(&state, ()),
             Some(Event::Menu(dropdown_menu::Event::Close))
         );
     }
@@ -611,17 +746,17 @@ mod tests {
             key: Key::Character("r".into()),
             modifiers: Modifiers::empty(),
         };
-        assert_eq!(state.key_event(&keymap, &letter), None);
-        let _ = state.update(Event::OpenFromKeyboard);
+        assert_eq!(state.key_event(&keymap, &letter, ()), None);
+        let _ = state.update(Event::OpenFromKeyboard(()));
         assert_eq!(
-            state.key_event(&keymap, &letter),
+            state.key_event(&keymap, &letter, ()),
             Some(Event::Menu(dropdown_menu::Event::Typeahead('r')))
         );
         let menu_key = keys::Event {
             key: Key::Named(Named::ContextMenu),
             modifiers: Modifiers::empty(),
         };
-        assert_eq!(state.key_event(&keymap, &menu_key), None);
+        assert_eq!(state.key_event(&keymap, &menu_key, ()), None);
     }
 
     #[test]
@@ -638,5 +773,9 @@ mod tests {
         assert_eq!(menu.width, 180.0);
         assert!(menu.keymap.is_empty());
         assert!(menu.on_event.is_some());
+
+        let rows = rows();
+        let row: ContextMenu<'_, u8, (), &str> = keyed(&rows, "a.txt", text("a.txt"));
+        assert_eq!(row.key, "a.txt");
     }
 }

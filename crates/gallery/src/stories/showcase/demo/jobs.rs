@@ -3,7 +3,7 @@
 
 use iced::widget::{column, container, mouse_area, row, space, text};
 use iced::{Alignment, Border, Element, Length};
-use iced_cube::context_menu::context_menu;
+use iced_cube::context_menu;
 use iced_cube::dropdown_menu::{Entry, item, radio_item, separator, submenu};
 use iced_cube::feedback::progress::{Size as ProgressSize, Variant as ProgressVariant};
 use iced_cube::feedback::spinner::Size as SpinnerSize;
@@ -220,15 +220,9 @@ impl Example {
         )
         .on_press(Message::Cursor(id));
 
-        // Only the row whose menu is open shows it; the others share a closed state.
-        let state = if self.menu_job == Some(id) {
-            &self.row_menu
-        } else {
-            &self.idle_menu
-        };
-        context_menu(state, row)
+        context_menu::keyed(&self.row_menu, id, row)
             .keymap(self.keys.row_menu.clone())
-            .on_event(move |event| Message::RowMenu(id, event))
+            .on_event(Message::RowMenu)
             .into()
     }
 

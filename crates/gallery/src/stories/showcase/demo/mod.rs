@@ -148,7 +148,7 @@ pub enum Message {
     Check(JobId, bool),
     CheckAll(bool),
     Cursor(JobId),
-    RowMenu(JobId, context_menu::Event<RowAction>),
+    RowMenu(context_menu::Event<RowAction, JobId>),
     PauseSelected,
     DeleteSelected,
     Confirm,
@@ -230,9 +230,7 @@ pub struct Example {
     search: String,
     filter: StatusFilter,
     cursor: Option<JobId>,
-    row_menu: context_menu::State<RowAction>,
-    idle_menu: context_menu::State<RowAction>,
-    menu_job: Option<JobId>,
+    row_menu: context_menu::State<RowAction, JobId>,
     undo: Option<(toast::Id, Vec<Job>)>,
     logs: VecDeque<(u32, LogLine)>,
     held: Vec<LogLine>,
@@ -284,8 +282,6 @@ impl Default for Example {
             filter: StatusFilter::All,
             cursor: None,
             row_menu: context_menu::State::new(jobs::row_menu_entries()),
-            idle_menu: context_menu::State::new(jobs::row_menu_entries()),
-            menu_job: None,
             undo: None,
             logs: data::logs().into(),
             held: Vec::new(),
@@ -356,7 +352,7 @@ impl Example {
                 }
             }
             Message::Cursor(id) => self.cursor = Some(id),
-            Message::RowMenu(id, event) => self.row_menu_event(id, event),
+            Message::RowMenu(event) => self.row_menu_event(event),
             Message::PauseSelected => {
                 let paused = self
                     .jobs
@@ -611,8 +607,8 @@ impl Example {
         use iced::keyboard::Key;
 
         if let Some(id) = self.cursor {
-            if let Some(event) = self.row_menu.key_event(&self.keys.row_menu, key) {
-                self.row_menu_event(id, event);
+            if let Some(event) = self.row_menu.key_event(&self.keys.row_menu, key, id) {
+                self.row_menu_event(event);
                 return true;
             }
             if let Some(action) = self.keys.checkbox.resolve_event(key) {
@@ -778,20 +774,17 @@ impl Example {
         self.schedule();
     }
 
-    fn row_menu_event(&mut self, id: JobId, event: context_menu::Event<RowAction>) {
-        let opening = matches!(
-            event,
-            context_menu::Event::Open(_) | context_menu::Event::OpenFromKeyboard
-        );
-        if opening {
-            self.menu_job = Some(id);
+    fn row_menu_event(&mut self, event: context_menu::Event<RowAction, JobId>) {
+        if let context_menu::Event::Open(id, _) | context_menu::Event::OpenFromKeyboard(id) = event
+        {
             self.cursor = Some(id);
             self.prepare_row_menu(id);
         }
-        let Some(target) = self.menu_job else {
+        let output = self.row_menu.update(event);
+        let Some(&target) = self.row_menu.target() else {
             return;
         };
-        match self.row_menu.update(event) {
+        match output {
             Some(MenuOutput::Activated(action)) => self.row_action(target, action),
             Some(MenuOutput::Selected(action)) => {
                 let queue = match action {

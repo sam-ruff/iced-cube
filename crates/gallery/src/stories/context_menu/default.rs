@@ -46,7 +46,7 @@ impl Default for Example {
             checkbox_item(Id::Bookmarks, "Show bookmarks", true),
             checkbox_item(Id::FullUrls, "Show full URLs", false),
         ]);
-        let _ = menu.update(Event::Open(Point::new(290.0, 24.0)));
+        let _ = menu.update(Event::Open((), Point::new(290.0, 24.0)));
         Self { menu }
     }
 }

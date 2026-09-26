@@ -4,7 +4,7 @@ use iced::keyboard::{Key, Modifiers, key::Named};
 use iced::widget::{column, container, text};
 use iced::{Element, Point, mouse};
 use iced_cube::keys;
-use iced_cube::overlay::context_menu::{Event, State, context_menu, default_keymap};
+use iced_cube::overlay::context_menu::{Event, State, context_menu, default_keymap, keyed};
 use iced_cube::overlay::dropdown_menu::{self, Output, item, separator};
 use iced_test::simulator::{self, Simulator};
 
@@ -28,7 +28,7 @@ fn state() -> State<u8> {
 
 fn opened_at(position: Point) -> State<u8> {
     let mut state = state();
-    let _ = state.update(Event::Open(position));
+    let _ = state.update(Event::Open((), position));
     state
 }
 
@@ -69,7 +69,7 @@ fn right_click_opens_at_the_pointer() {
     let mut ui = simulator::simulator(view(&closed));
     assert!(ui.find("Back").is_err());
     right_click(&mut ui, Point::new(50.0, 40.0));
-    assert_eq!(messages(ui), vec![Event::Open(Point::new(50.0, 40.0))]);
+    assert_eq!(messages(ui), vec![Event::Open((), Point::new(50.0, 40.0))]);
 
     let open = opened_at(Point::new(50.0, 40.0));
     let mut ui = simulator::simulator(view(&open));
@@ -115,7 +115,7 @@ fn clicking_an_item_activates_it() {
 #[test]
 fn the_open_menu_resolves_its_own_keys() {
     let mut state = state();
-    let _ = state.update(Event::OpenFromKeyboard);
+    let _ = state.update(Event::OpenFromKeyboard(()));
     let mut ui = simulator::simulator(view(&state));
     let _ = ui.tap_key(Key::Named(Named::ArrowDown));
     let _ = ui.tap_key(Key::Character("b".into()));
@@ -165,14 +165,14 @@ fn right_clicking_elsewhere_moves_the_menu() {
         emitted,
         vec![
             Event::Menu(dropdown_menu::Event::Close),
-            Event::Open(Point::new(280.0, 180.0)),
+            Event::Open((), Point::new(280.0, 180.0)),
         ]
     );
     for event in emitted {
         let _ = state.update(event);
     }
     assert!(state.is_open());
-    assert_eq!(state.position(), Point::new(280.0, 180.0));
+    assert_eq!(state.position(), Some(Point::new(280.0, 180.0)));
 }
 
 #[test]
@@ -189,30 +189,46 @@ fn clicking_inside_the_menu_does_not_reach_the_area() {
 }
 
 #[test]
-fn shift_f10_opens_at_the_corner_on_the_first_item_and_navigates() {
+fn shift_f10_opens_below_the_area_on_the_first_item_and_navigates() {
     let mut state = state();
     let keymap = default_keymap();
     let key = |key: Key, modifiers: Modifiers| keys::Event { key, modifiers };
 
     let open = key(Key::Named(Named::F10), Modifiers::SHIFT);
-    let event = state.key_event(&keymap, &open).expect("Shift+F10 is bound");
+    let event = state
+        .key_event(&keymap, &open, ())
+        .expect("Shift+F10 is bound");
     let _ = state.update(event);
     assert!(state.is_open());
-    assert_eq!(state.position(), Point::ORIGIN);
+    assert_eq!(state.position(), None);
     assert_eq!(state.menu().highlighted(), Some(BACK));
 
-    let back = simulator::simulator(view(&state))
-        .find("Back")
-        .expect("menu is open");
-    assert!(back.bounds().x < 30.0 && back.bounds().y < 30.0);
+    {
+        let mut ui = simulator::simulator(view(&state));
+        let label = ui.find("Right click here").expect("area is rendered");
+        let back = ui.find("Back").expect("menu is open");
+        assert!(
+            back.bounds().x + back.bounds().width <= 300.0,
+            "under the area: {:?}",
+            back.bounds()
+        );
+        assert!(
+            back.bounds().y > 200.0 && back.bounds().y > label.bounds().y + label.bounds().height,
+            "below the area, clear of its label"
+        );
+    }
 
     let down = key(Key::Named(Named::ArrowDown), Modifiers::empty());
-    let event = state.key_event(&keymap, &down).expect("ArrowDown is bound");
+    let event = state
+        .key_event(&keymap, &down, ())
+        .expect("ArrowDown is bound");
     let _ = state.update(event);
     assert_eq!(state.menu().highlighted(), Some(RELOAD));
 
     let enter = key(Key::Named(Named::Enter), Modifiers::empty());
-    let event = state.key_event(&keymap, &enter).expect("Enter is bound");
+    let event = state
+        .key_event(&keymap, &enter, ())
+        .expect("Enter is bound");
     assert_eq!(state.update(event), Some(Output::Activated(RELOAD)));
 }
 
@@ -223,8 +239,64 @@ fn the_menu_key_opens_too() {
         key: Key::Named(Named::ContextMenu),
         modifiers: Modifiers::empty(),
     };
-    let event = state.key_event(&default_keymap(), &menu);
-    assert_eq!(event, Some(Event::OpenFromKeyboard));
-    let _ = state.update(Event::OpenFromKeyboard);
+    let event = state.key_event(&default_keymap(), &menu, ());
+    assert_eq!(event, Some(Event::OpenFromKeyboard(())));
+    let _ = state.update(Event::OpenFromKeyboard(()));
     assert!(state.is_open());
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum RowMessage {
+    Menu(Event<u8, usize>),
+}
+
+const ROWS: [&str; 3] = ["alpha.txt", "beta.txt", "gamma.txt"];
+
+fn rows_view(state: &State<u8, usize>) -> Element<'_, RowMessage> {
+    let rows = ROWS.iter().enumerate().map(|(index, name)| {
+        keyed(state, index, container(text(*name)).width(300).height(32))
+            .on_event(RowMessage::Menu)
+            .into()
+    });
+    column(rows).into()
+}
+
+fn row_messages(ui: Simulator<'_, RowMessage>) -> Vec<Event<u8, usize>> {
+    ui.into_messages()
+        .map(|RowMessage::Menu(event)| event)
+        .collect()
+}
+
+#[test]
+fn a_right_click_carries_the_row_it_came_from() {
+    let state: State<u8, usize> = State::new([item(BACK, "Back"), item(RELOAD, "Reload")]);
+    let mut ui = simulator::simulator(rows_view(&state));
+    ui.point_at(Point::new(40.0, 48.0));
+    let _ = ui.simulate([
+        iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right)),
+        iced::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Right)),
+    ]);
+    assert_eq!(
+        row_messages(ui),
+        vec![Event::Open(1, Point::new(40.0, 16.0))]
+    );
+}
+
+#[test]
+fn a_shared_menu_shows_once_below_the_row_it_opened_on() {
+    let mut state: State<u8, usize> = State::new([item(BACK, "Back"), item(RELOAD, "Reload")]);
+    let _ = state.update(Event::OpenFromKeyboard(1));
+    let mut ui = simulator::simulator(rows_view(&state));
+    let row = ui.find("beta.txt").expect("row is rendered");
+    let row_bottom = row.bounds().y + row.bounds().height;
+    let back = ui.find("Back").expect("menu is open on the second row");
+    assert!(back.bounds().y > row_bottom, "below the row's label");
+    assert!(back.bounds().y < row_bottom + 40.0, "right under the row");
+
+    let _ = ui.tap_key(Key::Named(Named::Escape));
+    assert_eq!(
+        row_messages(ui),
+        vec![Event::Menu(dropdown_menu::Event::Close)],
+        "only the row with the open menu answers the key"
+    );
 }

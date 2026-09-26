@@ -77,8 +77,8 @@ fn shift_f10_opens_the_menu_for_the_current_row() {
     example.go(Page::Jobs);
     named(&mut example, Named::ArrowDown);
     press(&mut example, Key::Named(Named::F10), Modifiers::SHIFT);
-    assert!(example.row_menu.is_open());
-    assert_eq!(example.menu_job, Some(JobId(1041)));
+    assert!(example.row_menu.is_open_on(&JobId(1041)));
+    assert_eq!(example.row_menu.position(), None);
 }
 
 #[test]
@@ -192,15 +192,15 @@ fn arrows_switch_pages_where_nothing_else_uses_them() {
 fn the_row_menu_changes_the_queue() {
     let mut example = Example::default();
     let id = JobId(1045);
-    example.update(Message::RowMenu(
+    example.update(Message::RowMenu(iced_cube::context_menu::Event::Open(
         id,
-        iced_cube::context_menu::Event::Open(iced::Point::ORIGIN),
-    ));
-    example.update(Message::RowMenu(
-        id,
-        iced_cube::context_menu::Event::Menu(iced_cube::dropdown_menu::Event::Activate(
-            super::RowAction::High,
-        )),
-    ));
+        iced::Point::ORIGIN,
+    )));
+    assert!(example.row_menu.is_open_on(&id));
+    assert_eq!(example.cursor, Some(id));
+    example.update(Message::RowMenu(iced_cube::context_menu::Event::Menu(
+        iced_cube::dropdown_menu::Event::Activate(super::RowAction::High),
+    )));
     assert_eq!(example.job(id).map(|job| job.queue), Some(Queue::High));
+    assert!(!example.row_menu.is_open());
 }

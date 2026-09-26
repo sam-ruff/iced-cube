@@ -452,8 +452,8 @@ crate::stories! {
         file: "context_menu/default.rs", height: 300,
     }
     ContextMenuKeyboard => context_menu::keyboard {
-        id: "context-menu/keyboard", component: "context-menu", title: "Keyboard shortcuts",
-        description: "Shift+F10 or the Menu key opens the menu at the corner of the area, with radio items to sort by.",
+        id: "context-menu/keyboard", component: "context-menu", title: "One menu for every row",
+        description: "A file list shares one menu. Up and Down pick a file, and Shift+F10 or the Menu key opens its menu below it.",
         file: "context_menu/keyboard.rs", height: 400, subscription: true,
     }
     ThemeCustom => theme::custom {
