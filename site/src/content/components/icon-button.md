@@ -7,7 +7,7 @@ module: primitives::icon_button
 imports: |
   use iced_cube::{icon_button, lucide};
   use iced_cube::primitives::button::{Size, Variant};
-keywords: [toggle, toolbar, icon]
+keywords: [toolbar, icon only, pressed]
 related: [button, tooltip]
 hero: icon-button/toolbar
 stories: [icon-button/toolbar, icon-button/variants, icon-button/sizes]
