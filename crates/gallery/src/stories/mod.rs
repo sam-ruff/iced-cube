@@ -12,6 +12,7 @@ pub mod card;
 pub mod checkbox;
 pub mod combobox;
 pub mod command;
+pub mod context_menu;
 pub mod dialog;
 pub mod dropdown_menu;
 pub mod icon_button;
@@ -429,6 +430,16 @@ crate::stories! {
         id: "dropdown-menu/keyboard", component: "dropdown-menu", title: "Keyboard shortcuts",
         description: "Key presses resolve through the default keymap, with typeahead for letters.",
         file: "dropdown_menu/keyboard.rs", height: 400, subscription: true,
+    }
+    ContextMenuDefault => context_menu::default {
+        id: "context-menu/default", component: "context-menu", title: "Default",
+        description: "A right-click menu with shortcut hints, a submenu and checkbox items.",
+        file: "context_menu/default.rs", height: 300,
+    }
+    ContextMenuKeyboard => context_menu::keyboard {
+        id: "context-menu/keyboard", component: "context-menu", title: "Keyboard shortcuts",
+        description: "Shift+F10 or the Menu key opens the menu at the corner of the area, with radio items to sort by.",
+        file: "context_menu/keyboard.rs", height: 400, subscription: true,
     }
     ThemeCustom => theme::custom {
         id: "theme/custom", component: "theme", title: "Custom palette",
