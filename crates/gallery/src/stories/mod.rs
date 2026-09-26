@@ -12,6 +12,7 @@ pub mod card;
 pub mod checkbox;
 pub mod combobox;
 pub mod command;
+pub mod dialog;
 pub mod icon_button;
 pub mod input;
 pub mod label;
@@ -371,6 +372,21 @@ crate::stories! {
         id: "toast/keyboard", component: "toast", title: "Keyboard shortcuts",
         description: "Escape closes the newest toast and Shift+Escape closes them all, through the default keymap.",
         file: "toast/keyboard.rs", height: 340, subscription: true,
+    }
+    DialogDefault => dialog::default {
+        id: "dialog/default", component: "dialog", title: "Default",
+        description: "A trigger button opens the dialog. Escape, the close button or a click on the scrim dismisses it.",
+        file: "dialog/default.rs", height: 320,
+    }
+    DialogForm => dialog::form {
+        id: "dialog/form", component: "dialog", title: "Form and keyboard",
+        description: "Fields inside a small dialog. Tab and Shift+Tab move focus between them through the default keymap, without leaving the dialog.",
+        file: "dialog/form.rs", height: 420,
+    }
+    DialogDestructive => dialog::destructive {
+        id: "dialog/destructive", component: "dialog", title: "Destructive confirmation",
+        description: "An alert dialog with Cancel and a destructive action. Clicking the scrim does nothing.",
+        file: "dialog/destructive.rs", height: 320,
     }
     ThemeCustom => theme::custom {
         id: "theme/custom", component: "theme", title: "Custom palette",

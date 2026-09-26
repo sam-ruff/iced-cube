@@ -75,6 +75,8 @@ pub use navigation::{tab, tabs};
 
 #[cfg(feature = "tooltip")]
 pub use overlay::tooltip;
+#[cfg(feature = "dialog")]
+pub use overlay::{alert_dialog, dialog};
 #[cfg(feature = "toast")]
 pub use overlay::{toast, toasts};
 
