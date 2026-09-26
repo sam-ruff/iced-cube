@@ -73,6 +73,8 @@ pub use navigation::command;
 #[cfg(feature = "tabs")]
 pub use navigation::{tab, tabs};
 
+#[cfg(feature = "dropdown-menu")]
+pub use overlay::dropdown_menu;
 #[cfg(feature = "popover")]
 pub use overlay::popover;
 #[cfg(feature = "tooltip")]

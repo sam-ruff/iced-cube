@@ -13,6 +13,7 @@ pub mod checkbox;
 pub mod combobox;
 pub mod command;
 pub mod dialog;
+pub mod dropdown_menu;
 pub mod icon_button;
 pub mod input;
 pub mod label;
@@ -403,6 +404,31 @@ crate::stories! {
         id: "popover/keyboard", component: "popover", title: "Keyboard shortcuts",
         description: "Escape closes the popover, and an added binding toggles it with I.",
         file: "popover/keyboard.rs", height: 280, subscription: true,
+    }
+    DropdownMenuDefault => dropdown_menu::default {
+        id: "dropdown-menu/default", component: "dropdown-menu", title: "Default",
+        description: "Items with icons and shortcut hints, a submenu, a disabled item and a destructive one.",
+        file: "dropdown_menu/default.rs", height: 460,
+    }
+    DropdownMenuCheckboxes => dropdown_menu::checkboxes {
+        id: "dropdown-menu/checkboxes", component: "dropdown-menu", title: "Checkbox items",
+        description: "Items that toggle a check mark, one of them disabled.",
+        file: "dropdown_menu/checkboxes.rs", height: 280,
+    }
+    DropdownMenuRadioItems => dropdown_menu::radio_items {
+        id: "dropdown-menu/radio-items", component: "dropdown-menu", title: "Radio items",
+        description: "A group of items where choosing one unchecks the others.",
+        file: "dropdown_menu/radio_items.rs", height: 280,
+    }
+    DropdownMenuSubmenu => dropdown_menu::submenu {
+        id: "dropdown-menu/submenu", component: "dropdown-menu", title: "Submenu",
+        description: "A nested menu that opens beside its item, on hover or with the right arrow key.",
+        file: "dropdown_menu/submenu.rs", height: 340,
+    }
+    DropdownMenuKeyboard => dropdown_menu::keyboard {
+        id: "dropdown-menu/keyboard", component: "dropdown-menu", title: "Keyboard shortcuts",
+        description: "Key presses resolve through the default keymap, with typeahead for letters.",
+        file: "dropdown_menu/keyboard.rs", height: 400, subscription: true,
     }
     ThemeCustom => theme::custom {
         id: "theme/custom", component: "theme", title: "Custom palette",
