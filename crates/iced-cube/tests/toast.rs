@@ -62,6 +62,43 @@ fn action_button_emits_action() {
     assert_eq!(toast.title, "Deleted");
 }
 
+#[derive(Debug, Clone)]
+enum App {
+    Toast(Event),
+    Restore(Vec<&'static str>),
+}
+
+#[test]
+fn undo_hands_the_app_its_own_message() {
+    let mut state: State<App> = State::default();
+    let _ = state.push(toast("Saved"));
+    let _ = state.push_with(
+        toast("Deleted 2 files").action("Undo"),
+        App::Restore(vec!["a.txt", "b.txt"]),
+    );
+
+    let element: Element<'_, App> = toasts(&state, text("Content")).on_event(App::Toast).into();
+    let mut ui = simulator(element);
+    ui.click("Undo").expect("action is rendered");
+    let messages: Vec<App> = ui.into_messages().collect();
+
+    let follow_ups: Vec<App> = messages
+        .into_iter()
+        .filter_map(|message| match message {
+            App::Toast(event) => match state.update(event) {
+                Some(Output::Payload(message)) => Some(message),
+                _ => None,
+            },
+            other => Some(other),
+        })
+        .collect();
+    let [App::Restore(files)] = follow_ups.as_slice() else {
+        panic!("expected the restore message, got {follow_ups:?}");
+    };
+    assert_eq!(files, &["a.txt", "b.txt"]);
+    assert_eq!(state.len(), 1, "only the plain toast is left");
+}
+
 #[test]
 fn renders_visible_toasts_over_the_content() {
     let mut state = State::new().with_limit(2);

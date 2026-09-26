@@ -20,11 +20,13 @@ api:
   - name: ".duration(duration) / .persistent()"
     description: "Changes how long the toast stays, or keeps it until it is closed."
   - name: "toast::State"
-    description: "The queue. At most three toasts show at once by default; change it with .with_limit(n)."
+    description: "The queue. At most three toasts show at once by default; change it with .with_limit(n). State::new() makes a queue without payloads; State::<Message>::default() makes one whose action buttons can hand back your messages."
   - name: "state.update(Event)"
-    description: "Handles Ready, Received, Dismiss, Action and Tick. Returns Output::Ready(sender) or Output::Action(id, toast)."
+    description: "Handles Ready, Received, Dismiss, Action and Tick. Returns Output::Ready(sender), Output::Payload(value) for a toast queued with push_with, or Output::Action(id, toast) for any other action."
   - name: "state.push(toast)"
     description: "Queues a toast from the UI thread without the channel, and returns its Id."
+  - name: "state.push_with(toast, payload)"
+    description: "Queues a toast whose action button hands back payload, such as the message that undoes what it reports. Dismissing or expiring drops the payload."
   - name: "state.dismiss(id)"
     description: "Removes a toast, visible or waiting, and returns it."
   - name: "state.tick(now)"
@@ -118,6 +120,8 @@ fn main() -> iced::Result {
 ```
 
 [Subscriptions](../../subscriptions/) covers sending from async code, waiting for room instead of dropping, and how the timer stays idle.
+
+An Undo button needs to know what to undo. Rather than keeping toast ids and matching them, queue the toast with `state.push_with(toast, message)` on a `toast::State<Message>`. When the button is pressed, `update` returns `Output::Payload(message)`, and you handle it like any other message, as the action example does. If the toast is dismissed or times out, the message is dropped with it. Payloads only go through `push_with` on the UI thread; toasts from the channel have none.
 
 Time only enters the queue through `Tick`, so the queue is easy to test: push toasts, call `state.tick(now)` with any instant, and check what is left. A toast starts counting down when it becomes visible, not when it arrives.
 

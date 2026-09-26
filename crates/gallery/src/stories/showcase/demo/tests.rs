@@ -90,11 +90,21 @@ fn deleting_can_be_undone_from_the_toast() {
     example.update(Message::Confirm);
     assert_eq!(status(&example, 1049), None);
 
-    let Some((id, _)) = example.undo.clone() else {
+    let Some((id, _)) = example
+        .toasts
+        .visible()
+        .find(|(_, toast)| toast.action.is_some())
+    else {
         panic!("no undo toast");
     };
     example.update(Message::Toast(toast::Event::Action(id)));
     assert_eq!(status(&example, 1049), Some(Status::Succeeded));
+    assert!(
+        example
+            .toasts
+            .visible()
+            .any(|(_, toast)| toast.title.starts_with("Restored"))
+    );
 }
 
 #[test]

@@ -202,31 +202,41 @@ pub enum Event {
     Tick(Instant),
 }
 
-/// What the app may need to act on after an [`Event`].
+/// What the app may need to act on after an [`Event`]. `A` is the payload
+/// type of the [`State`].
 #[derive(Debug, Clone)]
-pub enum Output {
+pub enum Output<A = ()> {
     Ready(Sender),
     /// The action button of this toast was pressed.
     Action(Id, Toast),
+    /// The action button of a toast queued with [`State::push_with`] was
+    /// pressed. Handle the payload as the app's own message.
+    Payload(A),
 }
 
 #[derive(Debug, Clone)]
-struct Entry {
+struct Entry<A> {
     id: Id,
     toast: Toast,
+    payload: Option<A>,
     expires_at: Option<Instant>,
 }
 
 /// The toast queue. The first [`limit`](State::limit) toasts are visible and
 /// counting down; the rest wait until a visible one closes.
+///
+/// `A` is what action buttons hand back, usually the app's message, so an
+/// Undo toast can carry the message that undoes. A queue without payloads
+/// is `State<()>`, made with [`State::new`]; one with payloads is made with
+/// [`State::default`].
 #[derive(Debug, Clone)]
-pub struct State {
-    entries: VecDeque<Entry>,
+pub struct State<A = ()> {
+    entries: VecDeque<Entry<A>>,
     next_id: u64,
     limit: usize,
 }
 
-impl Default for State {
+impl<A> Default for State<A> {
     fn default() -> Self {
         Self {
             entries: VecDeque::new(),
@@ -240,7 +250,9 @@ impl State {
     pub fn new() -> Self {
         Self::default()
     }
+}
 
+impl<A> State<A> {
     /// Sets how many toasts are visible at once. At least one is.
     pub fn with_limit(mut self, limit: usize) -> Self {
         self.limit = limit.max(1);
@@ -253,20 +265,35 @@ impl State {
 
     /// Queues a toast and returns its id.
     pub fn push(&mut self, toast: Toast) -> Id {
+        self.enqueue(toast, None)
+    }
+
+    /// Queues a toast whose action button hands back `payload` as
+    /// [`Output::Payload`], and returns its id.
+    pub fn push_with(&mut self, toast: Toast, payload: A) -> Id {
+        self.enqueue(toast, Some(payload))
+    }
+
+    fn enqueue(&mut self, toast: Toast, payload: Option<A>) -> Id {
         let id = Id(self.next_id);
         self.next_id += 1;
         self.entries.push_back(Entry {
             id,
             toast,
+            payload,
             expires_at: None,
         });
         id
     }
 
-    /// Removes a toast, visible or waiting.
+    /// Removes a toast, visible or waiting, dropping any payload.
     pub fn dismiss(&mut self, id: Id) -> Option<Toast> {
+        self.remove(id).map(|entry| entry.toast)
+    }
+
+    fn remove(&mut self, id: Id) -> Option<Entry<A>> {
         let index = self.entries.iter().position(|entry| entry.id == id)?;
-        self.entries.remove(index).map(|entry| entry.toast)
+        self.entries.remove(index)
     }
 
     /// Closes expired toasts and starts the countdown of newly visible ones.
@@ -290,7 +317,7 @@ impl State {
         expired
     }
 
-    pub fn update(&mut self, event: Event) -> Option<Output> {
+    pub fn update(&mut self, event: Event) -> Option<Output<A>> {
         match event {
             Event::Ready(sender) => Some(Output::Ready(sender)),
             Event::Received(batch) => {
@@ -303,7 +330,13 @@ impl State {
                 let _ = self.dismiss(id);
                 None
             }
-            Event::Action(id) => self.dismiss(id).map(|toast| Output::Action(id, toast)),
+            Event::Action(id) => {
+                let entry = self.remove(id)?;
+                Some(match entry.payload {
+                    Some(payload) => Output::Payload(payload),
+                    None => Output::Action(id, entry.toast),
+                })
+            }
             Event::Tick(now) => {
                 let _ = self.tick(now);
                 None
@@ -352,7 +385,7 @@ pub enum Action {
 
 impl Action {
     /// The events this action sends to `state`. Empty when nothing is queued.
-    pub fn events(self, state: &State) -> Vec<Event> {
+    pub fn events<A>(self, state: &State<A>) -> Vec<Event> {
         match self {
             Action::DismissLatest => state
                 .visible()
@@ -419,7 +452,7 @@ pub fn batches<T>(receiver: impl Stream<Item = T>) -> impl Stream<Item = Vec<T>>
 }
 
 /// Ticks every [`TICK`] while a visible toast is counting down.
-pub fn timer(state: &State) -> Subscription<Event> {
+pub fn timer<A>(state: &State<A>) -> Subscription<Event> {
     if !state.needs_tick() {
         return Subscription::none();
     }
@@ -458,8 +491,8 @@ pub fn close_button_id(id: Id) -> widget::Id {
 }
 
 /// Renders the visible toasts of a [`State`] over some content.
-pub struct Toasts<'a, Message> {
-    state: &'a State,
+pub struct Toasts<'a, Message, A = ()> {
+    state: &'a State<A>,
     content: Element<'a, Message>,
     position: Position,
     on_event: Option<Box<dyn Fn(Event) -> Message + 'a>>,
@@ -467,10 +500,10 @@ pub struct Toasts<'a, Message> {
 
 /// Stacks the toasts of `state` over `content`. Without
 /// [`on_event`](Toasts::on_event) the buttons render disabled.
-pub fn toasts<'a, Message>(
-    state: &'a State,
+pub fn toasts<'a, Message, A>(
+    state: &'a State<A>,
     content: impl Into<Element<'a, Message>>,
-) -> Toasts<'a, Message> {
+) -> Toasts<'a, Message, A> {
     Toasts {
         state,
         content: content.into(),
@@ -479,7 +512,7 @@ pub fn toasts<'a, Message>(
     }
 }
 
-impl<Message> std::fmt::Debug for Toasts<'_, Message> {
+impl<Message, A: std::fmt::Debug> std::fmt::Debug for Toasts<'_, Message, A> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Toasts")
             .field("state", self.state)
@@ -488,7 +521,7 @@ impl<Message> std::fmt::Debug for Toasts<'_, Message> {
     }
 }
 
-impl<'a, Message> Toasts<'a, Message> {
+impl<'a, Message, A> Toasts<'a, Message, A> {
     pub fn position(mut self, position: Position) -> Self {
         self.position = position;
         self
@@ -500,8 +533,8 @@ impl<'a, Message> Toasts<'a, Message> {
     }
 }
 
-impl<'a, Message: Clone + 'a> From<Toasts<'a, Message>> for Element<'a, Message> {
-    fn from(toasts: Toasts<'a, Message>) -> Self {
+impl<'a, Message: Clone + 'a, A> From<Toasts<'a, Message, A>> for Element<'a, Message> {
+    fn from(toasts: Toasts<'a, Message, A>) -> Self {
         let Toasts {
             state,
             content,
@@ -734,6 +767,45 @@ mod tests {
         assert_eq!(toast.action.as_deref(), Some("Undo"));
         assert!(state.is_empty());
         assert!(state.update(Event::Action(b)).is_none());
+    }
+
+    #[derive(Debug, Clone, PartialEq)]
+    enum Undo {
+        Restore(&'static str),
+    }
+
+    #[test]
+    fn an_action_hands_back_the_payload_it_was_queued_with() {
+        let mut state: State<Undo> = State::default();
+        let plain = state.push(toast("Saved").action("View"));
+        let undo = state.push_with(toast("Archived").action("Undo"), Undo::Restore("inbox"));
+        assert_eq!(state.len(), 2);
+
+        let Some(Output::Payload(payload)) = state.update(Event::Action(undo)) else {
+            panic!("expected the payload");
+        };
+        assert_eq!(payload, Undo::Restore("inbox"));
+        assert!(matches!(
+            state.update(Event::Action(plain)),
+            Some(Output::Action(id, _)) if id == plain
+        ));
+        assert!(state.is_empty());
+    }
+
+    #[test]
+    fn dismissing_drops_the_payload() {
+        let mut state: State<Undo> = State::default();
+        let undo = state.push_with(toast("Archived").action("Undo"), Undo::Restore("inbox"));
+        assert!(state.update(Event::Dismiss(undo)).is_none());
+        assert!(state.update(Event::Action(undo)).is_none());
+        let expired = state.push_with(
+            toast("Archived").duration(Duration::from_secs(1)),
+            Undo::Restore("inbox"),
+        );
+        let start = Instant::now();
+        let _ = state.tick(start);
+        assert_eq!(state.tick(start + Duration::from_secs(1)), vec![expired]);
+        assert!(state.update(Event::Action(expired)).is_none());
     }
 
     fn press(keymap: &Keymap<Action>, chord: &str) -> Option<Action> {

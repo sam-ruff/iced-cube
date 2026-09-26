@@ -161,6 +161,7 @@ pub enum Message {
     Refresh,
     Feed(feed::Event),
     Toast(toast::Event),
+    Restore(Vec<Job>),
     Tick(Instant),
     Key(keys::Event),
 }
@@ -231,7 +232,6 @@ pub struct Example {
     filter: StatusFilter,
     cursor: Option<JobId>,
     row_menu: context_menu::State<RowAction, JobId>,
-    undo: Option<(toast::Id, Vec<Job>)>,
     logs: VecDeque<(u32, LogLine)>,
     held: Vec<LogLine>,
     clock: u32,
@@ -240,7 +240,8 @@ pub struct Example {
     log_query: String,
     runbooks: accordion::State<Runbook>,
     settings: Settings,
-    toasts: toast::State,
+    // Undo toasts carry the message that restores what they report.
+    toasts: toast::State<Message>,
     toast_sender: Option<toast::Sender>,
     feed: Option<feed::Sender>,
     phase: f32,
@@ -282,7 +283,6 @@ impl Default for Example {
             filter: StatusFilter::All,
             cursor: None,
             row_menu: context_menu::State::new(jobs::row_menu_entries()),
-            undo: None,
             logs: data::logs().into(),
             held: Vec::new(),
             clock: 9 * 3600 + 41 * 60,
@@ -291,7 +291,7 @@ impl Default for Example {
             log_query: String::new(),
             runbooks: accordion::State::new(accordion::Mode::Single).with_open(Runbook::Degraded),
             settings: Settings::default(),
-            toasts: toast::State::new(),
+            toasts: toast::State::default(),
             toast_sender: None,
             feed: None,
             phase: 0.15,
@@ -414,6 +414,7 @@ impl Example {
                 self.schedule();
             }
             Message::Toast(event) => self.toast_event(event),
+            Message::Restore(jobs) => self.restore(jobs),
             Message::Tick(now) => {
                 if let Some(last) = self.last_tick {
                     self.phase = advance(self.phase, now - last);
@@ -871,12 +872,20 @@ impl Example {
             [job] => format!("Deleted {}", job.name),
             jobs => format!("Deleted {} jobs", jobs.len()),
         };
-        let id = self.toasts.push(
+        let _ = self.toasts.push_with(
             toast(title)
                 .description("Their logs are kept for the retention period.")
                 .action("Undo"),
+            Message::Restore(removed),
         );
-        self.undo = Some((id, removed));
+        self.schedule();
+    }
+
+    fn restore(&mut self, jobs: Vec<Job>) {
+        let restored = jobs.len();
+        self.jobs.extend(jobs);
+        self.jobs.sort_by_key(|job| std::cmp::Reverse(job.id));
+        self.notify(toast(format!("Restored {restored} jobs")));
         self.schedule();
     }
 
@@ -887,21 +896,8 @@ impl Example {
         };
         match self.toasts.update(event) {
             Some(toast::Output::Ready(sender)) => self.toast_sender = Some(sender),
-            Some(toast::Output::Action(id, _)) => {
-                let Some((undo, jobs)) = self.undo.take() else {
-                    return;
-                };
-                if undo != id {
-                    self.undo = Some((undo, jobs));
-                    return;
-                }
-                let restored = jobs.len();
-                self.jobs.extend(jobs);
-                self.jobs.sort_by_key(|job| std::cmp::Reverse(job.id));
-                self.notify(toast(format!("Restored {restored} jobs")));
-                self.schedule();
-            }
-            None => {}
+            Some(toast::Output::Payload(message)) => self.update(message),
+            Some(toast::Output::Action(..)) | None => {}
         }
     }
 

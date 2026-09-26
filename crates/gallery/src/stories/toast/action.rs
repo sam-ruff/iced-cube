@@ -7,19 +7,21 @@ use iced_cube::{button, lucide};
 #[derive(Debug, Clone)]
 pub enum Message {
     Archive,
+    Unarchive,
     Toast(toast::Event),
 }
 
 #[derive(Debug)]
 pub struct Example {
     inbox: u32,
-    toasts: toast::State,
+    // Undo buttons hand back the message that reverses the archive.
+    toasts: toast::State<Message>,
 }
 
 impl Default for Example {
     fn default() -> Self {
-        let mut toasts = toast::State::new();
-        toasts.push(archived().persistent());
+        let mut toasts = toast::State::default();
+        toasts.push_with(archived().persistent(), Message::Unarchive);
         Self { inbox: 11, toasts }
     }
 }
@@ -33,11 +35,12 @@ impl Example {
         match message {
             Message::Archive => {
                 self.inbox -= 1;
-                self.toasts.push(archived());
+                self.toasts.push_with(archived(), Message::Unarchive);
             }
+            Message::Unarchive => self.inbox += 1,
             Message::Toast(event) => {
-                if let Some(toast::Output::Action(..)) = self.toasts.update(event) {
-                    self.inbox += 1;
+                if let Some(toast::Output::Payload(message)) = self.toasts.update(event) {
+                    self.update(message);
                 }
             }
         }
