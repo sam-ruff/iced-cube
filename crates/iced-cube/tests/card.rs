@@ -44,6 +44,35 @@ fn footer_buttons_emit_their_messages() {
     assert_eq!(messages, vec![Message::Save, Message::Cancel]);
 }
 
+// A text node's bounds are clamped to the room it is given, so a word that
+// runs past the border still reports one line. Breaking it adds lines.
+#[test]
+fn a_word_wider_than_the_card_breaks_instead_of_running_past_the_border() {
+    let element: Element<'_, Message> = row![
+        card()
+            .title("Subscribers")
+            .description("Subscriptions")
+            .width(90)
+    ]
+    .into();
+    let mut ui = simulator(element);
+
+    let title = ui.find("Subscribers").expect("title is rendered").bounds();
+    assert!(title.width <= 90.0 - 48.0, "title width {}", title.width);
+    assert!(title.height > 40.0, "title height {}", title.height);
+
+    let description = ui.find("Subscriptions").expect("description is rendered");
+    assert!(description.bounds().height > 30.0);
+}
+
+#[test]
+fn short_headers_keep_one_line() {
+    let element: Element<'_, Message> = row![card().title("Profile").width(200)].into();
+    let mut ui = simulator(element);
+    let title = ui.find("Profile").expect("title is rendered").bounds();
+    assert!(title.height < 30.0, "title height {}", title.height);
+}
+
 #[test]
 fn card_without_header_renders_body() {
     let element: Element<'_, Message> = card().body(text("Only body")).into();

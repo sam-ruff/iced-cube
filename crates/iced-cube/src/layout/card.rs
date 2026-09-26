@@ -5,6 +5,10 @@ use iced::{Background, Border, Color, Element, Length, Shadow, Vector};
 
 use crate::theme::{Tokens, fade, mix, radius, space, text_size};
 
+/// Headings break inside a word only when the word alone is wider than the
+/// card, so they never run past the border.
+const HEADER_WRAPPING: text::Wrapping = text::Wrapping::WordOrGlyph;
+
 /// A card builder. Convert it into an [`Element`] to render.
 pub struct Card<'a, Message> {
     title: Option<text::Fragment<'a>>,
@@ -84,15 +88,19 @@ impl<'a, Message: 'a> From<Card<'a, Message>> for Element<'a, Message> {
                 header = header.push(
                     text(title)
                         .size(text_size::LG)
-                        .font(crate::theme::semibold()),
+                        .font(crate::theme::semibold())
+                        .wrapping(HEADER_WRAPPING),
                 );
             }
             if let Some(description) = card.description {
-                header = header.push(text(description).size(text_size::SM).style(
-                    |theme: &iced::Theme| text::Style {
-                        color: Some(Tokens::of(theme).muted_foreground),
-                    },
-                ));
+                header = header.push(
+                    text(description)
+                        .size(text_size::SM)
+                        .wrapping(HEADER_WRAPPING)
+                        .style(|theme: &iced::Theme| text::Style {
+                            color: Some(Tokens::of(theme).muted_foreground),
+                        }),
+                );
             }
             sections = sections.push(header);
         }
@@ -103,9 +111,11 @@ impl<'a, Message: 'a> From<Card<'a, Message>> for Element<'a, Message> {
             sections = sections.push(footer);
         }
 
+        // Content wider than the card is cut at the border, not drawn over it.
         container(sections)
             .padding(space::XL)
             .width(card.width)
+            .clip(true)
             .style(|theme| style(&Tokens::of(theme)))
             .into()
     }
