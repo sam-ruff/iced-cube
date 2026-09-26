@@ -91,6 +91,8 @@ const { title, description, toc = [], pager, wide = false } = Astro.props;
     for (const heading of headings) {
       if (heading.getBoundingClientRect().top <= line) current = heading;
     }
+    // Short final sections never reach the line, so the bottom of the page selects the last one.
+    if (innerHeight + scrollY >= document.documentElement.scrollHeight - 2) current = headings.at(-1);
     for (const [id, link] of links) {
       if (id === current?.id) link.setAttribute("aria-current", "location");
       else link.removeAttribute("aria-current");

@@ -35,7 +35,8 @@ function setStatus(frame: Frame, state: "static" | "loading" | "live" | "failed"
   frame.classList.toggle("live", state === "live");
   frame.classList.toggle("failed", state === "failed");
   for (const poster of frame.querySelectorAll("img")) {
-    poster.toggleAttribute("aria-hidden", state === "live");
+    if (state === "live") poster.setAttribute("aria-hidden", "true");
+    else poster.removeAttribute("aria-hidden");
   }
   const label = frame.querySelector<HTMLElement>("[data-status-text]");
   if (label) label.textContent = text;

@@ -69,7 +69,12 @@ html:has(dialog[open]) {
 }
 
 /* Live preview frames: keyboard focus inside the iframe and the reduced-motion start button. */
-.frame:focus-within {
+.frame:focus-within::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
   box-shadow: inset 0 0 0 2px var(--ring);
 }
 

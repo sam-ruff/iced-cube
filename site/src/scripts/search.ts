@@ -165,7 +165,12 @@ function close(): void {
 }
 
 dialog?.addEventListener("close", () => {
-  if (returnFocus?.isConnected && !(returnFocus instanceof HTMLIFrameElement)) returnFocus.focus();
+  // A preview iframe cannot take focus back cleanly, so return to its tab instead.
+  const target =
+    returnFocus instanceof HTMLIFrameElement
+      ? returnFocus.closest("[data-preview-root]")?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')
+      : returnFocus;
+  if (target?.isConnected) target.focus();
   returnFocus = null;
 });
 

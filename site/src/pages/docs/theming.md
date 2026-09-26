@@ -32,6 +32,28 @@ Shared constants keep layouts consistent:
 - `theme::radius`: `SM` (4), `MD` (6), `LG` (8), `FULL`
 - `theme::text_size`: `XS` (12), `SM` (14), `MD` (16), `LG` (18)
 
+## Fonts
+
+Emphasised text, such as card and toast titles, is drawn at semibold weight. So that it uses your font rather than whatever sans-serif the system picks, register the same font you give iced as its default, before the app starts:
+
+```rust
+use iced::Font;
+
+const FONT: Font = Font::with_name("Inter");
+
+fn main() -> iced::Result {
+    iced_cube::theme::set_font(FONT);
+
+    iced::application(App::default, App::update, App::view)
+        .font(include_bytes!("../fonts/Inter-Regular.ttf").as_slice())
+        .font(include_bytes!("../fonts/Inter-SemiBold.ttf").as_slice())
+        .default_font(FONT)
+        .run()
+}
+```
+
+Load a semibold face of the font too, or the text renderer will fall back to a synthetic or system bold.
+
 ## Changing one component
 
 Components have no per-instance style option. Their look comes from the theme alone, so a palette change reaches every one of them at once.

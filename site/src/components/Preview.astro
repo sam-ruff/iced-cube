@@ -45,7 +45,7 @@ const wheel = story.component === "scroll-area";
     <span class="visually-hidden" role="status" data-copy-status></span>
   </div>
 
-  <div class="panel" role="tabpanel" tabindex="0" id={`panel-preview-${key}`} aria-labelledby={`tab-preview-${key}`} data-panel="preview">
+  <div class="panel" role="tabpanel" id={`panel-preview-${key}`} aria-labelledby={`tab-preview-${key}`} data-panel="preview">
     <div class="frame" style={`height:${height}px`} data-story={id} data-title={story.title} data-wheel={wheel ? "true" : undefined}>
       <img
         class="poster light"
