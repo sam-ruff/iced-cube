@@ -1,5 +1,5 @@
 use iced::Element;
-use iced::widget::{column, row};
+use iced::widget::row;
 use iced_cube::alert;
 use iced_cube::feedback::alert::Variant;
 
@@ -9,32 +9,42 @@ pub enum Message {}
 #[derive(Debug, Default)]
 pub struct Example;
 
+const ALERTS: [(&str, &str, Variant); 4] = [
+    (
+        "New version available",
+        "Restart to update to 2.4.",
+        Variant::Info,
+    ),
+    (
+        "Backup complete",
+        "All 1,284 files were saved.",
+        Variant::Success,
+    ),
+    (
+        "Storage almost full",
+        "You have 312 MB left.",
+        Variant::Warning,
+    ),
+    (
+        "Sync failed",
+        "Check your connection and retry.",
+        Variant::Destructive,
+    ),
+];
+
 impl Example {
     pub fn update(&mut self, _message: Message) {}
 
     pub fn view(&self) -> Element<'_, Message> {
-        column![
-            row![
-                alert("New version available")
-                    .description("Restart to update to 2.4.")
-                    .variant(Variant::Info),
-                alert("Backup complete")
-                    .description("All 1,284 files were saved.")
-                    .variant(Variant::Success),
-            ]
-            .spacing(12),
-            row![
-                alert("Storage almost full")
-                    .description("You have 312 MB left.")
-                    .variant(Variant::Warning),
-                alert("Sync failed")
-                    .description("Check your connection and retry.")
-                    .variant(Variant::Destructive),
-            ]
-            .spacing(12),
-        ]
+        row(ALERTS.map(|(title, description, variant)| {
+            alert(title)
+                .description(description)
+                .variant(variant)
+                .width(276)
+                .into()
+        }))
         .spacing(12)
-        .width(640)
+        .wrap()
         .into()
     }
 }

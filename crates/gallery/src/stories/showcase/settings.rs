@@ -1,4 +1,4 @@
-use iced::widget::{column, row, space, text};
+use iced::widget::{column, container, row, text};
 use iced::{Alignment, Element, Length};
 use iced_cube::feedback::badge::Variant as BadgeVariant;
 use iced_cube::primitives::button::Variant;
@@ -87,9 +87,7 @@ impl Example {
         ]
         .spacing(14);
 
-        let footer = row![
-            status,
-            space::horizontal(),
+        let actions = row![
             button("Reset")
                 .variant(Variant::Ghost)
                 .on_press(Message::Reset),
@@ -97,8 +95,17 @@ impl Example {
                 .icon(lucide!(Save))
                 .on_press_maybe((!self.saved).then_some(Message::Save)),
         ]
-        .spacing(8)
-        .align_y(Alignment::Center);
+        .spacing(8);
+
+        // On a narrow screen the actions move under the status.
+        let footer = container(
+            row![status, actions]
+                .spacing(8)
+                .align_y(Alignment::Center)
+                .wrap()
+                .align_x(Alignment::End),
+        )
+        .align_right(Length::Fill);
 
         card()
             .title("Preferences")

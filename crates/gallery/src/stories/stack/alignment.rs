@@ -25,7 +25,7 @@ impl Example {
                     .align(align)
                     .width(Length::Fill),
                 )
-                .width(Length::Fill)
+                .width(180)
                 .into()
         };
 
@@ -35,7 +35,7 @@ impl Example {
             panel("End", Alignment::End),
         ])
         .gap(Gap::Lg)
-        .width(600)
+        .wrap()
         .into()
     }
 }

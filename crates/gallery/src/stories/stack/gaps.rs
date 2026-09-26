@@ -20,7 +20,7 @@ impl Example {
 
             hstack([
                 text(format!("{gap:?}")).size(14).width(40).into(),
-                hstack(items).gap(gap).into(),
+                hstack(items).gap(gap).wrap().into(),
             ])
             .align(Alignment::Center)
             .into()

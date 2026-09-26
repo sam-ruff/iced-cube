@@ -1,5 +1,5 @@
+use iced::Element;
 use iced::widget::{column, row, text};
-use iced::{Element, Length};
 use iced_cube::feedback::badge::Variant;
 use iced_cube::{badge, card};
 
@@ -29,11 +29,11 @@ impl Example {
                     ]
                     .spacing(8),
                 )
-                .width(Length::Fill)
+                .width(200)
                 .into()
         }))
         .spacing(16)
-        .width(640)
+        .wrap()
         .into()
     }
 }

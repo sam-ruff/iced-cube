@@ -48,6 +48,7 @@ impl Example {
             self.panel("Custom", brand),
         ]
         .spacing(12)
+        .wrap()
         .into()
     }
 

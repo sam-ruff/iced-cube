@@ -38,7 +38,8 @@ impl Example {
             badge("Live"),
         ]
         .spacing(8)
-        .align_y(Alignment::Center);
+        .align_y(Alignment::Center)
+        .wrap();
 
         column![
             buttons,

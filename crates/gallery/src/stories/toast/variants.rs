@@ -53,7 +53,8 @@ impl Example {
                 .on_press(Message::Show(variant))
                 .into()
         }))
-        .spacing(8);
+        .spacing(8)
+        .wrap();
 
         toasts(&self.toasts, buttons)
             .on_event(Message::Toast)
