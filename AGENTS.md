@@ -81,6 +81,15 @@ A component is not done until all of these exist and pass:
 - **System tests** in `crates/iced-cube/tests/<component>.rs` using `iced_test::simulator`: click, type and key sequences, asserting on the emitted messages and on what is rendered (`ui.find`). Overlays: open, close, dismiss.
 - **Stories** in `crates/gallery/src/stories/<component>/`, registered in `stories/mod.rs`. Each story file is shown verbatim on the site, so write it as clean example code: `Message`, a `Default` `Example`, `update`, `view`. Optional settings after `file`, in order: `height: <px>` (default 280; about 160-200 for a single row, 320-360 for toasts and overlays), `subscription: true` and `theme: true` (a story `theme(&self) -> Option<Theme>` that replaces the gallery theme). Previews are centred, so a story whose text changes with state (such as "Selected: X") needs a fixed width, or the whole example shifts sideways when the text changes.
 - **Snapshots**: `cargo test -p gallery --test snapshots` writes PNGs for new stories on first run, 720 pixels wide at the story's height. Look at them before committing. To accept an intentional change, delete the old PNGs and rerun.
+- **Mobile check**: previews are narrower than the 720px snapshot on a phone, so check every new or changed story live at 360 and 390 CSS px in light and dark. Use Chromium with a real scale factor (`--force-device-scale-factor=2.625` and a 390px window). Playwright's `deviceScaleFactor` emulation renders wasm previews oversized, so it proves nothing. Nothing may clip, overflow its container or run off the edge. Labels in pills, buttons, tabs and badges never wrap inside themselves (`text::Wrapping::None`, sized to content). Rows of cards or buttons wrap onto new lines (`row![].wrap()`) or use fluid widths, rather than fixed widths that overflow. Only body text wraps. Fix a problem in the component when it is the component's fault, and test it with `iced_test` in a narrow container.
+- **Independent UX review**: once a batch of new or changed components is done, start a separate review agent that did not build them, with fresh context, to review the whole library, not just the new parts. The agent that wrote the code never reviews its own work. The review covers:
+  - Visual consistency in light and dark: surfaces, borders, radii, row heights, type, icons, and the hover, disabled and destructive states.
+  - Composition: menus inside dialogs, lists inside popovers, and toolbars mixing buttons and icon buttons, including click-outside and Escape order when overlays nest.
+  - Keyboard: conflicting default keymaps when several components are on screen.
+  - API naming consistency.
+  - The docs pages at desktop and mobile widths, including the live demo.
+  
+  The review agent reports prioritised findings with evidence (file:line or screenshots) and makes no changes. Fix the findings, or record why one is not fixed, before release. Do the mobile check the same way, with its own agent.
 - **Docs page**: `site/src/content/components/<slug>.md` (format below). The coverage test fails if a component has stories but no page, or a page references a missing story.
 
 ## Docs pages
