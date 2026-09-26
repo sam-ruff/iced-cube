@@ -55,6 +55,7 @@ impl Example {
             text(format!("Selected: {}", self.density)).size(14),
         ]
         .spacing(20)
+        .width(220)
         .into()
     }
 }
