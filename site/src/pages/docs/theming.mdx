@@ -4,9 +4,15 @@ title: Theming
 description: Light and dark themes, semantic tokens and custom palettes.
 ---
 
+import Preview from "../../components/Preview.astro";
+
 ## Built-in themes
 
 `iced_cube::theme::light()` and `iced_cube::theme::dark()` return ordinary `iced::Theme` values with a neutral palette. Switch between them from your application's `theme` function. To use your own colours, see [Custom palettes](#custom-palettes) below.
+
+These are the same controls under each built-in theme and a custom palette. Each panel sets its own theme with iced's `themer` widget, so the panels keep their colours whatever the site theme is:
+
+<Preview id="theme/palettes" height={280} />
 
 ## Tokens
 
@@ -20,7 +26,9 @@ let border = tokens.border;
 let text = tokens.muted_foreground;
 ```
 
-Tokens include `background`, `foreground`, `muted`, `muted_foreground`, `accent`, `border`, `ring`, `primary`, `secondary`, `destructive`, `success` and `warning`, each with a matching foreground where it makes sense.
+Tokens include `background`, `foreground`, `muted`, `muted_foreground`, `accent`, `border`, `ring`, `primary`, `secondary`, `destructive`, `success` and `warning`, each with a matching foreground where it makes sense. Here they are as the current theme resolves them; switch the site between light and dark to see both sets:
+
+<Preview id="theme/tokens" height={260} />
 
 Because tokens come from iced's extended palette, any iced theme works, including the built-in ones such as `Theme::Dracula` or a `Theme::custom` palette of your own. `secondary` and `accent` are read from the extended palette's secondary colours, which iced derives from the background and text for its own themes.
 
@@ -159,10 +167,8 @@ The setters are `primary`, `secondary`, `accent`, `destructive`, `success`, `war
 
 Whether components use their light or dark styling follows the background colour, so a dark background built from `Config::light()` still gets dark shadows and hover states.
 
-To see a brand palette on buttons, a badge, a switch and a progress bar, run the gallery's theme example:
+Here is a brand palette on buttons, badges, a switch and a progress bar. The switch rebuilds the palette from `Config::dark()`:
 
-```sh
-cargo run -p gallery -- theme/custom
-```
+<Preview id="theme/custom" height={240} />
 
 `build()` fills in iced's extended palette, so plain iced widgets pick up the same colours. If you need the palettes themselves, `config.palette()` and `config.extended()` return them without building a theme.

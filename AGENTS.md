@@ -21,6 +21,7 @@ scripts/install-hooks.sh                       # once per clone
 cargo fmt --all
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace                         # unit, system and snapshot tests
+scripts/check-features.sh                      # iced-cube with each component feature on its own
 cargo run -p gallery                           # native gallery
 cargo run -p gallery -- button/variants --dark # open one story
 scripts/build-wasm.sh                          # wasm previews into site/public/wasm
@@ -36,6 +37,7 @@ cd site && npm run test:e2e                    # Playwright, mobile and desktop
 - Comments only where the code is not obvious. Describe current behaviour, never history.
 - Add dependencies with `cargo add` or `npm i <pkg>@latest` so the latest versions are used.
 - No `unwrap`/`expect` in library code. Use guard clauses (`let ... else`, early return) to keep nesting shallow.
+- Every component has a Cargo feature named after its docs page slug (`scroll-area`, `field`), listed in its group feature (`primitives`, `forms` and so on), which `full` and the defaults enable. Gate the module in the group's `mod.rs`, its re-exports in `lib.rs` and its system test (`#![cfg(feature = "...")]`). A component that uses another enables that feature, and an iced feature or optional dependency only one component needs belongs to that component's feature. `theme`, `icon` and `keys` are always built.
 - Conventional commits (`feat(button): ...`, `fix(theme): ...`). The `commit-msg` hook checks the format. `feat` releases a minor, `fix`/`perf`/`refactor` a patch. While on 0.x a breaking change releases a minor.
 - Published text (README, rustdoc, site, commit messages) must not mention other UI libraries by name.
 
@@ -76,7 +78,7 @@ A component is not done until all of these exist and pass:
 
 - **Unit tests** next to the code: builder defaults, every `Variant`/`Size`, style resolution in light and dark and in every status (hovered, pressed, disabled, focused), `State::update` transitions, bounds and edge cases (empty, disabled, overflow, min/max), channel batching where relevant.
 - **System tests** in `crates/iced-cube/tests/<component>.rs` using `iced_test::simulator`: click, type and key sequences, asserting on the emitted messages and on what is rendered (`ui.find`). Overlays: open, close, dismiss.
-- **Stories** in `crates/gallery/src/stories/<component>/`, registered in `stories/mod.rs`. Each story file is shown verbatim on the site, so write it as clean example code: `Message`, a `Default` `Example`, `update`, `view`. Optional settings after `file`, in order: `height: <px>` (default 280; about 160-200 for a single row, 320-360 for toasts and overlays), `subscription: true` and `theme: true` (a story `theme(&self) -> Option<Theme>` that replaces the gallery theme).
+- **Stories** in `crates/gallery/src/stories/<component>/`, registered in `stories/mod.rs`. Each story file is shown verbatim on the site, so write it as clean example code: `Message`, a `Default` `Example`, `update`, `view`. Optional settings after `file`, in order: `height: <px>` (default 280; about 160-200 for a single row, 320-360 for toasts and overlays), `subscription: true` and `theme: true` (a story `theme(&self) -> Option<Theme>` that replaces the gallery theme). Previews are centred, so a story whose text changes with state (such as "Selected: X") needs a fixed width, or the whole example shifts sideways when the text changes.
 - **Snapshots**: `cargo test -p gallery --test snapshots` writes PNGs for new stories on first run, 720 pixels wide at the story's height. Look at them before committing. To accept an intentional change, delete the old PNGs and rerun.
 - **Docs page**: `site/src/content/components/<slug>.md` (format below). The coverage test fails if a component has stories but no page, or a page references a missing story.
 
@@ -109,7 +111,23 @@ keyboard:                    # optional, only for keys built into iced widgets
 Short usage notes in markdown. Code examples come from the stories, not from here.
 ```
 
-Component keymaps are exported from Rust to `site/src/generated/keymaps.json` by `npm run prepare-data` and rendered on the page automatically, so never copy them into `keyboard:`. Stories whose component is `theme` are exempt from the coverage check and are linked from the theming guide instead, because guides cannot embed previews.
+Component keymaps are exported from Rust to `site/src/generated/keymaps.json` by `npm run prepare-data` and rendered on the page automatically, so never copy them into `keyboard:`. Stories whose component is `theme` or `showcase` are exempt from the component-page coverage check: theme stories are embedded in the Theming guide and the showcase on the landing page. Guides that need live previews are MDX files (`theming.mdx`) that import `Preview`; the Markdown build replaces each `<Preview id="..." />` with that story's code.
+
+## Markdown docs for AI agents
+
+The site also publishes the whole documentation as plain, unstyled Markdown for AI agents and other tools, following the llms.txt convention:
+
+- `/llms.txt`: an index linking every page's Markdown version.
+- `/llms-full.txt`: every page in one file.
+- `/docs/<guide>.md` and `/docs/components/<slug>.md`: one file per page. Component pages list the imports, usage notes, each example as its full Rust source (no previews), the API table, keyboard shortcuts and related pages.
+
+These are generated at build time by `site/src/lib/markdown.ts` from the same sources as the HTML: guide Markdown, component frontmatter, story files and the Rust keymaps. So keep them working rather than editing output:
+
+- New guides must be added to `guides` in `site/src/lib/nav.ts`, or they will be missing from the Markdown version.
+- Write guide links as relative links (`../components/tabs/`), so they convert to `.md` links.
+- Any new component page field that carries meaning (not styling) must also be rendered in `componentBody` in `markdown.ts`.
+- Keep the one-sentence link in the Introduction guide.
+- `site/tests/e2e/markdown.spec.ts` checks that every page has a Markdown version and that no HTML leaks in.
 
 ## CI and releases
 

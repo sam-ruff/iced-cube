@@ -8,6 +8,8 @@ iced-cube is a set of components for [iced](https://iced.rs), the Rust GUI libra
 
 More components are on the way. The [Status](status/) page lists what is planned.
 
+For AI agents and other tools, the whole documentation is also available as plain Markdown with the examples as code, indexed at [llms.txt](../llms.txt) with everything in one file at [llms-full.txt](../llms-full.txt).
+
 ## How it fits with iced
 
 Every component is an ordinary iced widget, or a small composition of them. You build a component with a function, set options on it, and convert it into an `Element` like anything else:

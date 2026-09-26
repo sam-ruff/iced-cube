@@ -324,6 +324,16 @@ crate::stories! {
         description: "A brand palette built with theme::Config. The switch rebuilds it from the dark defaults.",
         file: "theme/custom.rs", height: 240, theme: true,
     }
+    ThemePalettes => theme::palettes {
+        id: "theme/palettes", component: "theme", title: "Light, dark and custom",
+        description: "The same controls under the light theme, the dark theme and a Config palette, side by side.",
+        file: "theme/palettes.rs", height: 280,
+    }
+    ThemeTokens => theme::tokens {
+        id: "theme/tokens", component: "theme", title: "Tokens",
+        description: "Every semantic colour token, as resolved from the current theme.",
+        file: "theme/tokens.rs", height: 260,
+    }
     ShowcaseSettings => showcase::settings {
         id: "showcase/settings", component: "showcase", title: "Preferences",
         description: "Switches, a select, a slider, a badge and buttons working together in a card.",
