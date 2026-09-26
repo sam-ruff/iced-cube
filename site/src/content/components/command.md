@@ -41,6 +41,8 @@ api:
     description: "Shows \"Searching...\" while a background search is running."
   - name: ".width(length) / .height(length) / .id(id)"
     description: "The width fills by default. A fixed height stops the list resizing as results change."
+  - name: ".max_height(f32)"
+    description: "Caps the height while the list still shrinks to fit a few results, as a palette should. Keep with_visible_rows within the cap, since rows past it are clipped."
   - name: ".keymap(keymap)"
     description: "Replaces the default keymap. The list resolves its own key presses while its search field has focus."
   - name: "command::default_keymap()"
@@ -51,7 +53,7 @@ api:
 
 A command list puts every action behind one search field. Typing ranks the items: an exact match comes first, then prefixes, then matches at the start of a word, then anywhere, then letters in order. Keywords let an item be found by other names, such as "preferences" for Settings. Disabled items stay visible but are skipped by the keyboard.
 
-The list is embedded where you place it. For a command palette, put it in a [dialog](../dialog/) and open it from a button or a shortcut such as Ctrl+K, as the palette example does. Let that shortcut through the dialog with `.pass_through(...)` so it closes the palette too, and close the dialog when `update` returns `Output::Activated` or `Output::Closed`.
+The list is embedded where you place it. For a command palette, put it in a [dialog](../dialog/) and open it from a button or a shortcut such as Ctrl+K, as the palette example does. Let that shortcut through the dialog with `.pass_through(...)` so it closes the palette too, and close the dialog when `update` returns `Output::Activated` or `Output::Closed`. Give a palette `.max_height(...)` rather than a fixed height, so it shrinks around a handful of matches instead of leaving an empty panel.
 
 Results can also come from background work, such as a file index or a server. When `update` returns `Output::Search(query)`, start a producer with that query and a clone of the sender. It sends `command::results(query, group, items)` as matches arrive; anything tagged with an older query is dropped, so slow searches never overwrite newer ones. The async example waits with `futures-timer` rather than a thread, so it runs in the browser too.
 

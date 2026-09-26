@@ -756,6 +756,7 @@ pub struct Command<'a, Id, Message> {
     loading: bool,
     width: Length,
     height: Length,
+    max_height: f32,
     id: Option<widget::Id>,
     keymap: Keymap<Action>,
     on_event: Option<Box<dyn Fn(Event<Id>) -> Message + 'a>>,
@@ -770,6 +771,7 @@ pub fn command<'a, Id, Message>(state: &'a State<Id>) -> Command<'a, Id, Message
         loading: false,
         width: Length::Fill,
         height: Length::Shrink,
+        max_height: f32::INFINITY,
         id: None,
         keymap: default_keymap(),
         on_event: None,
@@ -819,6 +821,14 @@ impl<'a, Id, Message> Command<'a, Id, Message> {
         self
     }
 
+    /// Caps the height in pixels while the list still shrinks to fit a
+    /// few results. Rows past the cap are clipped, so keep
+    /// [`State::with_visible_rows`] within it.
+    pub fn max_height(mut self, max_height: f32) -> Self {
+        self.max_height = max_height;
+        self
+    }
+
     /// Sets the widget id of the search field, to focus it or find it in
     /// tests.
     pub fn id(mut self, id: impl Into<widget::Id>) -> Self {
@@ -855,6 +865,7 @@ where
             loading,
             width,
             height,
+            max_height,
             id,
             keymap,
             on_event,
@@ -882,6 +893,7 @@ where
         ])
         .width(width)
         .height(height)
+        .max_height(max_height)
         .clip(true)
         .style(|theme| surface_style(&Tokens::of(theme)));
 
@@ -1483,9 +1495,15 @@ mod tests {
         assert_eq!(c.empty, DEFAULT_EMPTY);
         assert!(!c.loading);
         assert_eq!((c.width, c.height), (Length::Fill, Length::Shrink));
-        let c = c.loading(true).height(320).on_event(|_| ());
+        assert_eq!(c.max_height, f32::INFINITY);
+        let c = c
+            .loading(true)
+            .height(320)
+            .max_height(400.0)
+            .on_event(|_| ());
         assert!(c.is_enabled() && c.loading);
         assert_eq!(c.height, Length::Fixed(320.0));
+        assert_eq!(c.max_height, 400.0);
     }
 
     const STATES: [Status; 5] = [

@@ -178,6 +178,41 @@ fn focusing_and_leaving_the_field_toggle_the_highlight() {
 }
 
 #[test]
+fn a_capped_list_shrinks_to_a_few_results() {
+    use iced::widget::{column, text};
+
+    let mut state = sample();
+    let _ = state.update(Event::Input("bill".into()));
+    let element: Element<'_, Message> = column![
+        command(&state).max_height(400.0).on_event(Message::Command),
+        text("Below"),
+    ]
+    .into();
+    let mut ui = simulator(element);
+    let billing = ui.find("Billing").expect("result is rendered").bounds();
+    let below = ui.find("Below").expect("text under the list").bounds();
+    assert!(
+        below.y < billing.y + billing.height + 40.0,
+        "the list ends just after its one result: {billing:?} {below:?}"
+    );
+}
+
+#[test]
+fn a_capped_list_stops_at_its_maximum() {
+    use iced::widget::{column, text};
+
+    let state = sample();
+    let element: Element<'_, Message> = column![
+        command(&state).max_height(120.0).on_event(Message::Command),
+        text("Below"),
+    ]
+    .into();
+    let mut ui = simulator(element);
+    let below = ui.find("Below").expect("text under the list").bounds();
+    assert!(below.y <= 120.5, "{below:?}");
+}
+
+#[test]
 fn keys_pass_through_without_focus() {
     let state = sample();
     let mut ui = simulator(view(&state));

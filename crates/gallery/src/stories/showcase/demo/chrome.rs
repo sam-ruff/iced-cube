@@ -355,7 +355,7 @@ impl Example {
             .body(
                 command(&self.palette)
                     .placeholder("Search pages, actions and jobs...")
-                    .height(320)
+                    .max_height(400.0)
                     .id(PALETTE_ID)
                     .keymap(self.keys.command.clone())
                     .on_event(Message::Palette),

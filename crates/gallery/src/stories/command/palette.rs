@@ -111,7 +111,7 @@ impl Example {
             .body(
                 command(&self.command)
                     .placeholder("Search pages and actions...")
-                    .height(280)
+                    .max_height(280.0)
                     .on_event(Message::Command),
             )
             .size(dialog::Size::Sm)
