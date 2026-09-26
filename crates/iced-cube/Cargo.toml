@@ -68,7 +68,7 @@ context-menu = ["dropdown-menu"]
 alert = []
 badge = []
 progress = []
-spinner = ["iced/canvas"]
+spinner = ["iced/advanced"]
 
 [dependencies]
 iced = { version = "0.14.0", default-features = false, features = ["svg"] }

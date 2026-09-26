@@ -3,13 +3,24 @@
 //! The spinner has no clock of its own. The app keeps a phase in its state,
 //! advances it with [`advance`] on each frame while loading (for example from
 //! `iced::window::frames()`), and stops subscribing when it is done.
+//!
+//! The track and the arc are small SVG images drawn through iced's image
+//! path, which behaves the same on every backend. The arc comes from a fixed
+//! set of [`FRAMES`] pre-rotated images, so spinners at the same phase share
+//! one cached image.
 
 use std::f32::consts::{FRAC_PI_2, TAU};
+use std::sync::LazyLock;
 use std::time::Duration;
 
-use iced::widget::canvas::{self, Frame, Geometry, LineCap, Path, Stroke, path::Arc};
+use iced::advanced::layout::{self, Layout};
+use iced::advanced::renderer;
+use iced::advanced::svg::{self as advanced_svg, Renderer as _};
+use iced::advanced::widget::{Tree, Widget};
+use iced::widget::svg::Handle;
 use iced::{Color, Element, Length, Radians, Rectangle, Renderer, Theme, mouse};
 
+use crate::icon::opaque;
 use crate::theme::{Tokens, fade};
 
 /// Time for one full turn.
@@ -17,6 +28,9 @@ pub const PERIOD: Duration = Duration::from_millis(900);
 
 /// Share of the circle covered by the moving arc.
 pub const ARC: f32 = 0.3;
+
+/// Number of distinct arc positions in one turn.
+pub const FRAMES: usize = 60;
 
 /// Spinner diameter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -45,6 +59,14 @@ impl Size {
             Size::Sm => 2.0,
             Size::Md => 2.5,
             Size::Lg => 3.0,
+        }
+    }
+
+    const fn index(self) -> usize {
+        match self {
+            Size::Sm => 0,
+            Size::Md => 1,
+            Size::Lg => 2,
         }
     }
 }
@@ -97,6 +119,64 @@ pub fn arc_angles(phase: f32) -> (Radians, Radians) {
     (Radians(start), Radians(start + ARC * TAU))
 }
 
+/// The arc image drawn for `phase`: the nearest of the [`FRAMES`] positions.
+pub fn frame(phase: f32) -> usize {
+    let step = (wrap(phase) * FRAMES as f32).round() as usize;
+    step % FRAMES
+}
+
+/// SVG markup for the full circle behind the arc.
+pub fn track_svg(size: Size) -> String {
+    let (centre, radius, stroke) = geometry(size);
+    format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{d}" height="{d}" viewBox="0 0 {d} {d}"><circle cx="{centre}" cy="{centre}" r="{radius}" fill="none" stroke="black" stroke-width="{stroke}"/></svg>"#,
+        d = size.diameter(),
+    )
+}
+
+/// SVG markup for the arc at `phase`, running clockwise over [`ARC`] of the
+/// circle from the angle [`arc_angles`] gives.
+pub fn arc_svg(size: Size, phase: f32) -> String {
+    let (centre, radius, stroke) = geometry(size);
+    let (start, end) = arc_angles(phase);
+    let point = |angle: Radians| {
+        let x = centre + radius * angle.0.cos();
+        let y = centre + radius * angle.0.sin();
+        format!("{x:.3} {y:.3}")
+    };
+    let large_arc = u8::from(ARC > 0.5);
+    format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{d}" height="{d}" viewBox="0 0 {d} {d}"><path d="M {from} A {radius} {radius} 0 {large_arc} 1 {to}" fill="none" stroke="black" stroke-width="{stroke}" stroke-linecap="round"/></svg>"#,
+        d = size.diameter(),
+        from = point(start),
+        to = point(end),
+    )
+}
+
+/// Centre, radius and stroke width, in the SVG's own units.
+fn geometry(size: Size) -> (f32, f32, f32) {
+    let stroke = size.stroke();
+    let centre = size.diameter() / 2.0;
+    (centre, centre - stroke / 2.0, stroke)
+}
+
+struct Images {
+    track: [Handle; 3],
+    arc: [Vec<Handle>; 3],
+}
+
+static IMAGES: LazyLock<Images> = LazyLock::new(|| Images {
+    track: Size::ALL.map(|size| Handle::from_memory(track_svg(size).into_bytes())),
+    arc: Size::ALL.map(|size| {
+        (0..FRAMES)
+            .map(|step| {
+                let phase = step as f32 / FRAMES as f32;
+                Handle::from_memory(arc_svg(size, phase).into_bytes())
+            })
+            .collect()
+    }),
+});
+
 /// Colours of the track and the moving arc.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Colours {
@@ -112,58 +192,54 @@ pub fn colours(tokens: &Tokens) -> Colours {
     }
 }
 
-impl<Message> canvas::Program<Message> for Spinner {
-    type State = ();
+/// An svg image tinted with `colour`. iced ignores the alpha of a tint, so
+/// the alpha becomes the image opacity.
+fn image(handle: &Handle, colour: Color) -> advanced_svg::Svg {
+    advanced_svg::Svg::new(handle.clone())
+        .color(opaque(colour))
+        .opacity(colour.a)
+}
+
+impl<Message> Widget<Message, Theme, Renderer> for Spinner {
+    fn size(&self) -> iced::Size<Length> {
+        let diameter = Length::Fixed(self.size.diameter());
+        iced::Size::new(diameter, diameter)
+    }
+
+    fn layout(
+        &mut self,
+        _tree: &mut Tree,
+        _renderer: &Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
+        let diameter = Length::Fixed(self.size.diameter());
+        layout::atomic(limits, diameter, diameter)
+    }
 
     fn draw(
         &self,
-        _state: &(),
-        renderer: &Renderer,
+        _tree: &Tree,
+        renderer: &mut Renderer,
         theme: &Theme,
-        bounds: Rectangle,
+        _style: &renderer::Style,
+        layout: Layout<'_>,
         _cursor: mouse::Cursor,
-    ) -> Vec<Geometry> {
+        _viewport: &Rectangle,
+    ) {
+        let bounds = layout.bounds();
         let colours = colours(&Tokens::of(theme));
-        let width = self.size.stroke();
-        let mut frame = Frame::new(renderer, bounds.size());
-        let center = frame.center();
-        let radius = (bounds.width.min(bounds.height) - width) / 2.0;
-
-        frame.stroke(
-            &Path::circle(center, radius),
-            Stroke::default()
-                .with_color(colours.track)
-                .with_width(width),
-        );
-
-        let (start_angle, end_angle) = arc_angles(self.phase);
-        let arc = Path::new(|builder| {
-            builder.arc(Arc {
-                center,
-                radius,
-                start_angle,
-                end_angle,
-            });
-        });
-        frame.stroke(
-            &arc,
-            Stroke::default()
-                .with_color(colours.arc)
-                .with_width(width)
-                .with_line_cap(LineCap::Round),
-        );
-
-        vec![frame.into_geometry()]
+        let index = self.size.index();
+        renderer.draw_svg(image(&IMAGES.track[index], colours.track), bounds, bounds);
+        let Some(arc) = IMAGES.arc[index].get(frame(self.phase)) else {
+            return;
+        };
+        renderer.draw_svg(image(arc, colours.arc), bounds, bounds);
     }
 }
 
 impl<'a, Message: 'a> From<Spinner> for Element<'a, Message> {
     fn from(spinner: Spinner) -> Self {
-        let diameter = Length::Fixed(spinner.size.diameter());
-        canvas::Canvas::new(spinner)
-            .width(diameter)
-            .height(diameter)
-            .into()
+        Element::new(spinner)
     }
 }
 
@@ -219,6 +295,76 @@ mod tests {
 
         let (quarter, _) = arc_angles(0.25);
         assert!(quarter.0.abs() < EPSILON);
+    }
+
+    #[test]
+    fn frames_round_the_phase_to_the_nearest_step() {
+        assert_eq!(frame(0.0), 0);
+        assert_eq!(frame(0.5), FRAMES / 2);
+        assert_eq!(frame(1.0 / FRAMES as f32 * 0.4), 0);
+        assert_eq!(frame(1.0 / FRAMES as f32 * 0.6), 1);
+        assert_eq!(frame(0.999), 0);
+        assert_eq!(frame(f32::NAN), 0);
+        assert!((0..1000).all(|i| frame(i as f32 / 997.0) < FRAMES));
+    }
+
+    #[test]
+    fn svgs_fit_the_diameter_and_stroke() {
+        for size in Size::ALL {
+            let d = size.diameter();
+            for markup in [track_svg(size), arc_svg(size, 0.4)] {
+                assert!(
+                    markup.contains(&format!(r#"viewBox="0 0 {d} {d}""#)),
+                    "{markup}"
+                );
+                assert!(markup.contains(&format!(r#"stroke-width="{}""#, size.stroke())));
+            }
+            let (centre, radius, stroke) = geometry(size);
+            assert!((centre + radius + stroke / 2.0 - d).abs() < EPSILON);
+        }
+    }
+
+    #[test]
+    fn arc_starts_at_the_top_at_phase_zero_and_runs_clockwise() {
+        let markup = arc_svg(Size::Lg, 0.0);
+        let (centre, radius, _) = geometry(Size::Lg);
+        assert!(
+            markup.contains(&format!("M {centre:.3} {:.3}", centre - radius)),
+            "{markup}"
+        );
+        assert!(markup.contains(r#"stroke-linecap="round""#));
+        assert!(markup.contains(" 0 0 1 "), "short clockwise arc: {markup}");
+    }
+
+    #[test]
+    fn half_a_turn_starts_the_arc_at_the_bottom() {
+        let markup = arc_svg(Size::Md, 0.5);
+        let (centre, radius, _) = geometry(Size::Md);
+        assert!(
+            markup.contains(&format!("M {centre:.3} {:.3}", centre + radius)),
+            "{markup}"
+        );
+    }
+
+    #[test]
+    fn every_frame_has_its_own_image() {
+        for arcs in &IMAGES.arc {
+            assert_eq!(arcs.len(), FRAMES);
+            let ids: std::collections::HashSet<_> = arcs.iter().map(Handle::id).collect();
+            assert_eq!(ids.len(), FRAMES);
+        }
+    }
+
+    #[test]
+    fn spinner_is_sized_to_its_diameter() {
+        for size in Size::ALL {
+            let s = spinner(0.0).size(size);
+            let d = Length::Fixed(size.diameter());
+            assert_eq!(
+                Widget::<(), Theme, Renderer>::size(&s),
+                iced::Size::new(d, d)
+            );
+        }
     }
 
     #[test]

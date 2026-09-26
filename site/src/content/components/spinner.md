@@ -23,3 +23,5 @@ api:
 The spinner has no clock of its own. Your app keeps the phase in its state and moves it on with `advance` each frame, which keeps the spinner a pure function of state and makes it easy to test.
 
 Subscribe to `iced::window::frames()` only while something is loading, and return `Subscription::none()` otherwise. That way an idle app does not redraw at all.
+
+Several spinners can share one phase, as the rows of a job list do. The arc steps through `FRAMES` fixed positions per turn and is drawn as a cached image, so any number of spinners on screen stay cheap and look the same on every renderer, including WebGL in the browser.
