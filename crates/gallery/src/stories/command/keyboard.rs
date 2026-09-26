@@ -65,7 +65,7 @@ impl Example {
         let Some(event) = event else {
             return;
         };
-        if let Some(Output::Run(id)) = self.command.update(event) {
+        if let Some(Output::Activated(id)) = self.command.update(event) {
             self.last_run = Some(id);
         }
     }

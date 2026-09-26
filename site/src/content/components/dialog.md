@@ -32,6 +32,8 @@ api:
     description: "The maximum width: Sm (384), Md (512, the default) or Lg (640). The dialog shrinks to fit smaller windows."
   - name: ".keymap(Keymap<Action>)"
     description: "Replaces the default shortcuts."
+  - name: ".pass_through(chords)"
+    description: "Chords the open dialog lets through to keys::subscription, such as the shortcut that toggles a command palette. Every other key press stops at the dialog."
   - name: ".id(id)"
     description: "The surface's widget id, which scopes focus. Give nested dialogs different ids."
   - name: "alert_dialog(base, title, description)"
@@ -54,7 +56,9 @@ Wrap the root of your view in `dialog`, so the scrim covers the whole window. Wh
 
 Use a dialog for a short task that needs attention before people go back to what they were doing. For a destructive confirmation, use `alert_dialog`: it has no close button and ignores clicks on the scrim, so the only ways out are Cancel, Escape or the destructive action. Turn Escape off with `.dismiss_on_escape(false)` when even that is too easy.
 
-The dialog handles its own keys, so it needs no subscription. When it opens, it focuses its first text field and unfocuses anything underneath. Tab and Shift+Tab then move between the text fields inside it and wrap at either end, so focus never leaves the dialog. Keys the dialog does not use still reach `keys::subscription`, so app-wide shortcuts keep working.
+The dialog handles its own keys, so it needs no subscription. When it opens, it focuses its first text field and unfocuses anything underneath. Tab and Shift+Tab then move between the text fields inside it and wrap at either end, so focus never leaves the dialog. It captures every key press its content leaves, so app-wide shortcuts from `keys::subscription` cannot change tabs, sliders or menus behind the scrim. Let a chosen shortcut through with `.pass_through(...)`.
+
+Menus, comboboxes and command lists inside a dialog get keys and clicks first. Escape or a click on the scrim closes an open menu or list and leaves the dialog open; the next one closes the dialog. The [command palette](../command/) example puts a command list in a dialog.
 
 Some limits come from iced 0.14 itself:
 

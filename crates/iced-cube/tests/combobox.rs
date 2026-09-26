@@ -3,6 +3,7 @@
 use iced::keyboard::key::Named;
 use iced::{Element, Point, widget};
 use iced_cube::forms::combobox::{Event, State, combobox};
+use iced_cube::primitives::input::Size;
 use iced_test::simulator::{Simulator, click, simulator};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -83,7 +84,10 @@ fn arrows_and_enter_choose_a_suggestion() {
     let _ = ui.tap_key(Named::Enter);
 
     let events = events(ui);
-    assert_eq!(events, [Event::Next, Event::Next, Event::Confirm]);
+    assert_eq!(
+        events,
+        [Event::Next, Event::Next, Event::ActivateHighlighted]
+    );
     assert_eq!(apply(&mut state, events), Some("Blueberry"));
     assert!(!state.is_open());
 
@@ -120,6 +124,61 @@ fn clicking_outside_closes_the_list() {
 }
 
 #[test]
+fn clicking_outside_a_focused_field_closes_the_list_once() {
+    let mut state = State::new(FRUITS);
+    let _ = state.update(Event::Open);
+
+    let mut ui = simulator(view(&state));
+    ui.click(field_id()).expect("field is rendered");
+    ui.point_at(Point::new(600.0, 600.0));
+    let _ = ui.simulate(click());
+    let position = Point::new(600.0, 600.0);
+    let _ = ui.simulate([iced::Event::Mouse(iced::mouse::Event::CursorMoved {
+        position,
+    })]);
+
+    assert_eq!(events(ui), [Event::Close]);
+}
+
+#[test]
+fn the_list_matches_the_field_width_and_opens_below_it() {
+    let mut state = State::new(FRUITS);
+    let _ = state.update(Event::Open);
+    let element: Element<'_, Message> = combobox(&state)
+        .id(field_id())
+        .width(300)
+        .on_event(Message::Fruit)
+        .into();
+    let mut ui = simulator(element);
+    let field = ui.find(field_id()).expect("field is rendered").bounds();
+    let apple = ui.find("Apple").expect("list is open").bounds();
+    assert!(apple.y > field.y + field.height);
+    assert!(apple.x > field.x && apple.x < field.x + 30.0);
+}
+
+#[test]
+fn sizes_follow_the_input_sizes() {
+    let state = State::new(FRUITS);
+    let heights: Vec<f32> = Size::ALL
+        .iter()
+        .map(|&size| {
+            let element: Element<'_, Message> = combobox(&state)
+                .id(field_id())
+                .size(size)
+                .on_event(Message::Fruit)
+                .into();
+            simulator(element)
+                .find(field_id())
+                .expect("field is rendered")
+                .bounds()
+                .height
+        })
+        .collect();
+    let expected: Vec<f32> = Size::ALL.iter().map(|size| size.metrics().height).collect();
+    assert_eq!(heights, expected);
+}
+
+#[test]
 fn clicking_a_suggestion_chooses_it() {
     let mut state = State::new(FRUITS);
     let _ = state.update(Event::Open);
@@ -128,7 +187,7 @@ fn clicking_a_suggestion_chooses_it() {
     ui.click("Cherry").expect("suggestion is rendered");
 
     let events = events(ui);
-    assert!(events.contains(&Event::Pick(3)), "{events:?}");
+    assert!(events.contains(&Event::Activate(3)), "{events:?}");
     assert_eq!(apply(&mut state, events), Some("Cherry"));
 }
 

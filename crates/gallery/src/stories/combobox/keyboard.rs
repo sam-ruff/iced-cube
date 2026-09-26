@@ -51,6 +51,7 @@ impl Example {
         ]
         .spacing(12)
         .width(Length::Fixed(360.0))
+        .height(Length::Fill)
         .into()
     }
 }

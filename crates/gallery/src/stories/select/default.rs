@@ -1,5 +1,5 @@
-use iced::Element;
 use iced::widget::{column, text};
+use iced::{Element, Length};
 use iced_cube::forms::select;
 
 const TIMEZONES: &[&str] = &[
@@ -34,6 +34,7 @@ impl Example {
                 .on_select(Message::Selected),
         ]
         .spacing(8)
+        .height(Length::Fill)
         .into()
     }
 }

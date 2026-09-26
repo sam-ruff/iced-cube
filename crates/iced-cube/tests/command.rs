@@ -56,7 +56,7 @@ fn run(state: &mut State<&'static str>, events: Vec<Event<&'static str>>) -> Vec
     events
         .into_iter()
         .filter_map(|event| match state.update(event) {
-            Some(Output::Run(id)) => Some(id),
+            Some(Output::Activated(id)) => Some(id),
             _ => None,
         })
         .collect()
@@ -102,7 +102,10 @@ fn arrows_and_enter_run_the_highlighted_item() {
 
     let events = events(ui);
     assert!(
-        matches!(events.as_slice(), [Event::Next, Event::Next, Event::Run]),
+        matches!(
+            events.as_slice(),
+            [Event::Next, Event::Next, Event::ActivateHighlighted]
+        ),
         "{events:?}"
     );
     // The disabled calculator is skipped.
@@ -119,7 +122,7 @@ fn escape_clears_the_query() {
     let _ = ui.tap_key(Named::Escape);
 
     let events = events(ui);
-    assert!(matches!(events.as_slice(), [Event::Clear]), "{events:?}");
+    assert!(matches!(events.as_slice(), [Event::Close]), "{events:?}");
     for event in events {
         let _ = state.update(event);
     }

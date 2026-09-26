@@ -1,17 +1,29 @@
 //! A dropdown for choosing one value from a list.
+//!
+//! The select opens and closes its own list, so the app only handles the
+//! chosen value. The list floats on the shared
+//! [anchored layer](crate::overlay::anchored) in the
+//! [menu look](crate::overlay::menu), with a check mark on the selected
+//! option. Escape or a click outside closes it.
 
 use std::borrow::Cow;
 
+use iced::advanced::layout::{self, Layout};
+use iced::advanced::widget::{Operation, Tree, Widget, tree};
+use iced::advanced::{Clipboard, Shell, overlay, renderer};
 use iced::keyboard::key::Named;
-use iced::overlay::menu;
-use iced::widget::pick_list::{self, Handle, Status};
+use iced::widget::pick_list::{self, Status};
 use iced::widget::text::LineHeight;
-use iced::widget::{container, stack, svg};
-use iced::{Alignment, Background, Border, Color, Element, Length, Padding, Shadow, Theme, Vector};
+use iced::widget::{self, Column, row, svg, text};
+use iced::{
+    Alignment, Background, Border, Element, Event, Length, Rectangle, Renderer, Size, Theme,
+    Vector, mouse, touch,
+};
 
 use crate::icon::tinted;
-use crate::inert::inert;
 use crate::keys::{self, Chord, Keymap};
+use crate::overlay::anchored::{self, Align, Behaviour, Placement, Side};
+use crate::overlay::menu::{self, DISABLED_ICON_OPACITY, Parts, ROW_PADDING, RowStatus, Trailing};
 use crate::theme::{Tokens, fade, mix, radius, space, text_size};
 
 /// Height of the closed select in logical pixels.
@@ -96,64 +108,299 @@ where
     Message: Clone + 'a,
 {
     fn from(select: Select<'a, T, Message>) -> Self {
-        let enabled = select.is_enabled();
-        let placeholder = select.placeholder.unwrap_or_default();
-        let options = select.options;
-        let selected = select.selected;
+        let Select {
+            options,
+            selected,
+            placeholder,
+            width,
+            on_select,
+        } = select;
+        let enabled = on_select.is_some();
+        let label = selected.as_ref().map(ToString::to_string);
+        let has_value = label.is_some();
 
-        let list: Element<'a, Message> = match select.on_select {
-            Some(on_select) => field(options, selected, placeholder, on_select, true).into(),
-            None => inert(field(options, selected, placeholder, |_| (), false).into()),
+        let text_colour = move |theme: &Theme| {
+            let style = style(&Tokens::of(theme), Status::Active, enabled);
+            if has_value {
+                style.text_color
+            } else {
+                style.placeholder_color
+            }
         };
-
-        let chevron = tinted(crate::lucide!(ChevronDown), CHEVRON_SIZE, None).style(
-            move |theme: &Theme, _| svg::Style {
-                color: Some(style(&Tokens::of(theme), Status::Active, enabled).handle_color),
-            },
-        );
-
-        stack![
-            container(list).width(select.width),
-            container(chevron)
+        let chevron = tinted(crate::lucide!(ChevronDown), CHEVRON_SIZE, None)
+            .style(|theme: &Theme, _| svg::Style {
+                color: Some(chevron_colour(&Tokens::of(theme))),
+            })
+            .opacity(chevron_opacity(enabled));
+        let field = row![
+            text(label.or(placeholder).unwrap_or_default())
+                .size(text_size::SM)
+                .line_height(LineHeight::Absolute(LINE_HEIGHT.into()))
+                .wrapping(text::Wrapping::None)
                 .width(Length::Fill)
-                .height(Length::Fill)
-                .align_x(Alignment::End)
-                .align_y(Alignment::Center)
-                .padding(Padding::default().right(space::MD)),
+                .style(move |theme| text::Style {
+                    color: Some(text_colour(theme)),
+                }),
+            chevron,
         ]
-        .into()
+        .spacing(space::SM)
+        .align_y(Alignment::Center)
+        .padding([(HEIGHT - LINE_HEIGHT) / 2.0, space::MD])
+        .width(width)
+        .height(HEIGHT);
+
+        let rows = options.iter().map(|option| {
+            let is_selected = selected.as_ref() == Some(option);
+            option_row(option, is_selected, on_select.as_deref())
+        });
+        let list = menu::surface(Column::with_children(rows).width(Length::Fill))
+            .width(Length::Fill)
+            .into();
+
+        Element::new(Picker {
+            field: field.into(),
+            list,
+            enabled,
+            behaviour: Behaviour {
+                placement: Placement::new(Side::Bottom, Align::Start),
+                match_width: true,
+                closes_itself: true,
+                ..Behaviour::default()
+            },
+        })
     }
 }
 
-type PickList<'a, T, Message> =
-    iced::widget::PickList<'a, T, Cow<'a, [T]>, T, Message, Theme, iced::Renderer>;
-
-fn field<'a, T, Message>(
-    options: Cow<'a, [T]>,
-    selected: Option<T>,
-    placeholder: String,
-    on_select: impl Fn(T) -> Message + 'a,
-    enabled: bool,
-) -> PickList<'a, T, Message>
-where
-    T: ToString + PartialEq + Clone + 'a,
-    Message: Clone,
-{
-    let vertical = (HEIGHT - LINE_HEIGHT) / 2.0;
-    iced::widget::pick_list(options, selected, on_select)
-        .placeholder(placeholder)
+/// One option in the open list, highlighted under the pointer.
+fn option_row<'a, T: ToString + Clone, Message: Clone + 'a>(
+    option: &T,
+    selected: bool,
+    on_select: Option<&(dyn Fn(T) -> Message + 'a)>,
+) -> Element<'a, Message> {
+    let label = option.to_string();
+    let trailing = if selected {
+        Trailing::Check
+    } else {
+        Trailing::None
+    };
+    let parts = Parts {
+        trailing,
+        ..Parts::label(&label)
+    };
+    let row = widget::button(menu::content(parts, RowStatus::Idle, false))
+        .padding(ROW_PADDING)
         .width(Length::Fill)
-        .padding(Padding {
-            top: vertical,
-            bottom: vertical,
-            left: space::MD,
-            right: space::MD + CHEVRON_SIZE + space::SM,
-        })
-        .text_size(text_size::SM)
-        .text_line_height(LineHeight::Absolute(LINE_HEIGHT.into()))
-        .handle(Handle::None)
-        .style(move |theme, status| style(&Tokens::of(theme), status, enabled))
-        .menu_style(|theme| menu_style(&Tokens::of(theme)))
+        .on_press_maybe(on_select.map(|on_select| on_select(option.clone())))
+        .style(|theme, status| option_style(&Tokens::of(theme), status));
+    menu::inset(row)
+}
+
+/// An option row: the shared menu row, highlighted while hovered or pressed.
+pub fn option_style(tokens: &Tokens, status: widget::button::Status) -> widget::button::Style {
+    use widget::button::Status as Button;
+    let status = match status {
+        Button::Hovered | Button::Pressed => RowStatus::Highlighted,
+        Button::Active => RowStatus::Idle,
+        Button::Disabled => RowStatus::Disabled,
+    };
+    let row = menu::row_style(tokens, status, false);
+    widget::button::Style {
+        background: row.background.map(Background::Color),
+        text_color: row.text,
+        border: Border {
+            radius: radius::SM.into(),
+            ..Border::default()
+        },
+        ..widget::button::Style::default()
+    }
+}
+
+/// The colour of the chevron. It stays opaque; [`chevron_opacity`] fades
+/// it when the select is disabled.
+pub fn chevron_colour(tokens: &Tokens) -> iced::Color {
+    tokens.muted_foreground
+}
+
+/// The chevron's svg opacity. iced ignores the alpha of an svg tint, so a
+/// disabled chevron fades through its opacity instead.
+pub fn chevron_opacity(enabled: bool) -> f32 {
+    if enabled { 1.0 } else { DISABLED_ICON_OPACITY }
+}
+
+/// The select widget: draws the field and floats the list while open.
+struct Picker<'a, Message> {
+    field: Element<'a, Message>,
+    list: Element<'a, Message>,
+    enabled: bool,
+    behaviour: Behaviour<'a, Message>,
+}
+
+#[derive(Debug, Default)]
+struct PickerState {
+    panel: anchored::State,
+    hovered: bool,
+}
+
+impl<Message: Clone> Widget<Message, Theme, Renderer> for Picker<'_, Message> {
+    fn tag(&self) -> tree::Tag {
+        tree::Tag::of::<PickerState>()
+    }
+
+    fn state(&self) -> tree::State {
+        tree::State::new(PickerState::default())
+    }
+
+    fn children(&self) -> Vec<Tree> {
+        vec![Tree::new(&self.field), Tree::new(&self.list)]
+    }
+
+    fn diff(&self, tree: &mut Tree) {
+        tree.diff_children(&[&self.field, &self.list]);
+    }
+
+    fn size(&self) -> Size<Length> {
+        self.field.as_widget().size()
+    }
+
+    fn layout(
+        &mut self,
+        tree: &mut Tree,
+        renderer: &Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
+        self.field
+            .as_widget_mut()
+            .layout(&mut tree.children[0], renderer, limits)
+    }
+
+    fn draw(
+        &self,
+        tree: &Tree,
+        renderer: &mut Renderer,
+        theme: &Theme,
+        style: &renderer::Style,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+    ) {
+        let state = tree.state.downcast_ref::<PickerState>();
+        let bounds = layout.bounds();
+        let hovered = self.enabled && cursor.is_over(bounds);
+        let status = field_status(state.panel.open, hovered);
+        let field = self::style(&Tokens::of(theme), status, self.enabled);
+        <Renderer as renderer::Renderer>::fill_quad(
+            renderer,
+            renderer::Quad {
+                bounds,
+                border: field.border,
+                ..renderer::Quad::default()
+            },
+            field.background,
+        );
+        self.field.as_widget().draw(
+            &tree.children[0],
+            renderer,
+            theme,
+            style,
+            layout,
+            cursor,
+            viewport,
+        );
+    }
+
+    fn operate(
+        &mut self,
+        tree: &mut Tree,
+        layout: Layout<'_>,
+        renderer: &Renderer,
+        operation: &mut dyn Operation,
+    ) {
+        self.field
+            .as_widget_mut()
+            .operate(&mut tree.children[0], layout, renderer, operation);
+    }
+
+    fn update(
+        &mut self,
+        tree: &mut Tree,
+        event: &Event,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        _renderer: &Renderer,
+        _clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, Message>,
+        _viewport: &Rectangle,
+    ) {
+        if !self.enabled {
+            return;
+        }
+        let state = tree.state.downcast_mut::<PickerState>();
+        let over = cursor.is_over(layout.bounds());
+        if over != state.hovered {
+            state.hovered = over;
+            shell.request_redraw();
+        }
+        let pressed = matches!(
+            event,
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
+                | Event::Touch(touch::Event::FingerPressed { .. })
+        );
+        if pressed && over {
+            state.panel.open = !state.panel.open;
+            shell.capture_event();
+            shell.request_redraw();
+        }
+    }
+
+    fn mouse_interaction(
+        &self,
+        _tree: &Tree,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        _viewport: &Rectangle,
+        _renderer: &Renderer,
+    ) -> mouse::Interaction {
+        if self.enabled && cursor.is_over(layout.bounds()) {
+            mouse::Interaction::Pointer
+        } else {
+            mouse::Interaction::default()
+        }
+    }
+
+    fn overlay<'b>(
+        &'b mut self,
+        tree: &'b mut Tree,
+        layout: Layout<'b>,
+        _renderer: &Renderer,
+        _viewport: &Rectangle,
+        translation: Vector,
+    ) -> Option<overlay::Element<'b, Message, Theme, Renderer>> {
+        let Tree {
+            state, children, ..
+        } = tree;
+        let state = state.downcast_mut::<PickerState>();
+        if !self.enabled || !state.panel.open {
+            return None;
+        }
+        let list_tree = children.get_mut(1)?;
+        Some(anchored::floating(
+            &mut self.list,
+            list_tree,
+            &mut state.panel,
+            &self.behaviour,
+            layout.bounds() + translation,
+        ))
+    }
+}
+
+/// The field's status: opened while the list shows, hovered under the
+/// pointer, active otherwise.
+fn field_status(open: bool, hovered: bool) -> Status {
+    match (open, hovered) {
+        (true, is_hovered) => Status::Opened { is_hovered },
+        (false, true) => Status::Hovered,
+        (false, false) => Status::Active,
+    }
 }
 
 /// The iced pick list style for a status.
@@ -186,26 +433,6 @@ pub fn style(tokens: &Tokens, status: Status, enabled: bool) -> pick_list::Style
         border: Border {
             color: fade(tokens.border, 0.5),
             ..style.border
-        },
-    }
-}
-
-/// The style of the open menu.
-pub fn menu_style(tokens: &Tokens) -> menu::Style {
-    menu::Style {
-        background: Background::Color(tokens.background),
-        border: Border {
-            color: tokens.border,
-            width: 1.0,
-            radius: radius::MD.into(),
-        },
-        text_color: tokens.foreground,
-        selected_text_color: tokens.accent_foreground,
-        selected_background: Background::Color(tokens.accent),
-        shadow: Shadow {
-            color: fade(Color::BLACK, if tokens.is_dark { 0.5 } else { 0.1 }),
-            offset: Vector::new(0.0, 4.0),
-            blur_radius: 12.0,
         },
     }
 }
@@ -385,12 +612,49 @@ mod tests {
     }
 
     #[test]
-    fn menu_highlights_with_accent() {
+    fn options_highlight_with_the_menu_row_style() {
+        use widget::button::Status as Button;
         for theme in [light(), dark()] {
             let tokens = Tokens::of(&theme);
-            let menu = menu_style(&tokens);
-            assert_eq!(menu.selected_background, Background::Color(tokens.accent));
-            assert_eq!(menu.border.width, 1.0);
+            let idle = option_style(&tokens, Button::Active);
+            assert_eq!(idle.background, None);
+            assert_eq!(idle.text_color, tokens.foreground);
+            for status in [Button::Hovered, Button::Pressed] {
+                let highlighted = option_style(&tokens, status);
+                assert_eq!(
+                    highlighted.background,
+                    Some(Background::Color(tokens.accent))
+                );
+                assert_eq!(highlighted.text_color, tokens.accent_foreground);
+                assert_eq!(highlighted.border.radius, radius::SM.into());
+            }
+            let disabled = option_style(&tokens, Button::Disabled);
+            assert_eq!(disabled.text_color, tokens.muted_foreground);
         }
+    }
+
+    #[test]
+    fn field_status_follows_the_list_and_the_pointer() {
+        assert_eq!(field_status(false, false), Status::Active);
+        assert_eq!(field_status(false, true), Status::Hovered);
+        assert_eq!(
+            field_status(true, false),
+            Status::Opened { is_hovered: false }
+        );
+        assert_eq!(
+            field_status(true, true),
+            Status::Opened { is_hovered: true }
+        );
+    }
+
+    #[test]
+    fn disabled_chevron_fades_through_its_opacity() {
+        for theme in [light(), dark()] {
+            let tokens = Tokens::of(&theme);
+            assert_eq!(chevron_colour(&tokens), tokens.muted_foreground);
+            assert_eq!(chevron_colour(&tokens).a, 1.0, "svg tints ignore alpha");
+        }
+        assert_eq!(chevron_opacity(true), 1.0);
+        assert_eq!(chevron_opacity(false), DISABLED_ICON_OPACITY);
     }
 }

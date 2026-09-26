@@ -3,11 +3,15 @@
 //! [`State`] holds the groups of [`Item`]s, the query and the highlighted
 //! row. Typing ranks the items with [`score`], a case-insensitive fuzzy
 //! match that prefers prefixes and word starts, and checks each item's
-//! keywords too. [`State::update`] returns an [`Output`] when an item runs
-//! or the query changes.
+//! keywords too. [`State::update`] returns an [`Output`] when an item is
+//! activated or the query changes.
 //!
 //! While the search field has focus, the list handles its own keys through
-//! a [`Keymap`] of [`Action`]s; see [`default_keymap`].
+//! a [`Keymap`] of [`Action`]s, before anything around it sees them; see
+//! [`default_keymap`]. Inside a dialog or popover, Escape first clears the
+//! query, and only then returns [`Output::Closed`] for the app to close
+//! whatever holds the list. Rows use the shared
+//! [menu look](crate::overlay::menu).
 //!
 //! Results can also arrive from background work. [`subscription`] owns a
 //! bounded channel and emits [`Event::Ready`] with its [`Sender`] first.
@@ -43,7 +47,7 @@
 //!
 //!     fn update(&mut self, message: Message) {
 //!         let Message::Command(event) = message;
-//!         if let Some(Output::Run(id)) = self.command.update(event) {
+//!         if let Some(Output::Activated(id)) = self.command.update(event) {
 //!             println!("Run {id}");
 //!         }
 //!     }
@@ -55,6 +59,7 @@
 //! ```
 
 use std::fmt;
+use std::rc::Rc;
 
 use iced::futures::channel::mpsc;
 use iced::futures::{Stream, StreamExt, stream};
@@ -62,15 +67,14 @@ use iced::keyboard::key::Named;
 use iced::mouse::ScrollDelta;
 use iced::widget::text::LineHeight;
 use iced::widget::text_input::{self, Status};
-use iced::widget::{self, Column, column, container, mouse_area, row, stack, text};
+use iced::widget::{self, Column, column, container, mouse_area, stack, text};
 use iced::{Alignment, Background, Border, Color, Element, Length, Padding, Subscription, Theme};
 
 use crate::icon::{Glyph, tinted};
 use crate::keys::{self, Chord, Keymap};
-use crate::popup::{self, ROW_PADDING, scope};
+use crate::overlay::anchored::{anchored, surface_style};
+use crate::overlay::menu::{self, DISABLED_ICON_OPACITY, Parts, ROW_PADDING, RowStatus};
 use crate::theme::{Tokens, fade, space, text_size};
-
-pub use crate::popup::{RowStatus, row_style, surface_style};
 
 /// How many result batches a producer can send before it has to wait.
 pub const CHANNEL_CAPACITY: usize = 64;
@@ -316,13 +320,13 @@ pub enum Event<Id> {
     Previous,
     First,
     Last,
-    /// Runs the highlighted row.
-    Run,
-    /// Clears the query, or dismisses the list when it is already empty.
-    Clear,
+    /// Activates the highlighted row.
+    ActivateHighlighted,
+    /// Clears the query, or closes the list when it is already empty.
+    Close,
     /// Highlights a row, by its position in [`State::results`].
     Highlight(usize),
-    /// Runs a row, by its position in [`State::results`].
+    /// Activates a row, by its position in [`State::results`].
     Activate(usize),
     /// Scrolls the list by a number of rows, down when positive.
     Scroll(i32),
@@ -335,9 +339,10 @@ pub enum Output<Id> {
     /// The query changed. Start any background search for it here.
     Search(String),
     /// An item was chosen.
-    Run(Id),
-    /// Escape was pressed with an empty query.
-    Dismiss,
+    Activated(Id),
+    /// Close was pressed with an empty query: close whatever holds the
+    /// list, such as a dialog.
+    Closed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -457,12 +462,12 @@ impl<Id> State<Id> {
                 let last = (0..self.entries.len()).rev().find(|&p| self.is_enabled(p));
                 self.highlight(last);
             }
-            Event::Run => {
+            Event::ActivateHighlighted => {
                 let id = self.highlighted()?.id.clone();
-                return Some(Output::Run(id));
+                return Some(Output::Activated(id));
             }
-            Event::Clear if self.query.is_empty() => return Some(Output::Dismiss),
-            Event::Clear => return self.search(String::new()),
+            Event::Close if self.query.is_empty() => return Some(Output::Closed),
+            Event::Close => return self.search(String::new()),
             Event::Highlight(position) => {
                 if self.is_enabled(position) {
                     self.highlighted = Some(position);
@@ -474,7 +479,7 @@ impl<Id> State<Id> {
                 }
                 self.highlighted = Some(position);
                 let id = self.item_at(position)?.id.clone();
-                return Some(Output::Run(id));
+                return Some(Output::Activated(id));
             }
             Event::Scroll(rows) => {
                 let last = self.entries.len().saturating_sub(self.rows);
@@ -602,8 +607,8 @@ pub enum Action {
     Previous,
     First,
     Last,
-    Run,
-    Clear,
+    Activate,
+    Close,
 }
 
 impl Action {
@@ -616,8 +621,11 @@ impl Action {
             Action::Previous => movable.then_some(Event::Previous),
             Action::First => movable.then_some(Event::First),
             Action::Last => movable.then_some(Event::Last),
-            Action::Run => state.highlighted.is_some().then_some(Event::Run),
-            Action::Clear => Some(Event::Clear),
+            Action::Activate => state
+                .highlighted
+                .is_some()
+                .then_some(Event::ActivateHighlighted),
+            Action::Close => Some(Event::Close),
         }
     }
 }
@@ -628,8 +636,8 @@ impl keys::Action for Action {
         Action::Previous,
         Action::First,
         Action::Last,
-        Action::Run,
-        Action::Clear,
+        Action::Activate,
+        Action::Close,
     ];
 
     fn defaults() -> Keymap<Self> {
@@ -642,8 +650,8 @@ impl keys::Action for Action {
             Action::Previous => "Previous",
             Action::First => "First",
             Action::Last => "Last",
-            Action::Run => "Run",
-            Action::Clear => "Clear",
+            Action::Activate => "Activate",
+            Action::Close => "Close",
         }
     }
 
@@ -653,8 +661,8 @@ impl keys::Action for Action {
             Action::Previous => "Highlights the previous enabled result, wrapping at the start.",
             Action::First => "Highlights the first enabled result.",
             Action::Last => "Highlights the last enabled result.",
-            Action::Run => "Runs the highlighted result.",
-            Action::Clear => "Clears the query, or dismisses the list when the query is empty.",
+            Action::Activate => "Activates the highlighted result.",
+            Action::Close => "Clears the query, or closes the list when the query is empty.",
         }
     }
 }
@@ -667,8 +675,8 @@ impl keys::Action for Action {
 /// | `ArrowUp` | [`Action::Previous`] |
 /// | `Home` | [`Action::First`] |
 /// | `End` | [`Action::Last`] |
-/// | `Enter` | [`Action::Run`] |
-/// | `Escape` | [`Action::Clear`] |
+/// | `Enter` | [`Action::Activate`] |
+/// | `Escape` | [`Action::Close`] |
 ///
 /// The list handles these itself while its search field has focus, so
 /// Home and End move the highlight rather than the text cursor. Pass a
@@ -681,8 +689,8 @@ pub fn default_keymap() -> Keymap<Action> {
         .bind(Chord::named(Named::ArrowUp), Action::Previous)
         .bind(Chord::named(Named::Home), Action::First)
         .bind(Chord::named(Named::End), Action::Last)
-        .bind(Chord::named(Named::Enter), Action::Run)
-        .bind(Chord::named(Named::Escape), Action::Clear)
+        .bind(Chord::named(Named::Enter), Action::Activate)
+        .bind(Chord::named(Named::Escape), Action::Close)
 }
 
 /// Owns the results channel. Emits [`Event::Ready`] first, then batches.
@@ -816,16 +824,17 @@ where
             on_event,
         } = command;
 
+        let on_event: Option<Rc<dyn Fn(Event<Id>) -> Message + 'a>> = on_event.map(Rc::from);
         let list = list(state, &empty, loading, on_event.as_deref());
         let list = container(list).height(if height == Length::Shrink {
             Length::Shrink
         } else {
             Length::Fill
         });
-        let bindings = on_event
-            .as_ref()
-            .map(|on_event| popup::bindings(&keymap, |action| action.event(state).map(on_event)));
-        let on_input = on_event.map(|on_event| move |query| on_event(Event::Input(query)));
+        let on_input = on_event.clone().map(|on_event| {
+            Box::new(move |query| on_event(Event::Input(query)))
+                as Box<dyn Fn(String) -> Message + 'a>
+        });
 
         let surface = container(column![
             search_field(&placeholder, &state.query, id, on_input),
@@ -840,10 +849,18 @@ where
         .clip(true)
         .style(|theme| surface_style(&Tokens::of(theme)));
 
-        match bindings {
-            Some(bindings) => scope(surface).bindings(bindings).into(),
-            None => surface.into(),
-        }
+        let Some(on_event) = on_event else {
+            return surface.into();
+        };
+        anchored(surface)
+            .dismiss_keys([])
+            .on_key(move |key| {
+                keymap
+                    .resolve_event(key)
+                    .and_then(|action| action.event(state))
+                    .map(&*on_event)
+            })
+            .into()
     }
 }
 
@@ -873,11 +890,11 @@ fn search_field<'a, Message: Clone + 'a>(
         input = input.on_input(on_input);
     }
 
-    let icon = tinted(crate::lucide!(Search), ICON_SIZE, None).style(move |theme: &Theme, _| {
-        widget::svg::Style {
-            color: Some(icon_colour(&Tokens::of(theme), enabled)),
-        }
-    });
+    let icon = tinted(crate::lucide!(Search), menu::ICON_SIZE, None)
+        .style(move |theme: &Theme, _| widget::svg::Style {
+            color: Some(icon_colour(&Tokens::of(theme))),
+        })
+        .opacity(icon_opacity(enabled));
 
     stack![
         input,
@@ -912,42 +929,42 @@ fn list<'a, Id, Message: Clone + 'a>(
         let key = (entry.remote, entry.group);
         if previous != Some(key) {
             if previous.is_some() {
-                children.push(separator());
+                children.push(menu::separator());
             }
             if !group.label.is_empty() {
-                children.push(inset(group_label(&group.label)));
+                children.push(menu::group_label(&group.label, false));
             }
             previous = Some(key);
         }
 
-        let status = if item.disabled {
+        let enabled = on_event.is_some() && !item.disabled;
+        let status = if !enabled {
             RowStatus::Disabled
         } else if state.highlighted == Some(position) {
             RowStatus::Highlighted
         } else {
             RowStatus::Idle
         };
-        let messages = on_event.filter(|_| !item.disabled).map(|on_event| {
+        let messages = on_event.filter(|_| enabled).map(|on_event| {
             (
                 on_event(Event::Highlight(position)),
                 on_event(Event::Activate(position)),
             )
         });
-        children.push(inset(item_row(item, status, messages)));
+        let parts = Parts {
+            icon: item.icon,
+            hint: item.shortcut.as_deref(),
+            ..Parts::label(&item.label)
+        };
+        children.push(menu::item(parts, status, item.destructive, messages));
     }
 
     if children.is_empty() {
-        let message = if loading { SEARCHING } else { empty };
-        return container(muted(message.to_owned(), text_size::SM))
-            .padding([space::XL, space::SM])
-            .center_x(Length::Fill)
-            .into();
+        return menu::empty(if loading { SEARCHING } else { empty });
     }
     if loading {
-        children.push(inset(
-            container(muted(SEARCHING.to_owned(), text_size::SM))
-                .padding(ROW_PADDING)
-                .into(),
+        children.push(menu::inset(
+            container(muted(SEARCHING.to_owned(), text_size::SM)).padding(ROW_PADDING),
         ));
     }
 
@@ -967,83 +984,14 @@ fn list<'a, Id, Message: Clone + 'a>(
         .into()
 }
 
-fn item_row<'a, Id, Message: Clone + 'a>(
-    item: &'a Item<Id>,
-    status: RowStatus,
-    messages: Option<(Message, Message)>,
-) -> Element<'a, Message> {
-    let mut content = row![].spacing(space::SM).align_y(Alignment::Center);
-    if let Some(glyph) = item.icon {
-        content = content.push(
-            tinted(glyph, ICON_SIZE, None).style(move |theme: &Theme, _| widget::svg::Style {
-                color: Some(icon_colour(
-                    &Tokens::of(theme),
-                    status != RowStatus::Disabled,
-                )),
-            }),
-        );
-    }
-    content = content.push(
-        text(item.label.as_str())
-            .size(text_size::SM)
-            .width(Length::Fill),
-    );
-    if let Some(shortcut) = &item.shortcut {
-        content = content.push(muted(shortcut.clone(), text_size::XS));
-    }
-
-    let destructive = item.destructive;
-    let body = container(content)
-        .padding(ROW_PADDING)
-        .width(Length::Fill)
-        .style(move |theme| row_style(&Tokens::of(theme), status, destructive));
-
-    let Some((highlight, activate)) = messages else {
-        return body.into();
-    };
-    mouse_area(body)
-        .on_enter(highlight)
-        .on_press(activate)
-        .interaction(iced::mouse::Interaction::Pointer)
-        .into()
-}
-
-fn group_label<'a, Message: 'a>(label: &str) -> Element<'a, Message> {
-    container(
-        text(label.to_owned())
-            .size(text_size::XS)
-            .font(crate::theme::semibold())
-            .style(|theme: &Theme| text::Style {
-                color: Some(Tokens::of(theme).muted_foreground),
-            }),
-    )
-    .padding(ROW_PADDING)
-    .into()
-}
-
 fn muted<'a, Message: 'a>(content: String, size: f32) -> Element<'a, Message> {
     text(content)
         .size(size)
+        .line_height(LineHeight::Absolute(menu::LINE_HEIGHT.into()))
         .style(|theme: &Theme| text::Style {
             color: Some(Tokens::of(theme).muted_foreground),
         })
         .into()
-}
-
-/// Indents a row from the surface edge.
-fn inset<'a, Message: 'a>(content: Element<'a, Message>) -> Element<'a, Message> {
-    container(content).padding([0.0, space::XS]).into()
-}
-
-fn separator<'a, Message: 'a>() -> Element<'a, Message> {
-    container(
-        container(widget::space())
-            .width(Length::Fill)
-            .height(1)
-            .style(|theme| divider_style(&Tokens::of(theme))),
-    )
-    .padding([space::XS, 0.0])
-    .into()
 }
 
 /// The search field: borderless and transparent, inside the surface.
@@ -1076,13 +1024,16 @@ pub fn divider_style(tokens: &Tokens) -> container::Style {
     }
 }
 
-/// The colour of the search icon and item icons.
-pub fn icon_colour(tokens: &Tokens, enabled: bool) -> Color {
-    if enabled {
-        tokens.muted_foreground
-    } else {
-        fade(tokens.muted_foreground, 0.5)
-    }
+/// The colour of the search icon. It stays opaque; [`icon_opacity`] fades
+/// it when the list is disabled.
+pub fn icon_colour(tokens: &Tokens) -> Color {
+    tokens.muted_foreground
+}
+
+/// The search icon's svg opacity. iced ignores the alpha of an svg tint,
+/// so a disabled icon fades through its opacity instead.
+pub fn icon_opacity(enabled: bool) -> f32 {
+    if enabled { 1.0 } else { DISABLED_ICON_OPACITY }
 }
 
 #[cfg(test)]
@@ -1218,7 +1169,7 @@ mod tests {
         let _ = state.update(Event::Input("zzz".into()));
         assert!(state.is_empty());
         assert!(state.highlighted().is_none());
-        assert!(state.update(Event::Run).is_none());
+        assert!(state.update(Event::ActivateHighlighted).is_none());
         let _ = state.update(Event::Next);
         assert!(state.highlighted().is_none());
     }
@@ -1260,13 +1211,13 @@ mod tests {
         let mut state = sample();
         let _ = state.update(Event::Next);
         assert!(matches!(
-            state.update(Event::Run),
-            Some(Output::Run("emoji"))
+            state.update(Event::ActivateHighlighted),
+            Some(Output::Activated("emoji"))
         ));
 
         assert!(matches!(
             state.update(Event::Activate(4)),
-            Some(Output::Run("billing"))
+            Some(Output::Activated("billing"))
         ));
         assert_eq!(highlighted(&state), Some("billing"));
         assert!(state.update(Event::Activate(2)).is_none());
@@ -1286,10 +1237,10 @@ mod tests {
     fn clear_empties_the_query_then_dismisses() {
         let mut state = sample();
         let _ = state.update(Event::Input("bill".into()));
-        let output = state.update(Event::Clear);
+        let output = state.update(Event::Close);
         assert!(matches!(output, Some(Output::Search(query)) if query.is_empty()));
         assert_eq!(state.len(), 6);
-        assert!(matches!(state.update(Event::Clear), Some(Output::Dismiss)));
+        assert!(matches!(state.update(Event::Close), Some(Output::Closed)));
     }
 
     #[test]
@@ -1397,8 +1348,8 @@ mod tests {
         assert_eq!(press(&keymap, "ArrowUp"), Some(Action::Previous));
         assert_eq!(press(&keymap, "Home"), Some(Action::First));
         assert_eq!(press(&keymap, "End"), Some(Action::Last));
-        assert_eq!(press(&keymap, "Enter"), Some(Action::Run));
-        assert_eq!(press(&keymap, "Escape"), Some(Action::Clear));
+        assert_eq!(press(&keymap, "Enter"), Some(Action::Activate));
+        assert_eq!(press(&keymap, "Escape"), Some(Action::Close));
 
         let custom = keymap
             .bind("Ctrl+N".parse().unwrap(), Action::Next)
@@ -1414,8 +1365,11 @@ mod tests {
         for action in [Action::Next, Action::Previous, Action::First, Action::Last] {
             assert!(action.event(&state).is_some(), "{action:?}");
         }
-        assert!(matches!(Action::Run.event(&state), Some(Event::Run)));
-        assert!(matches!(Action::Clear.event(&state), Some(Event::Clear)));
+        assert!(matches!(
+            Action::Activate.event(&state),
+            Some(Event::ActivateHighlighted)
+        ));
+        assert!(matches!(Action::Close.event(&state), Some(Event::Close)));
 
         let _ = state.update(Event::Input("zzz".into()));
         for action in [
@@ -1423,11 +1377,11 @@ mod tests {
             Action::Previous,
             Action::First,
             Action::Last,
-            Action::Run,
+            Action::Activate,
         ] {
             assert!(action.event(&state).is_none(), "{action:?}");
         }
-        assert!(matches!(Action::Clear.event(&state), Some(Event::Clear)));
+        assert!(matches!(Action::Close.event(&state), Some(Event::Close)));
     }
 
     #[test]
@@ -1505,8 +1459,8 @@ mod tests {
                 divider_style(&tokens).background,
                 Some(Background::Color(tokens.border))
             );
-            assert_eq!(icon_colour(&tokens, true), tokens.muted_foreground);
-            assert!(icon_colour(&tokens, false).a < tokens.muted_foreground.a);
+            assert_eq!(icon_colour(&tokens), tokens.muted_foreground);
+            assert_eq!(icon_colour(&tokens).a, 1.0, "svg tints ignore alpha");
         }
     }
 }

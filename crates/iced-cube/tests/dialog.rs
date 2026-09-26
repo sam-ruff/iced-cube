@@ -2,7 +2,7 @@
 
 use iced::keyboard::{self, Key, Modifiers, key::Named};
 use iced::widget::{self, column, text_input};
-use iced::{Element, Event, Point, mouse};
+use iced::{Element, Event, Point, event, mouse};
 use iced_cube::button;
 use iced_cube::overlay::dialog::{self, CLOSE_BUTTON_ID, alert_dialog, dialog};
 use iced_test::selector::Candidate;
@@ -280,6 +280,37 @@ fn a_custom_keymap_replaces_the_defaults() {
     let mut ui = simulator(element);
     let _ = ui.tap_key(Named::Escape);
     assert!(messages(ui).is_empty());
+}
+
+#[test]
+fn an_open_dialog_captures_every_key_so_app_shortcuts_stop_there() {
+    let mut ui = simulator(view(OPEN));
+    for key in [Named::ArrowDown, Named::Enter, Named::Space, Named::F2] {
+        assert_eq!(ui.tap_key(key), event::Status::Captured, "{key:?}");
+    }
+    let _ = ui.tap_key(Key::Character("k".into()));
+    assert!(messages(ui).is_empty());
+
+    let closed = Options {
+        open: false,
+        ..OPEN
+    };
+    let mut ui = simulator(view(closed));
+    assert_eq!(ui.tap_key(Named::ArrowDown), event::Status::Ignored);
+}
+
+#[test]
+fn pass_through_chords_reach_the_app() {
+    let toggle = iced_cube::Chord::named(Named::F2);
+    let element: Element<'_, Message> = dialog(base())
+        .open(true)
+        .title("Palette")
+        .on_dismiss(Message::Dismiss)
+        .pass_through([toggle])
+        .into();
+    let mut ui = simulator(element);
+    assert_eq!(ui.tap_key(Named::F2), event::Status::Ignored);
+    assert_eq!(ui.tap_key(Named::F3), event::Status::Captured);
 }
 
 fn confirmation(escape: bool) -> Element<'static, Message> {

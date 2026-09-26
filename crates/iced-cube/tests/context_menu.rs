@@ -101,12 +101,36 @@ fn clicking_an_item_activates_it() {
     ui.click("Reload").expect("item is rendered");
     ui.click("Forward").expect("disabled item is rendered");
     let emitted = messages(ui);
-    assert_eq!(
-        emitted,
-        vec![Event::Menu(dropdown_menu::Event::Activate(RELOAD))]
+    let activate = Event::Menu(dropdown_menu::Event::Activate(RELOAD));
+    assert_eq!(emitted.last(), Some(&activate), "{emitted:?}");
+    assert!(
+        emitted
+            .iter()
+            .all(|event| !matches!(event, Event::Menu(dropdown_menu::Event::Activate(FORWARD))))
     );
-    assert_eq!(state.update(emitted[0]), Some(Output::Activated(RELOAD)));
+    assert_eq!(state.update(activate), Some(Output::Activated(RELOAD)));
     assert!(!state.is_open());
+}
+
+#[test]
+fn the_open_menu_resolves_its_own_keys() {
+    let mut state = state();
+    let _ = state.update(Event::OpenFromKeyboard);
+    let mut ui = simulator::simulator(view(&state));
+    let _ = ui.tap_key(Key::Named(Named::ArrowDown));
+    let _ = ui.tap_key(Key::Character("b".into()));
+    assert_eq!(
+        messages(ui),
+        vec![
+            Event::Menu(dropdown_menu::Event::Next),
+            Event::Menu(dropdown_menu::Event::Typeahead('b')),
+        ]
+    );
+
+    let closed = self::state();
+    let mut ui = simulator::simulator(view(&closed));
+    let _ = ui.tap_key(Key::Named(Named::ArrowDown));
+    assert!(messages(ui).is_empty(), "a closed menu claims no keys");
 }
 
 #[test]

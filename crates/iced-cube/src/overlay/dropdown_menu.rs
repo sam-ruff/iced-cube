@@ -6,30 +6,27 @@
 //! pointer and keyboard navigation and returns an [`Output`] when an item
 //! is chosen. The context menu uses the same model and rows.
 //!
-//! Keyboard shortcuts resolve through a [`Keymap`] of [`Action`]s; see
-//! [`default_keymap`], [`State::key_event`] and [`crate::keys`].
+//! An open menu resolves its own keys through a [`Keymap`] of [`Action`]s,
+//! so the app needs no subscription while it is open; see
+//! [`default_keymap`]. A closed menu claims no keys: it opens from its
+//! trigger, or from a chord the app binds to [`Action::Open`] and routes
+//! through [`State::key_event`]. Rows are drawn in the shared
+//! [menu look](crate::overlay::menu).
 
+use std::rc::Rc;
+
+use iced::Element;
 use iced::keyboard::{Key, key::Named};
-use iced::widget::text::LineHeight;
-use iced::widget::{self, column, container, mouse_area, row, svg, text};
-use iced::{Alignment, Background, Border, Color, Element, Length, Padding, Shadow, Theme};
+use iced::widget::column;
 
-use crate::icon::{Glyph, tinted};
+use crate::icon::Glyph;
 use crate::keys::{self, Chord, Keymap};
-use crate::overlay::anchored::{Align, Placement, Side, anchored, surface_style};
-use crate::theme::{Tokens, fade, radius, semibold, space, text_size};
+use crate::overlay::anchored::{Align, Placement, Side, anchored};
+use crate::overlay::menu::{self, Leading, Parts, RowStatus, Trailing};
+use crate::theme::space;
 
 /// Default menu width in logical pixels.
 pub const WIDTH: f32 = 224.0;
-
-const ROW_PADDING: Padding = Padding {
-    top: 6.0,
-    bottom: 6.0,
-    left: space::SM,
-    right: space::SM,
-};
-const LINE_HEIGHT: f32 = 20.0;
-const ICON_SIZE: f32 = 16.0;
 
 /// What an item does when chosen.
 #[derive(Debug, Clone, PartialEq)]
@@ -339,7 +336,9 @@ impl<Id: Copy + PartialEq> State<Id> {
     }
 
     /// Turns a key press into an event: first through `keymap`, then, while
-    /// the menu is open, as typeahead for a letter or digit.
+    /// the menu is open, as typeahead for a letter or digit. An open menu
+    /// does this itself; an app calls it for a closed menu's
+    /// [`Action::Open`] chord.
     pub fn key_event(&self, keymap: &Keymap<Action>, key: &keys::Event) -> Option<Event<Id>> {
         if let Some(action) = keymap.resolve_event(key) {
             return action.event(self);
@@ -631,6 +630,8 @@ pub fn typeahead(key: &keys::Event) -> Option<char> {
 /// What a menu keyboard shortcut does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Action {
+    /// Opens a closed menu on its first item. Not bound by default.
+    Open,
     Next,
     Previous,
     First,
@@ -643,25 +644,31 @@ pub enum Action {
 
 impl Action {
     /// The [`Event`] this action sends to `state`, or `None` when it does
-    /// nothing in the current state. Moving and activating also open a
-    /// closed menu.
+    /// nothing: only [`Action::Open`] works while the menu is closed, and
+    /// only the others while it is open. [`Action::Close`] closes just the
+    /// innermost submenu when one is open.
     pub fn event<Id: Copy + PartialEq>(self, state: &State<Id>) -> Option<Event<Id>> {
-        let open = state.is_open();
+        if !state.is_open() {
+            return (self == Action::Open).then_some(Event::First);
+        }
         match self {
+            Action::Open => None,
             Action::Next => Some(Event::Next),
             Action::Previous => Some(Event::Previous),
             Action::First => Some(Event::First),
             Action::Last => Some(Event::Last),
             Action::Activate => Some(Event::ActivateHighlighted),
-            Action::Close => open.then_some(Event::Close),
-            Action::OpenSubmenu => open.then_some(Event::OpenSubmenu),
-            Action::CloseSubmenu => open.then_some(Event::CloseSubmenu),
+            Action::Close if state.depth() > 1 => Some(Event::CloseSubmenu),
+            Action::Close => Some(Event::Close),
+            Action::OpenSubmenu => Some(Event::OpenSubmenu),
+            Action::CloseSubmenu => Some(Event::CloseSubmenu),
         }
     }
 }
 
 impl keys::Action for Action {
     const ALL: &'static [Self] = &[
+        Action::Open,
         Action::Next,
         Action::Previous,
         Action::First,
@@ -678,6 +685,7 @@ impl keys::Action for Action {
 
     fn name(self) -> &'static str {
         match self {
+            Action::Open => "Open",
             Action::Next => "Next",
             Action::Previous => "Previous",
             Action::First => "First",
@@ -691,16 +699,13 @@ impl keys::Action for Action {
 
     fn description(self) -> &'static str {
         match self {
-            Action::Next => "Highlights the next enabled item, wrapping, or opens the menu.",
-            Action::Previous => {
-                "Highlights the previous enabled item, wrapping, or opens the menu on the last item."
-            }
+            Action::Open => "Opens the menu on its first item.",
+            Action::Next => "Highlights the next enabled item, wrapping.",
+            Action::Previous => "Highlights the previous enabled item, wrapping.",
             Action::First => "Highlights the first enabled item.",
             Action::Last => "Highlights the last enabled item.",
-            Action::Activate => {
-                "Chooses the highlighted item or opens its submenu, or opens the menu."
-            }
-            Action::Close => "Closes the menu.",
+            Action::Activate => "Chooses the highlighted item or opens its submenu.",
+            Action::Close => "Closes the innermost submenu, or the menu.",
             Action::OpenSubmenu => "Opens the highlighted submenu.",
             Action::CloseSubmenu => "Closes the innermost submenu.",
         }
@@ -720,11 +725,12 @@ impl keys::Action for Action {
 /// | `ArrowRight` | [`Action::OpenSubmenu`] |
 /// | `ArrowLeft` | [`Action::CloseSubmenu`] |
 ///
-/// Letters and digits jump to the next item starting with them; see
-/// [`State::key_event`]. Shortcuts are app-wide, so while the menu is
-/// closed the arrow keys, Enter and Space open it. An app with other
-/// keyboard-driven widgets should route keys to the menu only while it is
-/// the one in use, or unbind those chords.
+/// Letters and digits jump to the next item starting with them. The open
+/// menu handles all of these itself, before anything underneath sees
+/// them; pass a changed keymap with [`DropdownMenu::keymap`]. A closed
+/// menu claims none of them. [`Action::Open`] has no default chord
+/// because a menu usually belongs to one button; bind one when a menu
+/// deserves an app-wide shortcut.
 pub fn default_keymap() -> Keymap<Action> {
     Keymap::new()
         .bind(Chord::named(Named::ArrowDown), Action::Next)
@@ -744,6 +750,7 @@ pub struct DropdownMenu<'a, Id, Message> {
     trigger: Element<'a, Message>,
     placement: Placement,
     width: f32,
+    keymap: Keymap<Action>,
     on_event: Option<Box<dyn Fn(Event<Id>) -> Message + 'a>>,
 }
 
@@ -753,6 +760,7 @@ impl<Id: std::fmt::Debug, Message> std::fmt::Debug for DropdownMenu<'_, Id, Mess
             .field("state", self.state)
             .field("placement", &self.placement)
             .field("width", &self.width)
+            .field("keymap", &self.keymap)
             .finish_non_exhaustive()
     }
 }
@@ -771,6 +779,7 @@ pub fn dropdown_menu<'a, Id, Message>(
         trigger: trigger.into(),
         placement: Placement::new(Side::Bottom, Align::Start),
         width: WIDTH,
+        keymap: default_keymap(),
         on_event: None,
     }
 }
@@ -800,6 +809,12 @@ impl<'a, Id, Message> DropdownMenu<'a, Id, Message> {
         self
     }
 
+    /// Replaces the [`default_keymap`] the open menu resolves its keys with.
+    pub fn keymap(mut self, keymap: Keymap<Action>) -> Self {
+        self.keymap = keymap;
+        self
+    }
+
     pub fn on_event(mut self, on_event: impl Fn(Event<Id>) -> Message + 'a) -> Self {
         self.on_event = Some(Box::new(on_event));
         self
@@ -817,15 +832,24 @@ where
             trigger,
             placement,
             width,
+            keymap,
             on_event,
         } = menu;
-        let on_event = on_event.as_deref();
-        let panel = state.is_open().then(|| panel(state, on_event, width));
-        let anchored = anchored(trigger).content(panel).placement(placement);
-        match on_event {
-            Some(on_event) => anchored.on_dismiss(on_event(Event::Close)).into(),
-            None => anchored.into(),
-        }
+        let on_event: Option<Rc<dyn Fn(Event<Id>) -> Message + 'a>> = on_event.map(Rc::from);
+        let panel = state
+            .is_open()
+            .then(|| panel(state, on_event.as_deref(), width));
+        let anchored = anchored(trigger)
+            .content(panel)
+            .placement(placement)
+            .dismiss_keys([]);
+        let Some(on_event) = on_event.filter(|_| state.is_open()) else {
+            return anchored.into();
+        };
+        anchored
+            .on_dismiss(on_event(Event::Close))
+            .on_key(move |key| state.key_event(&keymap, key).map(&*on_event))
+            .into()
     }
 }
 
@@ -867,8 +891,8 @@ where
         .iter()
         .enumerate()
         .map(|(index, entry)| match entry {
-            Entry::Separator => separator_line(),
-            Entry::Label(label) => label_row(label, indented),
+            Entry::Separator => menu::separator(),
+            Entry::Label(label) => menu::group_label(label, indented),
             Entry::Item(item) => {
                 let is_highlighted = highlighted == Some(index);
                 let row = item_row(item, is_highlighted, indented, on_event);
@@ -876,132 +900,21 @@ where
                 else {
                     return row;
                 };
-                let submenu = anchored(row)
+                // The root menu dismisses everything, so a submenu lets
+                // outside presses through to it.
+                anchored(row)
                     .content(Some(level(state, children, depth + 1, on_event, width)))
                     .placement(
                         Placement::new(Side::Right, Align::Start)
                             .gap(space::XS)
                             .offset(-(space::XS + 1.0)),
-                    );
-                match on_event {
-                    Some(on_event) => submenu.on_dismiss(on_event(Event::CloseSubmenu)).into(),
-                    None => submenu.into(),
-                }
+                    )
+                    .pass_through(true)
+                    .into()
             }
         });
 
-    container(column(rows).width(width))
-        .padding([space::XS, 0.0])
-        .style(|theme| surface_style(&Tokens::of(theme)))
-        .into()
-}
-
-/// How a row is drawn.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub enum RowStatus {
-    #[default]
-    Idle,
-    Highlighted,
-    Disabled,
-}
-
-impl RowStatus {
-    pub const ALL: [RowStatus; 3] = [RowStatus::Idle, RowStatus::Highlighted, RowStatus::Disabled];
-}
-
-/// The colours of one menu row.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct RowStyle {
-    pub background: Option<Color>,
-    pub text: Color,
-    /// The leading icon.
-    pub icon: Color,
-    /// The shortcut hint.
-    pub hint: Color,
-}
-
-/// Resolves a row's colours from the theme.
-pub fn row_style(tokens: &Tokens, status: RowStatus, destructive: bool) -> RowStyle {
-    match (status, destructive) {
-        (RowStatus::Disabled, _) => RowStyle {
-            background: None,
-            text: tokens.muted_foreground,
-            icon: fade(tokens.muted_foreground, 0.5),
-            hint: fade(tokens.muted_foreground, 0.5),
-        },
-        (RowStatus::Idle, false) => RowStyle {
-            background: None,
-            text: tokens.foreground,
-            icon: tokens.muted_foreground,
-            hint: tokens.muted_foreground,
-        },
-        (RowStatus::Highlighted, false) => RowStyle {
-            background: Some(tokens.accent),
-            text: tokens.accent_foreground,
-            icon: tokens.muted_foreground,
-            hint: tokens.muted_foreground,
-        },
-        (RowStatus::Idle, true) => RowStyle {
-            background: None,
-            text: tokens.destructive,
-            icon: tokens.destructive,
-            hint: tokens.muted_foreground,
-        },
-        (RowStatus::Highlighted, true) => RowStyle {
-            background: Some(fade(
-                tokens.destructive,
-                if tokens.is_dark { 0.2 } else { 0.1 },
-            )),
-            text: tokens.destructive,
-            icon: tokens.destructive,
-            hint: tokens.muted_foreground,
-        },
-    }
-}
-
-/// The group label style.
-pub fn label_style(tokens: &Tokens) -> text::Style {
-    text::Style {
-        color: Some(tokens.muted_foreground),
-    }
-}
-
-/// The separator line.
-pub fn separator_style(tokens: &Tokens) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(tokens.border)),
-        ..container::Style::default()
-    }
-}
-
-/// Space before a label in a menu with check marks, so it lines up with
-/// the item labels.
-const INDICATOR_WIDTH: f32 = ICON_SIZE + space::SM;
-
-fn label_row<'a, Message: 'a>(label: &'a str, indented: bool) -> Element<'a, Message> {
-    let left = ROW_PADDING.left + if indented { INDICATOR_WIDTH } else { 0.0 };
-    inset(
-        container(
-            text(label)
-                .size(text_size::XS)
-                .line_height(LineHeight::Absolute(16.0.into()))
-                .font(semibold())
-                .style(|theme| label_style(&Tokens::of(theme))),
-        )
-        .padding(ROW_PADDING.left(left))
-        .width(Length::Fill),
-    )
-}
-
-fn separator_line<'a, Message: 'a>() -> Element<'a, Message> {
-    container(
-        container(widget::space())
-            .width(Length::Fill)
-            .height(1)
-            .style(|theme| separator_style(&Tokens::of(theme))),
-    )
-    .padding([space::XS, 0.0])
-    .into()
+    menu::surface(column(rows).width(width)).into()
 }
 
 fn item_row<'a, Id, Message>(
@@ -1020,122 +933,38 @@ where
         (true, true) => RowStatus::Highlighted,
         (true, false) => RowStatus::Idle,
     };
-    let destructive = item.destructive;
-    let colours = move |theme: &Theme| row_style(&Tokens::of(theme), status, destructive);
-
-    let mut content = row![].spacing(space::SM).align_y(Alignment::Center);
-    if indented {
-        content = content.push(indicator(&item.kind, colours));
-    }
-    if let Some(glyph) = item.icon {
-        content = content.push(
-            tinted(glyph, ICON_SIZE, None).style(move |theme: &Theme, _| svg::Style {
-                color: Some(colours(theme).icon),
-            }),
-        );
-    }
-    content = content.push(
-        text(item.label.as_str())
-            .size(text_size::SM)
-            .line_height(LineHeight::Absolute(LINE_HEIGHT.into()))
-            .width(Length::Fill),
-    );
-    if let Some(hint) = &item.shortcut {
-        content =
-            content.push(
-                text(hint.as_str())
-                    .size(text_size::XS)
-                    .style(move |theme| text::Style {
-                        color: Some(colours(theme).hint),
-                    }),
-            );
-    }
-    if item.submenu().is_some() {
-        content = content.push(tinted(crate::lucide!(ChevronRight), ICON_SIZE, None).style(
-            move |theme: &Theme, _| svg::Style {
-                color: Some(colours(theme).text),
-            },
-        ));
-    }
-
-    let button = widget::button(content)
-        .width(Length::Fill)
-        .padding(ROW_PADDING)
-        .on_press_maybe(enabled.map(|on_event| on_event(Event::Activate(item.id))))
-        .style(move |theme, _| {
-            let colours = colours(theme);
-            widget::button::Style {
-                background: colours.background.map(Background::Color),
-                text_color: colours.text,
-                border: Border {
-                    radius: radius::SM.into(),
-                    ..Border::default()
-                },
-                shadow: Shadow::default(),
-                snap: true,
-            }
-        });
-
-    let row: Element<'a, Message> = match enabled {
-        Some(on_event) => mouse_area(button)
-            .on_enter(on_event(Event::Highlight(item.id)))
-            .into(),
-        None => button.into(),
+    let leading = match (&item.kind, indented) {
+        (_, false) => Leading::None,
+        (Kind::Checkbox(true), true) => Leading::Check,
+        (Kind::Radio(true), true) => Leading::Dot,
+        (_, true) => Leading::Empty,
     };
-    inset(row)
-}
-
-/// The check mark or dot in front of checkbox and radio items.
-fn indicator<'a, Id, Message: 'a>(
-    kind: &Kind<Id>,
-    colours: impl Fn(&Theme) -> RowStyle + Copy + 'a,
-) -> Element<'a, Message> {
-    let slot = |content: Element<'a, Message>| -> Element<'a, Message> {
-        container(content)
-            .center_x(ICON_SIZE)
-            .center_y(ICON_SIZE)
-            .into()
+    let trailing = if item.submenu().is_some() {
+        Trailing::Chevron
+    } else {
+        Trailing::None
     };
-    match kind {
-        Kind::Checkbox(true) => slot(
-            tinted(crate::lucide!(Check), ICON_SIZE, None)
-                .style(move |theme: &Theme, _| svg::Style {
-                    color: Some(colours(theme).text),
-                })
-                .into(),
-        ),
-        Kind::Radio(true) => slot(
-            container(widget::space())
-                .width(8)
-                .height(8)
-                .style(move |theme| container::Style {
-                    background: Some(Background::Color(colours(theme).text)),
-                    border: Border {
-                        radius: radius::FULL.into(),
-                        ..Border::default()
-                    },
-                    ..container::Style::default()
-                })
-                .into(),
-        ),
-        _ => slot(widget::space().into()),
-    }
-}
-
-/// Rows sit inside the panel's horizontal padding; separators do not, so
-/// they run the full width.
-fn inset<'a, Message: 'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
-    container(content)
-        .padding([0.0, space::XS])
-        .width(Length::Fill)
-        .into()
+    let parts = Parts {
+        icon: item.icon,
+        hint: item.shortcut.as_deref(),
+        leading,
+        trailing,
+        ..Parts::label(&item.label)
+    };
+    let messages = enabled.map(|on_event| {
+        (
+            on_event(Event::Highlight(item.id)),
+            on_event(Event::Activate(item.id)),
+        )
+    });
+    menu::item(parts, status, item.destructive, messages)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::theme::{dark, light};
     use iced::keyboard::Modifiers;
+    use iced::widget::text;
 
     const COPY: u8 = 1;
     const PASTE: u8 = 2;
@@ -1528,9 +1357,19 @@ mod tests {
         let keymap = default_keymap();
         let closed = state();
         let down = key(Key::Named(Named::ArrowDown), Modifiers::empty());
+        let enter = key(Key::Named(Named::Enter), Modifiers::empty());
         let letter = key(character("d"), Modifiers::empty());
-        assert_eq!(closed.key_event(&keymap, &down), Some(Event::Next));
+        assert_eq!(
+            closed.key_event(&keymap, &down),
+            None,
+            "closed menus claim no keys"
+        );
+        assert_eq!(closed.key_event(&keymap, &enter), None);
         assert_eq!(closed.key_event(&keymap, &letter), None);
+
+        let bound = default_keymap().bind(Chord::named(Named::F2), Action::Open);
+        let f2 = key(Key::Named(Named::F2), Modifiers::empty());
+        assert_eq!(closed.key_event(&bound, &f2), Some(Event::First));
 
         let open = open();
         assert_eq!(
@@ -1560,7 +1399,8 @@ mod tests {
         assert_eq!(press(&keymap, "ArrowLeft"), Some(Action::CloseSubmenu));
         assert_eq!(press(&keymap, "Tab"), None);
         for action in <Action as keys::Action>::ALL {
-            assert!(!keymap.chords(action).is_empty(), "{action:?}");
+            let bound = !keymap.chords(action).is_empty();
+            assert_eq!(bound, *action != Action::Open, "{action:?}");
         }
         assert_eq!(Keymap::<Action>::defaults(), keymap);
     }
@@ -1576,24 +1416,48 @@ mod tests {
     }
 
     #[test]
-    fn actions_map_to_events() {
+    fn a_closed_menu_only_answers_open() {
         let closed = state();
-        assert_eq!(Action::Next.event(&closed), Some(Event::Next));
-        assert_eq!(Action::Previous.event(&closed), Some(Event::Previous));
-        assert_eq!(Action::First.event(&closed), Some(Event::First));
-        assert_eq!(Action::Last.event(&closed), Some(Event::Last));
+        assert_eq!(Action::Open.event(&closed), Some(Event::First));
+        for &action in <Action as keys::Action>::ALL {
+            if action != Action::Open {
+                assert_eq!(action.event(&closed), None, "{action:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn an_open_menu_maps_every_action_but_open() {
+        let open = open();
+        assert_eq!(Action::Open.event(&open), None);
+        assert_eq!(Action::Next.event(&open), Some(Event::Next));
+        assert_eq!(Action::Previous.event(&open), Some(Event::Previous));
+        assert_eq!(Action::First.event(&open), Some(Event::First));
+        assert_eq!(Action::Last.event(&open), Some(Event::Last));
         assert_eq!(
-            Action::Activate.event(&closed),
+            Action::Activate.event(&open),
             Some(Event::ActivateHighlighted)
         );
-        assert_eq!(Action::Close.event(&closed), None);
-        assert_eq!(Action::OpenSubmenu.event(&closed), None);
-        assert_eq!(Action::CloseSubmenu.event(&closed), None);
-
-        let open = open();
         assert_eq!(Action::Close.event(&open), Some(Event::Close));
         assert_eq!(Action::OpenSubmenu.event(&open), Some(Event::OpenSubmenu));
         assert_eq!(Action::CloseSubmenu.event(&open), Some(Event::CloseSubmenu));
+    }
+
+    #[test]
+    fn close_in_a_submenu_closes_only_the_submenu() {
+        let mut state = open();
+        let _ = state.update(Event::Highlight(SHARE));
+        assert_eq!(Action::Close.event(&state), Some(Event::CloseSubmenu));
+        let _ = state.update(Event::CloseSubmenu);
+        assert_eq!(Action::Close.event(&state), Some(Event::Close));
+    }
+
+    #[test]
+    fn every_action_has_a_name_and_a_sentence() {
+        for &action in <Action as keys::Action>::ALL {
+            assert!(!keys::Action::name(action).is_empty());
+            assert!(keys::Action::description(action).ends_with('.'));
+        }
     }
 
     #[test]
@@ -1602,6 +1466,7 @@ mod tests {
         let menu: DropdownMenu<'_, u8, ()> = dropdown_menu(&state, text("Open"));
         assert_eq!(menu.placement, Placement::new(Side::Bottom, Align::Start));
         assert_eq!(menu.width, WIDTH);
+        assert_eq!(menu.keymap, default_keymap());
         assert!(menu.on_event.is_none());
 
         let menu: DropdownMenu<'_, u8, ()> = dropdown_menu(&state, text("Open"))
@@ -1609,74 +1474,13 @@ mod tests {
             .align(Align::End)
             .gap(8.0)
             .width(300.0)
+            .keymap(Keymap::new())
             .on_event(|_| ());
         assert_eq!(menu.placement.side, Side::Top);
         assert_eq!(menu.placement.align, Align::End);
         assert_eq!(menu.placement.gap, 8.0);
         assert_eq!(menu.width, 300.0);
+        assert!(menu.keymap.is_empty());
         assert!(menu.on_event.is_some());
-    }
-
-    #[test]
-    fn highlighted_rows_use_the_accent_in_both_themes() {
-        for theme in [light(), dark()] {
-            let tokens = Tokens::of(&theme);
-            let idle = row_style(&tokens, RowStatus::Idle, false);
-            let highlighted = row_style(&tokens, RowStatus::Highlighted, false);
-            assert_eq!(idle.background, None);
-            assert_eq!(idle.text, tokens.foreground);
-            assert_eq!(highlighted.background, Some(tokens.accent));
-            assert_eq!(highlighted.text, tokens.accent_foreground);
-            assert_eq!(idle.icon, tokens.muted_foreground);
-            assert_eq!(idle.hint, tokens.muted_foreground);
-        }
-    }
-
-    #[test]
-    fn disabled_rows_are_muted_in_both_themes() {
-        for theme in [light(), dark()] {
-            let tokens = Tokens::of(&theme);
-            for destructive in [false, true] {
-                let style = row_style(&tokens, RowStatus::Disabled, destructive);
-                assert_eq!(style.background, None);
-                assert_eq!(style.text, tokens.muted_foreground);
-                assert!(style.icon.a < tokens.muted_foreground.a);
-            }
-        }
-    }
-
-    #[test]
-    fn destructive_rows_use_the_destructive_colour_in_every_status() {
-        for theme in [light(), dark()] {
-            let tokens = Tokens::of(&theme);
-            for status in [RowStatus::Idle, RowStatus::Highlighted] {
-                let style = row_style(&tokens, status, true);
-                assert_eq!(style.text, tokens.destructive);
-                assert_eq!(style.icon, tokens.destructive);
-            }
-            let highlighted = row_style(&tokens, RowStatus::Highlighted, true);
-            assert!(highlighted.background.is_some_and(|colour| colour.a < 1.0));
-        }
-    }
-
-    #[test]
-    fn every_status_resolves_distinctly() {
-        let tokens = Tokens::of(&light());
-        let styles = RowStatus::ALL.map(|status| row_style(&tokens, status, false));
-        for (i, a) in styles.iter().enumerate() {
-            assert!(styles[i + 1..].iter().all(|b| a != b));
-        }
-    }
-
-    #[test]
-    fn label_and_separator_styles() {
-        for theme in [light(), dark()] {
-            let tokens = Tokens::of(&theme);
-            assert_eq!(label_style(&tokens).color, Some(tokens.muted_foreground));
-            assert_eq!(
-                separator_style(&tokens).background,
-                Some(Background::Color(tokens.border))
-            );
-        }
     }
 }

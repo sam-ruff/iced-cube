@@ -68,8 +68,8 @@ impl Example {
                         .filter(|_| !query.trim().is_empty())
                         .map(|sender| Search { query, sender });
                 }
-                Some(Output::Run(id)) => self.last_run = Some(id),
-                Some(Output::Dismiss) | None => {}
+                Some(Output::Activated(id)) => self.last_run = Some(id),
+                Some(Output::Closed) | None => {}
             },
             Message::SearchFinished(query) => {
                 if self

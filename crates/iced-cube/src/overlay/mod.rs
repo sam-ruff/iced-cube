@@ -1,9 +1,13 @@
 //! Floating content: dialogs, tooltips, toasts, popovers and menus.
 
 #[cfg(any(
-    feature = "popover",
+    feature = "combobox",
+    feature = "command",
+    feature = "context-menu",
+    feature = "dialog",
     feature = "dropdown-menu",
-    feature = "context-menu"
+    feature = "popover",
+    feature = "select"
 ))]
 pub mod anchored;
 #[cfg(feature = "context-menu")]
@@ -12,6 +16,13 @@ pub mod context_menu;
 pub mod dialog;
 #[cfg(feature = "dropdown-menu")]
 pub mod dropdown_menu;
+#[cfg(any(
+    feature = "combobox",
+    feature = "command",
+    feature = "dropdown-menu",
+    feature = "select"
+))]
+pub mod menu;
 #[cfg(feature = "popover")]
 pub mod popover;
 #[cfg(feature = "toast")]

@@ -1,5 +1,5 @@
 use iced::widget::{column, container, text};
-use iced::{Alignment, Border, Element, Subscription};
+use iced::{Alignment, Border, Element, Length, Subscription};
 use iced_cube::context_menu::{self, Action, Event, State, context_menu};
 use iced_cube::dropdown_menu::{Output, group_label, item, radio_item, separator};
 use iced_cube::keys::{self, Keymap};
@@ -53,6 +53,8 @@ impl Example {
     pub fn update(&mut self, message: Message) {
         let event = match message {
             Message::Menu(event) => Some(event),
+            // The open menu takes its own keys, so only the opening chord
+            // arrives here.
             Message::Key(key) => self.menu.key_event(&self.keymap, &key),
         };
         match event.and_then(|event| self.menu.update(event)) {
@@ -85,10 +87,13 @@ impl Example {
         column![
             text("Shift+F10 or the Menu key opens the menu at the corner of the area.").size(14),
             text(&self.last).size(14),
-            context_menu(&self.menu, area).on_event(Message::Menu),
+            context_menu(&self.menu, area)
+                .keymap(self.keymap.clone())
+                .on_event(Message::Menu),
         ]
         .spacing(12)
         .width(480)
+        .height(Length::Fill)
         .into()
     }
 

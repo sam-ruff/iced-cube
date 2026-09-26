@@ -1,9 +1,9 @@
 #![cfg(feature = "dropdown-menu")]
 
-use iced::keyboard::{Key, Modifiers, key::Named};
-use iced::widget::{button, column, text};
-use iced::{Element, Point, event};
-use iced_cube::keys;
+use iced::keyboard::{Key, key::Named};
+use iced::widget::{button, column, container, text};
+use iced::{Element, Length, Point, event};
+use iced_cube::Chord;
 use iced_cube::overlay::dropdown_menu::{
     Event, Output, State, checkbox_item, default_keymap, dropdown_menu, group_label, item,
     separator, submenu,
@@ -20,6 +20,7 @@ const GRID: u8 = 6;
 #[derive(Debug, Clone, PartialEq)]
 enum Message {
     Menu(Event<u8>),
+    Other,
 }
 
 fn state() -> State<u8> {
@@ -51,30 +52,31 @@ fn view(state: &State<u8>) -> Element<'_, Message> {
         )
         .on_event(Message::Menu),
         text("Page"),
+        container(button(text("Other")).on_press(Message::Other))
+            .padding([240, 0])
+            .width(Length::Fill),
     ]
     .into()
 }
 
-fn messages(ui: Simulator<'_, Message>) -> Vec<Event<u8>> {
+fn messages(ui: Simulator<'_, Message>) -> Vec<Message> {
+    ui.into_messages().collect()
+}
+
+fn events(ui: Simulator<'_, Message>) -> Vec<Event<u8>> {
     ui.into_messages()
-        .map(|Message::Menu(event)| event)
+        .filter_map(|message| match message {
+            Message::Menu(event) => Some(event),
+            Message::Other => None,
+        })
         .collect()
 }
 
-/// Presses a key the way an app does: the overlay sees it first, and what
-/// it leaves goes through the keymap.
+/// Presses a key on the rendered menu and applies what it sends.
 fn press(state: &mut State<u8>, key: Key) -> Option<Output<u8>> {
     let mut ui = simulator::simulator(view(state));
-    let status = ui.tap_key(key.clone());
-    let mut emitted = messages(ui);
-    if status == event::Status::Ignored {
-        let key = keys::Event {
-            key,
-            modifiers: Modifiers::empty(),
-        };
-        emitted.extend(state.key_event(&default_keymap(), &key));
-    }
-    emitted
+    let _ = ui.tap_key(key);
+    events(ui)
         .into_iter()
         .fold(None, |output, event| state.update(event).or(output))
 }
@@ -85,7 +87,7 @@ fn the_trigger_opens_the_menu() {
     let mut ui = simulator::simulator(view(&state));
     assert!(ui.find("Copy").is_err());
     ui.click("Actions").expect("trigger is rendered");
-    let emitted = messages(ui);
+    let emitted = events(ui);
     assert_eq!(emitted, vec![Event::Toggle]);
 
     let _ = state.update(Event::Toggle);
@@ -100,8 +102,8 @@ fn clicking_an_item_activates_it() {
     let mut state = opened();
     let mut ui = simulator::simulator(view(&state));
     ui.click("Copy").expect("item is rendered");
-    let emitted = messages(ui);
-    assert_eq!(emitted, vec![Event::Activate(COPY)]);
+    let emitted = events(ui);
+    assert_eq!(emitted.last(), Some(&Event::Activate(COPY)), "{emitted:?}");
     assert_eq!(
         state.update(Event::Activate(COPY)),
         Some(Output::Activated(COPY))
@@ -119,10 +121,9 @@ fn disabled_items_and_labels_emit_nothing() {
 }
 
 #[test]
-fn keyboard_navigation_skips_disabled_items_and_activates() {
-    let mut state = state();
-    assert_eq!(press(&mut state, Key::Named(Named::ArrowDown)), None);
-    assert!(state.is_open());
+fn the_open_menu_resolves_its_own_keys() {
+    let mut state = opened();
+    let _ = press(&mut state, Key::Named(Named::ArrowDown));
     assert_eq!(state.highlighted(), Some(COPY));
 
     let _ = press(&mut state, Key::Named(Named::ArrowDown));
@@ -145,12 +146,47 @@ fn keyboard_navigation_skips_disabled_items_and_activates() {
 }
 
 #[test]
+fn a_closed_menu_claims_no_keys() {
+    let state = state();
+    for key in [Named::ArrowDown, Named::ArrowUp, Named::Enter, Named::Space] {
+        let mut ui = simulator::simulator(view(&state));
+        let status = ui.tap_key(Key::Named(key));
+        assert_eq!(status, event::Status::Ignored, "{key:?}");
+        assert!(messages(ui).is_empty(), "{key:?}");
+    }
+}
+
+#[test]
+fn a_custom_keymap_replaces_the_defaults() {
+    let state = opened();
+    let keymap = default_keymap().unbind(&Chord::named(Named::Escape)).bind(
+        Chord::character('q'),
+        iced_cube::dropdown_menu::Action::Close,
+    );
+    let view = || -> Element<'_, Message> {
+        dropdown_menu(&state, text("Actions"))
+            .keymap(keymap.clone())
+            .on_event(Message::Menu)
+            .into()
+    };
+
+    let mut ui = simulator::simulator(view());
+    let status = ui.tap_key(Key::Named(Named::Escape));
+    assert_eq!(status, event::Status::Ignored, "Escape is unbound");
+    assert!(messages(ui).is_empty());
+
+    let mut ui = simulator::simulator(view());
+    let _ = ui.tap_key(Key::Character("q".into()));
+    assert_eq!(events(ui), vec![Event::Close]);
+}
+
+#[test]
 fn escape_closes_the_menu() {
     let mut state = opened();
     let mut ui = simulator::simulator(view(&state));
     let status = ui.tap_key(Key::Named(Named::Escape));
     assert_eq!(status, event::Status::Captured);
-    assert_eq!(messages(ui), vec![Event::Close]);
+    assert_eq!(events(ui), vec![Event::Close]);
 
     let _ = press(&mut state, Key::Named(Named::Escape));
     assert!(!state.is_open());
@@ -172,7 +208,20 @@ fn clicking_outside_closes_the_menu() {
     let mut ui = simulator::simulator(view(&state));
     ui.point_at(Point::new(900.0, 700.0));
     let _ = ui.simulate(simulator::click());
-    assert_eq!(messages(ui), vec![Event::Close]);
+    assert_eq!(messages(ui), vec![Message::Menu(Event::Close)]);
+}
+
+#[test]
+fn the_outside_click_that_closes_the_menu_goes_no_further() {
+    let state = opened();
+    let mut ui = simulator::simulator(view(&state));
+    ui.click("Other").expect("button below is rendered");
+    assert_eq!(messages(ui), vec![Message::Menu(Event::Close)]);
+
+    let closed = self::state();
+    let mut ui = simulator::simulator(view(&closed));
+    ui.click("Other").expect("button below is rendered");
+    assert_eq!(messages(ui), vec![Message::Other]);
 }
 
 #[test]
@@ -180,7 +229,7 @@ fn clicking_the_trigger_while_open_only_toggles() {
     let state = opened();
     let mut ui = simulator::simulator(view(&state));
     ui.click("Actions").expect("trigger is rendered");
-    assert_eq!(messages(ui), vec![Event::Toggle]);
+    assert_eq!(events(ui), vec![Event::Toggle]);
 }
 
 #[test]
@@ -194,8 +243,8 @@ fn submenu_items_are_rendered_beside_their_item_and_activate() {
     assert!(email.bounds().x > share.bounds().x + share.bounds().width);
 
     ui.click("Copy link").expect("submenu item is rendered");
-    let emitted = messages(ui);
-    assert_eq!(emitted, vec![Event::Activate(LINK)]);
+    let emitted = events(ui);
+    assert_eq!(emitted.last(), Some(&Event::Activate(LINK)), "{emitted:?}");
     assert_eq!(
         state.update(Event::Activate(LINK)),
         Some(Output::Activated(LINK))
@@ -203,14 +252,14 @@ fn submenu_items_are_rendered_beside_their_item_and_activate() {
 }
 
 #[test]
-fn clicking_outside_with_a_submenu_open_closes_everything() {
+fn clicking_outside_with_a_submenu_open_closes_everything_once() {
     let mut state = opened();
     let _ = state.update(Event::Highlight(SHARE));
     let mut ui = simulator::simulator(view(&state));
     ui.point_at(Point::new(900.0, 700.0));
     let _ = ui.simulate(simulator::click());
-    let emitted = messages(ui);
-    assert_eq!(emitted, vec![Event::CloseSubmenu, Event::Close]);
+    let emitted = events(ui);
+    assert_eq!(emitted, vec![Event::Close]);
     for event in emitted {
         let _ = state.update(event);
     }
@@ -222,8 +271,8 @@ fn checkbox_items_toggle_through_the_state() {
     let mut state = opened();
     let mut ui = simulator::simulator(view(&state));
     ui.click("Show grid").expect("checkbox item is rendered");
-    let emitted = messages(ui);
-    assert_eq!(emitted, vec![Event::Activate(GRID)]);
+    let emitted = events(ui);
+    assert_eq!(emitted.last(), Some(&Event::Activate(GRID)), "{emitted:?}");
     assert_eq!(
         state.update(Event::Activate(GRID)),
         Some(Output::Toggled(GRID, true))

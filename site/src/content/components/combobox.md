@@ -16,7 +16,7 @@ api:
   - name: ".with_selected(&value) / .with_visible_rows(n)"
     description: "Starts with a value selected, and sets how many suggestions show at once (six by default)."
   - name: "state.update(Event)"
-    description: "Input(query), Open, Close, Next, Previous, Confirm, Highlight(index), Pick(index) or Scroll(rows). Returns the value when one is chosen."
+    description: "Input(query), Open, Close, Next, Previous, ActivateHighlighted, Highlight(index), Activate(index) or Scroll(rows). Returns the value when one is chosen."
   - name: "state.selected() / state.query() / state.is_open()"
     description: "The chosen value, the text typed so far and whether the list is showing."
   - name: "state.matches() / state.highlighted()"
@@ -27,8 +27,8 @@ api:
     description: "Maps combobox events to your message, such as Message::Fruit."
   - name: ".placeholder(text) / .empty(text)"
     description: "Text shown in the empty field, and in the list when nothing matches. The empty text defaults to \"No results found.\""
-  - name: ".width(length) / .id(id)"
-    description: "Overrides the width (240 pixels by default) and sets the text field's widget id."
+  - name: ".width(length) / .size(Size) / .id(id)"
+    description: "Overrides the width (240 pixels by default), takes the input sizes Sm, Md (the default) or Lg, and sets the text field's widget id."
   - name: ".keymap(keymap)"
     description: "Replaces the default keymap. The combobox resolves its own key presses while its field has focus or its list is open."
   - name: "combobox::default_keymap()"
@@ -39,6 +39,6 @@ api:
 
 Use a combobox when the list is long enough that people would rather type than scroll, such as timezones or countries. For a handful of options, a [select](../select/) is simpler.
 
-The app owns a `combobox::State` and passes every event to `update`. Clicking the field or pressing the down arrow opens the list; typing filters it. The selected value shows in the field while the list is closed, and as the placeholder while you type.
+The app owns a `combobox::State` and passes every event to `update`. Clicking the field or pressing the down arrow opens the list; typing filters it. The selected value shows in the field while the list is closed, and as the placeholder while you type. The list is as wide as the field, draws its rows like every other menu and list, and stays inside the window.
 
-The combobox handles its own keys while its field has focus or its list is open, so there is no need to subscribe to key presses. The list closes when the field loses focus or when you click elsewhere. Long lists show a window of rows that follows the highlight and scrolls with the mouse wheel.
+The combobox handles its own keys while its field has focus or its list is open, so there is no need to subscribe to key presses. Inside a dialog or popover, Escape closes the list first and leaves the dialog or popover open. The list closes when the field loses focus or when you click elsewhere; that click goes no further and the field gives up focus. Long lists show a window of rows that follows the highlight and scrolls with the mouse wheel.

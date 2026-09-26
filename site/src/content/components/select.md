@@ -25,6 +25,6 @@ api:
     description: "The option a resolved Action (Next or Previous) selects, or None at either end. Send it through your on_select message."
 ---
 
-Use a select when there are too many options to show as radios, or when space is tight. The menu opens below the field and closes when an option is chosen or when you click elsewhere.
+Use a select when there are too many options to show as radios, or when space is tight. The list opens below the field, as wide as it, with a check mark on the selected option, and looks like every other menu and list. It closes when an option is chosen, on Escape, or when you click elsewhere; that click goes no further.
 
 Options can be borrowed, such as a `const` slice, so the list is not copied on every view.

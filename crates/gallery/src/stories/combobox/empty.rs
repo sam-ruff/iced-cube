@@ -1,4 +1,5 @@
-use iced::Element;
+use iced::widget::container;
+use iced::{Element, Length};
 use iced_cube::forms::combobox::{self, Event, State, combobox};
 
 const LANGUAGES: &[&str] = &["English", "French", "German", "Italian", "Spanish", "Welsh"];
@@ -28,11 +29,14 @@ impl Example {
     }
 
     pub fn view(&self) -> Element<'_, Message> {
-        combobox(&self.language)
-            .placeholder("Search languages...")
-            .empty("No language found.")
-            .width(280)
-            .on_event(Message::Language)
-            .into()
+        container(
+            combobox(&self.language)
+                .placeholder("Search languages...")
+                .empty("No language found.")
+                .width(280)
+                .on_event(Message::Language),
+        )
+        .height(Length::Fill)
+        .into()
     }
 }

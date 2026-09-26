@@ -1,20 +1,33 @@
-//! Floats a panel next to an anchor element: the layer popovers and menus
-//! are built on.
+//! Floats a panel next to an anchor element: the one layer popovers, menus,
+//! the combobox and select lists, and the command list's keys are built on.
 //!
-//! [`anchored`] wraps an anchor, such as a trigger button, and while it has
-//! content draws that content above everything else. [`place`] is the pure
-//! positioning logic: it puts the panel on one [`Side`] of the anchor,
-//! aligned by [`Align`], then flips and shifts it to stay inside the window.
+//! [`anchored`] wraps an anchor, such as a trigger button or a text field,
+//! and while it has content draws that content above everything else.
+//! [`place`] is the pure positioning logic: it puts the panel on one
+//! [`Side`] of the anchor, aligned by [`Align`], then flips and shifts it to
+//! stay inside the window.
 //!
-//! The panel is dismissed through one message, sent on Escape or on a press
-//! outside both the panel and the anchor. Presses on the anchor are left to
-//! the anchor, so a trigger can toggle the panel itself. Presses inside the
-//! panel never reach the widgets underneath it.
+//! Every open panel follows the same rules:
+//!
+//! - Events reach the content first, including panels nested inside it, so
+//!   Escape closes the innermost layer.
+//! - [`on_key`](Anchored::on_key) sees the key presses the content leaves,
+//!   while the panel is open or something in the anchor has focus.
+//! - [`on_dismiss`](Anchored::on_dismiss) is sent at most once per event: on
+//!   a [dismiss chord](Anchored::dismiss_keys), a press outside the panel and
+//!   the anchor, or, with [`dismiss_on_blur`](Anchored::dismiss_on_blur),
+//!   when the anchor loses focus.
+//! - That outside press is captured, so nothing underneath sees it, unless
+//!   the panel [passes it through](Anchored::pass_through).
+//! - Presses on the anchor are left to the anchor, so a trigger can toggle
+//!   the panel itself. Presses inside the panel never reach the widgets
+//!   underneath it.
 
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::overlay;
 use iced::advanced::renderer;
-use iced::advanced::widget::{Operation, Tree, Widget};
+use iced::advanced::widget::operation::Focusable;
+use iced::advanced::widget::{Id, Operation, Tree, Widget, tree};
 use iced::advanced::{Clipboard, Shell};
 use iced::keyboard::{self, key::Named};
 use iced::widget::container;
@@ -23,6 +36,7 @@ use iced::{
     Theme, Vector, mouse, touch,
 };
 
+use crate::keys::{self, Chord};
 use crate::theme::{Tokens, fade, radius};
 
 /// Default space between the anchor and the panel, in logical pixels.
@@ -218,24 +232,88 @@ fn clamp(value: f32, low: f32, high: f32) -> f32 {
     value.min(high).max(low)
 }
 
-/// The floating surface shared by popovers and menus: the page background,
-/// a subtle border and the same restrained shadow as the select menu.
+/// The floating surface shared by popovers, menus, lists and dialogs: the
+/// popover colour, a subtle border and a restrained shadow.
 pub fn surface_style(tokens: &Tokens) -> container::Style {
     container::Style {
-        background: Some(Background::Color(tokens.background)),
+        background: Some(Background::Color(tokens.popover)),
         text_color: Some(tokens.foreground),
         border: Border {
             color: tokens.border,
             width: 1.0,
             radius: radius::MD.into(),
         },
-        shadow: Shadow {
-            color: fade(Color::BLACK, if tokens.is_dark { 0.5 } else { 0.1 }),
-            offset: Vector::new(0.0, 4.0),
-            blur_radius: 12.0,
-        },
-        ..container::Style::default()
+        shadow: shadow(tokens),
+        snap: true,
     }
+}
+
+/// The shadow under every floating surface, stronger on a dark page.
+pub fn shadow(tokens: &Tokens) -> Shadow {
+    Shadow {
+        color: fade(Color::BLACK, if tokens.is_dark { 0.5 } else { 0.1 }),
+        offset: Vector::new(0.0, 4.0),
+        blur_radius: 12.0,
+    }
+}
+
+type OnKey<'a, Message> = Box<dyn Fn(&keys::Event) -> Option<Message> + 'a>;
+
+/// How an open panel behaves. Shared with the widgets in this crate that
+/// float a panel of their own.
+pub(crate) struct Behaviour<'a, Message> {
+    pub(crate) placement: Placement,
+    pub(crate) point: Option<Point>,
+    pub(crate) match_width: bool,
+    pub(crate) on_dismiss: Option<Message>,
+    pub(crate) dismiss_keys: Vec<Chord>,
+    pub(crate) dismiss_on_anchor_press: bool,
+    pub(crate) dismiss_on_blur: bool,
+    pub(crate) pass_through: bool,
+    /// The panel opens and closes itself through [`State::open`]: a
+    /// dismissal or a press the content captured closes it.
+    pub(crate) closes_itself: bool,
+    pub(crate) on_key: Option<OnKey<'a, Message>>,
+    pub(crate) on_anchor_press: Option<Message>,
+}
+
+impl<Message> Default for Behaviour<'_, Message> {
+    fn default() -> Self {
+        Self {
+            placement: Placement::default(),
+            point: None,
+            match_width: false,
+            on_dismiss: None,
+            dismiss_keys: vec![Chord::named(Named::Escape)],
+            dismiss_on_anchor_press: false,
+            dismiss_on_blur: false,
+            pass_through: false,
+            closes_itself: false,
+            on_key: None,
+            on_anchor_press: None,
+        }
+    }
+}
+
+impl<Message> Behaviour<'_, Message> {
+    fn can_dismiss(&self) -> bool {
+        self.on_dismiss.is_some() || self.closes_itself
+    }
+
+    fn watches_focus(&self) -> bool {
+        self.on_key.is_some() || self.dismiss_on_blur
+    }
+}
+
+/// What an anchor remembers between events.
+#[derive(Debug, Default)]
+pub(crate) struct State {
+    focused: bool,
+    /// An outside press dismissed the panel, so the anchor gives up focus
+    /// on the next event, without a second dismissal.
+    unfocus: bool,
+    /// Whether a panel that [closes itself](Behaviour::closes_itself) is open.
+    pub(crate) open: bool,
 }
 
 /// An anchor with a panel floating next to it. Convert it into an
@@ -243,19 +321,20 @@ pub fn surface_style(tokens: &Tokens) -> container::Style {
 pub struct Anchored<'a, Message> {
     anchor: Element<'a, Message>,
     content: Option<Element<'a, Message>>,
-    placement: Placement,
-    point: Option<Point>,
-    on_dismiss: Option<Message>,
-    dismiss_on_anchor_press: bool,
+    behaviour: Behaviour<'a, Message>,
 }
 
 impl<Message> std::fmt::Debug for Anchored<'_, Message> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let behaviour = &self.behaviour;
         f.debug_struct("Anchored")
             .field("open", &self.content.is_some())
-            .field("placement", &self.placement)
-            .field("point", &self.point)
-            .field("dismissable", &self.on_dismiss.is_some())
+            .field("placement", &behaviour.placement)
+            .field("point", &behaviour.point)
+            .field("match_width", &behaviour.match_width)
+            .field("dismissable", &behaviour.on_dismiss.is_some())
+            .field("dismiss_keys", &behaviour.dismiss_keys)
+            .field("pass_through", &behaviour.pass_through)
             .finish_non_exhaustive()
     }
 }
@@ -265,10 +344,7 @@ pub fn anchored<'a, Message>(anchor: impl Into<Element<'a, Message>>) -> Anchore
     Anchored {
         anchor: anchor.into(),
         content: None,
-        placement: Placement::default(),
-        point: None,
-        on_dismiss: None,
-        dismiss_on_anchor_press: false,
+        behaviour: Behaviour::default(),
     }
 }
 
@@ -280,27 +356,79 @@ impl<'a, Message> Anchored<'a, Message> {
     }
 
     pub fn placement(mut self, placement: Placement) -> Self {
-        self.placement = placement;
+        self.behaviour.placement = placement;
         self
     }
 
     /// Anchors the panel to a point, relative to the anchor's top left
     /// corner, instead of to the anchor's edges.
     pub fn at(mut self, point: Point) -> Self {
-        self.point = Some(point);
+        self.behaviour.point = Some(point);
         self
     }
 
-    /// Sent on Escape and on a press outside the panel and the anchor.
-    pub fn on_dismiss(mut self, message: Message) -> Self {
-        self.on_dismiss = Some(message);
+    /// Makes the panel exactly as wide as the anchor, as a list under a
+    /// field is.
+    pub fn match_width(mut self, match_width: bool) -> Self {
+        self.behaviour.match_width = match_width;
+        self
+    }
+
+    /// Sent once when the panel is dismissed; see the module docs.
+    pub fn on_dismiss(self, message: Message) -> Self {
+        self.on_dismiss_maybe(Some(message))
+    }
+
+    /// Like [`on_dismiss`](Self::on_dismiss); `None` makes the panel
+    /// undismissable, so presses outside it pass through.
+    pub fn on_dismiss_maybe(mut self, message: Option<Message>) -> Self {
+        self.behaviour.on_dismiss = message;
+        self
+    }
+
+    /// The chords that dismiss the panel when the content and
+    /// [`on_key`](Self::on_key) leave them alone. Defaults to Escape. Pass
+    /// the chords of a component keymap's close action, so unbinding them
+    /// there works.
+    pub fn dismiss_keys(mut self, chords: impl IntoIterator<Item = Chord>) -> Self {
+        self.behaviour.dismiss_keys = chords.into_iter().collect();
         self
     }
 
     /// Also dismiss on presses on the anchor itself, for anchors that do
-    /// not toggle the panel, such as a context menu area.
+    /// not toggle the panel, such as a context menu area. The press still
+    /// reaches the anchor.
     pub fn dismiss_on_anchor_press(mut self, dismiss: bool) -> Self {
-        self.dismiss_on_anchor_press = dismiss;
+        self.behaviour.dismiss_on_anchor_press = dismiss;
+        self
+    }
+
+    /// Also dismiss when a focused widget inside the anchor, such as a text
+    /// field, loses focus.
+    pub fn dismiss_on_blur(mut self, dismiss: bool) -> Self {
+        self.behaviour.dismiss_on_blur = dismiss;
+        self
+    }
+
+    /// Lets a press outside the panel reach the widgets underneath after
+    /// dismissing it, for panels that are not modal, such as a popover.
+    pub fn pass_through(mut self, pass_through: bool) -> Self {
+        self.behaviour.pass_through = pass_through;
+        self
+    }
+
+    /// Resolves key presses the content leaves, while the panel is open or
+    /// something in the anchor has focus. Returning a message sends it and
+    /// captures the key.
+    pub fn on_key(mut self, on_key: impl Fn(&keys::Event) -> Option<Message> + 'a) -> Self {
+        self.behaviour.on_key = Some(Box::new(on_key));
+        self
+    }
+
+    /// Sent when the pointer is pressed on the anchor, before the anchor
+    /// sees the press.
+    pub fn on_anchor_press_maybe(mut self, message: Option<Message>) -> Self {
+        self.behaviour.on_anchor_press = message;
         self
     }
 }
@@ -312,6 +440,14 @@ impl<'a, Message: Clone + 'a> From<Anchored<'a, Message>> for Element<'a, Messag
 }
 
 impl<Message: Clone> Widget<Message, Theme, Renderer> for Anchored<'_, Message> {
+    fn tag(&self) -> tree::Tag {
+        tree::Tag::of::<State>()
+    }
+
+    fn state(&self) -> tree::State {
+        tree::State::new(State::default())
+    }
+
     fn size(&self) -> Size<Length> {
         self.anchor.as_widget().size()
     }
@@ -389,8 +525,41 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for Anchored<'_, Message> 
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) {
+        let Tree {
+            state, children, ..
+        } = tree;
+        let state = state.downcast_mut::<State>();
+        let Some(anchor_tree) = children.first_mut() else {
+            return;
+        };
+        let behaviour = &self.behaviour;
+
+        if state.unfocus {
+            state.unfocus = false;
+            state.focused = false;
+            self.anchor
+                .as_widget_mut()
+                .operate(anchor_tree, layout, renderer, &mut Unfocus);
+            shell.request_redraw();
+        }
+
+        if state.focused
+            && let Some(message) = key_message(behaviour, event)
+        {
+            shell.publish(message);
+            shell.capture_event();
+            return;
+        }
+
+        if is_press(event)
+            && cursor.is_over(layout.bounds())
+            && let Some(message) = &behaviour.on_anchor_press
+        {
+            shell.publish(message.clone());
+        }
+
         self.anchor.as_widget_mut().update(
-            &mut tree.children[0],
+            anchor_tree,
             event,
             layout,
             cursor,
@@ -399,6 +568,22 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for Anchored<'_, Message> 
             shell,
             viewport,
         );
+
+        if !behaviour.watches_focus() {
+            return;
+        }
+        let mut focus = FindFocus::default();
+        self.anchor
+            .as_widget_mut()
+            .operate(anchor_tree, layout, renderer, &mut focus);
+        if state.focused
+            && !focus.0
+            && behaviour.dismiss_on_blur
+            && let Some(message) = &behaviour.on_dismiss
+        {
+            shell.publish(message.clone());
+        }
+        state.focused = focus.0;
     }
 
     fn mouse_interaction(
@@ -429,45 +614,60 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for Anchored<'_, Message> 
         let Self {
             anchor,
             content,
-            placement,
-            point,
-            on_dismiss,
-            dismiss_on_anchor_press,
+            behaviour,
         } = self;
-        let mut trees = tree.children.iter_mut();
+        let Tree {
+            state, children, ..
+        } = tree;
+        let mut trees = children.iter_mut();
         let anchor_tree = trees.next()?;
         let trigger = layout.bounds() + translation;
-        let own =
-            anchor
-                .as_widget_mut()
-                .overlay(anchor_tree, layout, renderer, viewport, translation);
 
-        let target = match point {
-            Some(point) => Rectangle::new(
-                trigger.position() + Vector::new(point.x, point.y),
-                Size::ZERO,
-            ),
-            None => trigger,
+        // While the panel is open the anchor's own overlays, such as its
+        // tooltip, stay hidden.
+        let Some((content, tree)) = content.as_mut().zip(trees.next()) else {
+            return anchor.as_widget_mut().overlay(
+                anchor_tree,
+                layout,
+                renderer,
+                viewport,
+                translation,
+            );
         };
-        let floating = content.as_mut().zip(trees.next()).map(|(content, tree)| {
-            overlay::Element::new(Box::new(Floating {
-                content,
-                tree,
-                target,
-                trigger,
-                placement: *placement,
-                on_dismiss: on_dismiss.as_ref(),
-                dismiss_on_anchor_press: *dismiss_on_anchor_press,
-            }))
-        });
-
-        match (own, floating) {
-            (Some(own), Some(floating)) => {
-                Some(overlay::Group::with_children(vec![own, floating]).overlay())
-            }
-            (own, floating) => own.or(floating),
-        }
+        Some(floating(
+            content,
+            tree,
+            state.downcast_mut::<State>(),
+            behaviour,
+            trigger,
+        ))
     }
+}
+
+/// The overlay drawing a panel for `trigger`, the anchor's bounds in
+/// window coordinates.
+pub(crate) fn floating<'a, 'b, Message: Clone>(
+    content: &'b mut Element<'a, Message>,
+    tree: &'b mut Tree,
+    state: &'b mut State,
+    behaviour: &'b Behaviour<'a, Message>,
+    trigger: Rectangle,
+) -> overlay::Element<'b, Message, Theme, Renderer> {
+    let target = match behaviour.point {
+        Some(point) => Rectangle::new(
+            trigger.position() + Vector::new(point.x, point.y),
+            Size::ZERO,
+        ),
+        None => trigger,
+    };
+    overlay::Element::new(Box::new(Floating {
+        content,
+        tree,
+        state,
+        behaviour,
+        target,
+        trigger,
+    }))
 }
 
 /// The overlay drawing the panel. Its node covers the whole window so the
@@ -475,21 +675,63 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for Anchored<'_, Message> 
 struct Floating<'a, 'b, Message> {
     content: &'b mut Element<'a, Message>,
     tree: &'b mut Tree,
+    state: &'b mut State,
+    behaviour: &'b Behaviour<'a, Message>,
     target: Rectangle,
     trigger: Rectangle,
-    placement: Placement,
-    on_dismiss: Option<&'b Message>,
-    dismiss_on_anchor_press: bool,
 }
 
 impl<Message: Clone> Floating<'_, '_, Message> {
-    fn dismiss(&self, shell: &mut Shell<'_, Message>) -> bool {
-        let Some(message) = self.on_dismiss else {
-            return false;
-        };
-        shell.publish(message.clone());
-        true
+    fn dismiss(&mut self, shell: &mut Shell<'_, Message>) {
+        if self.behaviour.closes_itself {
+            self.state.open = false;
+            shell.request_redraw();
+        }
+        if self.behaviour.dismiss_on_blur {
+            self.state.unfocus = true;
+        }
+        if let Some(message) = &self.behaviour.on_dismiss {
+            shell.publish(message.clone());
+        }
     }
+}
+
+/// The message [`Behaviour::on_key`] sends for a key press, if any.
+fn key_message<Message>(behaviour: &Behaviour<'_, Message>, event: &Event) -> Option<Message> {
+    let Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) = event else {
+        return None;
+    };
+    let on_key = behaviour.on_key.as_ref()?;
+    on_key(&keys::Event {
+        key: key.clone(),
+        modifiers: *modifiers,
+    })
+}
+
+fn is_dismiss_key<Message>(behaviour: &Behaviour<'_, Message>, event: &Event) -> bool {
+    let Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) = event else {
+        return false;
+    };
+    behaviour
+        .dismiss_keys
+        .iter()
+        .any(|chord| chord.matches(key, *modifiers))
+}
+
+fn is_press(event: &Event) -> bool {
+    matches!(
+        event,
+        Event::Mouse(mouse::Event::ButtonPressed(_))
+            | Event::Touch(touch::Event::FingerPressed { .. })
+    )
+}
+
+fn is_release(event: &Event) -> bool {
+    matches!(
+        event,
+        Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
+            | Event::Touch(touch::Event::FingerLifted { .. })
+    )
 }
 
 /// Where a mouse or touch press landed, if the event is one.
@@ -516,15 +758,18 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, Renderer> for Floating<'_,
     fn layout(&mut self, renderer: &Renderer, bounds: Size) -> layout::Node {
         let viewport = Rectangle::with_size(bounds);
         let room = viewport.shrink(MARGIN).size();
-        let limits = layout::Limits::new(
-            Size::ZERO,
-            Size::new(room.width.max(0.0), room.height.max(0.0)),
-        );
+        let room = Size::new(room.width.max(0.0), room.height.max(0.0));
+        let limits = if self.behaviour.match_width {
+            let width = self.trigger.width.min(room.width);
+            layout::Limits::new(Size::new(width, 0.0), Size::new(width, room.height))
+        } else {
+            layout::Limits::new(Size::ZERO, room)
+        };
         let node = self
             .content
             .as_widget_mut()
             .layout(self.tree, renderer, &limits);
-        let panel = place(self.target, node.size(), viewport, self.placement);
+        let panel = place(self.target, node.size(), viewport, self.behaviour.placement);
         layout::Node::with_children(bounds, vec![node.move_to(panel.position())])
     }
 
@@ -572,16 +817,6 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, Renderer> for Floating<'_,
             return;
         };
 
-        if let Event::Keyboard(keyboard::Event::KeyPressed {
-            key: keyboard::Key::Named(Named::Escape),
-            ..
-        }) = event
-            && self.dismiss(shell)
-        {
-            shell.capture_event();
-            return;
-        }
-
         self.content.as_widget_mut().update(
             self.tree,
             event,
@@ -592,7 +827,26 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, Renderer> for Floating<'_,
             shell,
             &layout.bounds(),
         );
-        if shell.is_event_captured() || !is_pointer_input(event) {
+        if shell.is_event_captured() {
+            // A row took the click, so the choice is made.
+            if self.behaviour.closes_itself && is_release(event) {
+                self.state.open = false;
+                shell.request_redraw();
+            }
+            return;
+        }
+
+        if let Some(message) = key_message(self.behaviour, event) {
+            shell.publish(message);
+            shell.capture_event();
+            return;
+        }
+        if is_dismiss_key(self.behaviour, event) && self.behaviour.can_dismiss() {
+            self.dismiss(shell);
+            shell.capture_event();
+            return;
+        }
+        if !is_pointer_input(event) {
             return;
         }
 
@@ -608,8 +862,13 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, Renderer> for Floating<'_,
             shell.capture_event();
             return;
         }
-        if self.dismiss_on_anchor_press || !self.trigger.contains(position) {
-            let _ = self.dismiss(shell);
+        let on_anchor = self.trigger.contains(position);
+        if (on_anchor && !self.behaviour.dismiss_on_anchor_press) || !self.behaviour.can_dismiss() {
+            return;
+        }
+        self.dismiss(shell);
+        if !on_anchor && !self.behaviour.pass_through {
+            shell.capture_event();
         }
     }
 
@@ -644,10 +903,40 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, Renderer> for Floating<'_,
     }
 }
 
+/// Whether any focusable widget in a subtree has focus.
+#[derive(Default)]
+struct FindFocus(bool);
+
+impl Operation for FindFocus {
+    fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation)) {
+        operate(self);
+    }
+
+    fn focusable(&mut self, _id: Option<&Id>, _bounds: Rectangle, state: &mut dyn Focusable) {
+        self.0 |= state.is_focused();
+    }
+}
+
+/// Takes focus away from every widget in a subtree.
+struct Unfocus;
+
+impl Operation for Unfocus {
+    fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation)) {
+        operate(self);
+    }
+
+    fn focusable(&mut self, _id: Option<&Id>, _bounds: Rectangle, state: &mut dyn Focusable) {
+        if state.is_focused() {
+            state.unfocus();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::theme::{dark, light};
+    use iced::keyboard::{Key, Modifiers};
 
     const VIEWPORT: Rectangle = Rectangle {
         x: 0.0,
@@ -760,6 +1049,19 @@ mod tests {
     }
 
     #[test]
+    fn a_list_near_the_bottom_keeps_the_margin() {
+        let field = Rectangle::new(Point::new(20.0, 200.0), Size::new(200.0, 36.0));
+        let list = Size::new(200.0, 80.0);
+        let placement = Placement::new(Side::Bottom, Align::Start);
+        let panel = place(field, list, VIEWPORT, placement);
+        assert_eq!(panel.y, 200.0 - GAP - list.height, "flips above the field");
+
+        let wide = Size::new(420.0, 40.0);
+        let panel = place(field, wide, VIEWPORT, placement);
+        assert_eq!(panel.x, MARGIN, "clamped inside the window");
+    }
+
+    #[test]
     fn a_point_anchor_opens_below_and_right_then_flips_near_edges() {
         let point = |x, y| Rectangle::new(Point::new(x, y), Size::ZERO);
         let placement = Placement::new(Side::Bottom, Align::Start).gap(0.0);
@@ -792,28 +1094,99 @@ mod tests {
     }
 
     #[test]
-    fn surface_uses_background_border_and_a_shadow_in_both_themes() {
+    fn surface_uses_the_popover_colour_a_border_and_a_shadow() {
         for theme in [light(), dark()] {
             let tokens = Tokens::of(&theme);
             let style = surface_style(&tokens);
-            assert_eq!(style.background, Some(Background::Color(tokens.background)));
+            assert_eq!(style.background, Some(Background::Color(tokens.popover)));
             assert_eq!(style.text_color, Some(tokens.foreground));
             assert_eq!(style.border.color, tokens.border);
             assert_eq!(style.border.width, 1.0);
-            assert!(style.shadow.color.a > 0.0);
+            assert_eq!(style.border.radius, radius::MD.into());
+            assert_eq!(style.shadow, shadow(&tokens));
+            assert_eq!(style.shadow.offset, Vector::new(0.0, 4.0));
+            assert_eq!(style.shadow.blur_radius, 12.0);
         }
-        let light = surface_style(&Tokens::of(&light())).shadow.color.a;
-        let dark = surface_style(&Tokens::of(&dark())).shadow.color.a;
-        assert!(dark > light, "shadows are stronger on a dark page");
+        let light = shadow(&Tokens::of(&light())).color.a;
+        let dark = shadow(&Tokens::of(&dark())).color.a;
+        assert!((light - 0.1).abs() < 1e-6);
+        assert!((dark - 0.5).abs() < 1e-6);
     }
 
     #[test]
-    fn builder_starts_closed_and_undismissable() {
+    fn builder_starts_closed_and_undismissable_with_escape_bound() {
         let anchored: Anchored<'_, ()> = anchored(iced::widget::text("Anchor"));
+        let behaviour = &anchored.behaviour;
         assert!(anchored.content.is_none());
-        assert!(anchored.on_dismiss.is_none());
-        assert!(anchored.point.is_none());
-        assert!(!anchored.dismiss_on_anchor_press);
+        assert!(behaviour.on_dismiss.is_none());
+        assert!(behaviour.point.is_none());
+        assert!(!behaviour.dismiss_on_anchor_press);
+        assert!(!behaviour.dismiss_on_blur);
+        assert!(!behaviour.pass_through);
+        assert!(!behaviour.match_width);
+        assert_eq!(behaviour.dismiss_keys, vec![Chord::named(Named::Escape)]);
+        assert!(!behaviour.can_dismiss());
+        assert!(!behaviour.watches_focus());
+    }
+
+    #[test]
+    fn builder_sets_every_option() {
+        let anchored: Anchored<'_, u8> = anchored(iced::widget::text("Anchor"))
+            .at(Point::new(3.0, 4.0))
+            .match_width(true)
+            .on_dismiss(1)
+            .dismiss_keys([Chord::character('q')])
+            .dismiss_on_anchor_press(true)
+            .dismiss_on_blur(true)
+            .pass_through(true)
+            .on_anchor_press_maybe(Some(2))
+            .on_key(|_| Some(3));
+        let behaviour = &anchored.behaviour;
+        assert_eq!(behaviour.point, Some(Point::new(3.0, 4.0)));
+        assert!(behaviour.match_width && behaviour.pass_through);
+        assert!(behaviour.dismiss_on_anchor_press && behaviour.dismiss_on_blur);
+        assert_eq!(behaviour.on_dismiss, Some(1));
+        assert_eq!(behaviour.on_anchor_press, Some(2));
+        assert_eq!(behaviour.dismiss_keys, vec![Chord::character('q')]);
+        assert!(behaviour.can_dismiss() && behaviour.watches_focus());
+    }
+
+    fn key_press(key: Key, modifiers: Modifiers) -> Event {
+        Event::Keyboard(keyboard::Event::KeyPressed {
+            key: key.clone(),
+            modified_key: key,
+            physical_key: keyboard::key::Physical::Unidentified(
+                keyboard::key::NativeCode::Unidentified,
+            ),
+            location: keyboard::Location::Standard,
+            modifiers,
+            text: None,
+            repeat: false,
+        })
+    }
+
+    #[test]
+    fn keys_resolve_through_on_key_then_the_dismiss_chords() {
+        let behaviour: Behaviour<'_, u8> = Behaviour {
+            on_key: Some(Box::new(|key: &keys::Event| {
+                (key.key == Key::Named(Named::ArrowDown)).then_some(7)
+            })),
+            ..Behaviour::default()
+        };
+        let down = key_press(Key::Named(Named::ArrowDown), Modifiers::empty());
+        let escape = key_press(Key::Named(Named::Escape), Modifiers::empty());
+        let shift_escape = key_press(Key::Named(Named::Escape), Modifiers::SHIFT);
+        assert_eq!(key_message(&behaviour, &down), Some(7));
+        assert_eq!(key_message(&behaviour, &escape), None);
+        assert!(is_dismiss_key(&behaviour, &escape));
+        assert!(!is_dismiss_key(&behaviour, &shift_escape));
+        assert!(!is_dismiss_key(&behaviour, &down));
+
+        let unbound: Behaviour<'_, u8> = Behaviour {
+            dismiss_keys: Vec::new(),
+            ..Behaviour::default()
+        };
+        assert!(!is_dismiss_key(&unbound, &escape));
     }
 
     #[test]
@@ -825,6 +1198,9 @@ mod tests {
         assert_eq!(press_position(&released, cursor), None);
         assert_eq!(press_position(&pressed, mouse::Cursor::Unavailable), None);
         assert!(is_pointer_input(&released));
+        assert!(is_release(&released));
+        assert!(is_press(&pressed));
+        assert!(!is_release(&pressed));
         assert!(!is_pointer_input(&Event::Mouse(mouse::Event::CursorLeft)));
     }
 }

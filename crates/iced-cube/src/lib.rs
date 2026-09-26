@@ -29,14 +29,12 @@
 pub mod feedback;
 pub mod forms;
 pub mod icon;
-#[cfg(any(feature = "select", feature = "slider"))]
+#[cfg(feature = "slider")]
 mod inert;
 pub mod keys;
 pub mod layout;
 pub mod navigation;
 pub mod overlay;
-#[cfg(any(feature = "combobox", feature = "command"))]
-mod popup;
 pub mod primitives;
 pub mod theme;
 

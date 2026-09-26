@@ -56,7 +56,7 @@ impl Default for Example {
 impl Example {
     pub fn update(&mut self, message: Message) {
         let Message::Command(event) = message;
-        if let Some(Output::Run(id)) = self.command.update(event) {
+        if let Some(Output::Activated(id)) = self.command.update(event) {
             self.last_run = Some(id);
         }
     }
@@ -69,7 +69,7 @@ impl Example {
 
         column![
             command(&self.command)
-                .height(300)
+                .height(320)
                 .on_event(Message::Command),
             text(status).size(14),
         ]

@@ -3,7 +3,8 @@
 use iced::keyboard::{Key, key::Named};
 use iced::widget::{Button, column, text};
 use iced::{Element, Length, Point};
-use iced_cube::overlay::popover::{Side, popover};
+use iced_cube::Chord;
+use iced_cube::overlay::popover::{Action, Side, default_keymap, popover};
 use iced_test::simulator::{self, Simulator};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -79,6 +80,34 @@ fn escape_dismisses_an_open_popover() {
 fn clicking_outside_dismisses() {
     let mut ui = simulator::simulator(view(true, true));
     click_at(&mut ui, Point::new(900.0, 700.0));
+    assert_eq!(messages(ui), vec![Message::Dismiss]);
+}
+
+#[test]
+fn the_click_that_dismisses_still_reaches_what_it_landed_on() {
+    let mut ui = simulator::simulator(view(true, true));
+    let behind = ui
+        .find("Behind")
+        .expect("button behind is rendered")
+        .bounds();
+    // The right end of the wide button, clear of the panel.
+    click_at(&mut ui, Point::new(390.0, behind.center_y()));
+    assert_eq!(messages(ui), vec![Message::Dismiss, Message::Behind]);
+}
+
+#[test]
+fn the_keymap_decides_which_keys_dismiss() {
+    let keymap = default_keymap()
+        .unbind(&Chord::named(Named::Escape))
+        .bind(Chord::character('q'), Action::Close);
+    let element: Element<'_, Message> = popover(button("Open"), text("Content"))
+        .open(true)
+        .keymap(keymap)
+        .on_dismiss(Message::Dismiss)
+        .into();
+    let mut ui = simulator::simulator(element);
+    let _ = ui.tap_key(Key::Named(Named::Escape));
+    let _ = ui.tap_key(Key::Character("q".into()));
     assert_eq!(messages(ui), vec![Message::Dismiss]);
 }
 

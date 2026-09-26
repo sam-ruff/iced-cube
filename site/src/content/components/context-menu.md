@@ -26,6 +26,8 @@ api:
     description: "Maps context menu events to your message."
   - name: ".width(f32)"
     description: "Width of the menu and its submenus. Defaults to 224."
+  - name: ".keymap(keymap)"
+    description: "Replaces the default keymap the open menu resolves its keys with."
   - name: "context_menu::default_keymap()"
     description: "The dropdown menu's shortcuts plus Open. Bind, unbind or clear chords to change them."
   - name: "state.key_event(&keymap, &key)"
@@ -38,4 +40,4 @@ A context menu offers actions for whatever is under the pointer: a file in a lis
 
 A right-click inside the area opens the menu with its top left corner at the pointer. It flips up or to the left near the edges of the window. Right-clicking somewhere else in the area moves the menu there, and a left-click anywhere outside the menu closes it. Clicks inside the menu never reach the area underneath.
 
-Keyboard users open it with Shift+F10 or the Menu key, as in desktop apps. The menu then opens at the area's top left corner with its first item highlighted, and the arrow keys, Enter and Escape work as in a dropdown menu. Unlike a dropdown menu, the arrow keys do nothing while the menu is closed, so a context menu can share the keyboard with the rest of your app.
+Keyboard users open it with Shift+F10 or the Menu key, as in desktop apps: route presses from `keys::subscription()` through `state.key_event`, as the keyboard example does. The menu then opens at the area's top left corner with its first item highlighted, and handles the arrow keys, Enter and Escape itself until it closes. While it is closed, only the opening chords do anything, so a context menu shares the keyboard with the rest of your app.

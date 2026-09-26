@@ -3,8 +3,12 @@
 //! The app owns whether the popover is open: pass it to
 //! [`open`](Popover::open) and close it again when
 //! [`on_dismiss`](Popover::on_dismiss) arrives, after Escape or a click
-//! outside. The popover is not modal, so the rest of the window stays
-//! usable while it is open.
+//! outside. The popover is not modal: the rest of the window stays usable
+//! while it is open, and the click that dismisses it still reaches what it
+//! landed on.
+//!
+//! Escape reaches the content first, so a menu, combobox or command list
+//! inside the popover closes before the popover does.
 
 use iced::keyboard::key::Named;
 use iced::widget::container;
@@ -28,6 +32,7 @@ pub struct Popover<'a, Message> {
     placement: Placement,
     width: Length,
     padding: f32,
+    keymap: Keymap<Action>,
 }
 
 impl<Message> std::fmt::Debug for Popover<'_, Message> {
@@ -38,6 +43,7 @@ impl<Message> std::fmt::Debug for Popover<'_, Message> {
             .field("placement", &self.placement)
             .field("width", &self.width)
             .field("padding", &self.padding)
+            .field("keymap", &self.keymap)
             .finish_non_exhaustive()
     }
 }
@@ -57,6 +63,7 @@ pub fn popover<'a, Message>(
         placement: Placement::default(),
         width: Length::Fixed(WIDTH),
         padding: space::LG,
+        keymap: default_keymap(),
     }
 }
 
@@ -102,6 +109,13 @@ impl<'a, Message> Popover<'a, Message> {
         self.padding = padding;
         self
     }
+
+    /// Replaces the [`default_keymap`]. The open popover dismisses itself
+    /// on the chords bound to [`Action::Close`].
+    pub fn keymap(mut self, keymap: Keymap<Action>) -> Self {
+        self.keymap = keymap;
+        self
+    }
 }
 
 impl<'a, Message: Clone + 'a> From<Popover<'a, Message>> for Element<'a, Message> {
@@ -114,6 +128,7 @@ impl<'a, Message: Clone + 'a> From<Popover<'a, Message>> for Element<'a, Message
             placement,
             width,
             padding,
+            keymap,
         } = popover;
 
         let panel = open.then(|| {
@@ -123,11 +138,13 @@ impl<'a, Message: Clone + 'a> From<Popover<'a, Message>> for Element<'a, Message
                 .style(|theme| style(&Tokens::of(theme)))
                 .into()
         });
-        let anchored = anchored(trigger).content(panel).placement(placement);
-        match on_dismiss {
-            Some(message) => anchored.on_dismiss(message).into(),
-            None => anchored.into(),
-        }
+        anchored(trigger)
+            .content(panel)
+            .placement(placement)
+            .pass_through(true)
+            .dismiss_keys(keymap.chords(&Action::Close).into_iter().cloned())
+            .on_dismiss_maybe(on_dismiss)
+            .into()
     }
 }
 
@@ -183,10 +200,12 @@ impl keys::Action for Action {
 /// | --- | --- |
 /// | `Escape` | [`Action::Close`] |
 ///
-/// An open popover with [`on_dismiss`](Popover::on_dismiss) already takes
-/// Escape itself. [`Action::Toggle`] has no default chord because a popover
-/// usually belongs to one button; bind one when a popover deserves an
-/// app-wide shortcut.
+/// An open popover with [`on_dismiss`](Popover::on_dismiss) resolves
+/// [`Action::Close`] itself, after its content has had the key, so pass a
+/// changed keymap with [`Popover::keymap`]. [`Action::Toggle`] has no
+/// default chord because a popover usually belongs to one button; bind one
+/// when a popover deserves an app-wide shortcut, and route it from
+/// [`keys::subscription`] with [`Action::apply`].
 pub fn default_keymap() -> Keymap<Action> {
     Keymap::new().bind(Chord::named(Named::Escape), Action::Close)
 }
@@ -207,6 +226,7 @@ mod tests {
         assert_eq!(popover.placement.align, Align::Center);
         assert_eq!(popover.width, Length::Fixed(WIDTH));
         assert_eq!(popover.padding, space::LG);
+        assert_eq!(popover.keymap, default_keymap());
     }
 
     #[test]
@@ -218,7 +238,9 @@ mod tests {
             .align(Align::End)
             .gap(10.0)
             .width(Length::Shrink)
-            .padding(4.0);
+            .padding(4.0)
+            .keymap(Keymap::new());
+        assert!(popover.keymap.is_empty());
         assert!(popover.open);
         assert_eq!(popover.on_dismiss, Some(1));
         assert_eq!(popover.placement.side, Side::Right);

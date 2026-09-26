@@ -66,6 +66,7 @@ impl Example {
                 popover(trigger, info)
                     .open(self.open)
                     .width(240)
+                    .keymap(self.keymap.clone())
                     .on_dismiss(Message::Dismiss),
             )
             .height(140),

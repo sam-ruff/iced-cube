@@ -1,7 +1,7 @@
 use std::fmt;
 
-use iced::Element;
-use iced::widget::row;
+use iced::widget::{container, row};
+use iced::{Element, Length};
 use iced_cube::forms::select;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,17 +48,20 @@ impl Example {
     }
 
     pub fn view(&self) -> Element<'_, Message> {
-        row![
-            select(&Role::ALL[..], Some(self.role))
-                .width(160)
-                .on_select(Message::Selected),
-            select(&Role::ALL[..], None)
-                .placeholder("Disabled")
-                .width(160),
-            select(&Role::ALL[..], Some(Role::Owner)).width(160),
-        ]
-        .spacing(12)
-        .wrap()
+        container(
+            row![
+                select(&Role::ALL[..], Some(self.role))
+                    .width(160)
+                    .on_select(Message::Selected),
+                select(&Role::ALL[..], None)
+                    .placeholder("Disabled")
+                    .width(160),
+                select(&Role::ALL[..], Some(Role::Owner)).width(160),
+            ]
+            .spacing(12)
+            .wrap(),
+        )
+        .height(Length::Fill)
         .into()
     }
 }

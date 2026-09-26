@@ -41,6 +41,11 @@
 //! The dialog handles its own keys through a [`Keymap`], so an app needs no
 //! subscription for it: Escape dismisses, and Tab and Shift+Tab move focus
 //! between the text fields inside the dialog without leaving it.
+//!
+//! While it is open the dialog captures every key press, after the content
+//! inside it has had its turn, so app-wide shortcuts from
+//! [`keys::subscription`] never reach the components underneath. Let
+//! chosen chords through with [`Dialog::pass_through`].
 
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::widget::operation::Focusable;
@@ -50,10 +55,11 @@ use iced::keyboard::key::Named;
 use iced::widget::{self, center, column, container, mouse_area, opaque, row, stack, text};
 use iced::{
     Alignment, Background, Border, Color, Element, Event, Length, Padding, Rectangle, Renderer,
-    Shadow, Size as Bounds, Theme, Vector, keyboard, mouse,
+    Size as Bounds, Theme, Vector, keyboard, mouse,
 };
 
 use crate::keys::{self, Chord, Keymap};
+use crate::overlay::anchored;
 use crate::primitives::button::{self, Size as ButtonSize};
 use crate::primitives::icon_button::icon_button;
 use crate::theme::{Tokens, fade, radius, space, text_size};
@@ -158,9 +164,10 @@ impl keys::Action for Action {
 /// | `Tab` | [`Action::FocusNext`] |
 /// | `Shift+Tab` | [`Action::FocusPrevious`] |
 ///
-/// The dialog resolves these itself while it is open, so they never reach
-/// the content underneath. A focused text field takes the first Escape to
-/// lose focus, so it takes a second Escape to dismiss the dialog.
+/// The dialog resolves these itself while it is open, after the content
+/// inside it, so a menu or combobox in the dialog closes on Escape before
+/// the dialog does. A focused text field takes the first Escape to lose
+/// focus, so it takes a second Escape to dismiss the dialog.
 pub fn default_keymap() -> Keymap<Action> {
     Keymap::new()
         .bind(Chord::named(Named::Escape), Action::Close)
@@ -183,6 +190,7 @@ pub struct Dialog<'a, Message> {
     width: f32,
     id: widget::Id,
     keymap: Keymap<Action>,
+    pass_through: Vec<Chord>,
 }
 
 impl<Message> std::fmt::Debug for Dialog<'_, Message> {
@@ -197,6 +205,7 @@ impl<Message> std::fmt::Debug for Dialog<'_, Message> {
             .field("close_button", &self.close_button)
             .field("width", &self.width)
             .field("id", &self.id)
+            .field("pass_through", &self.pass_through)
             .finish_non_exhaustive()
     }
 }
@@ -218,6 +227,7 @@ pub fn dialog<'a, Message>(base: impl Into<Element<'a, Message>>) -> Dialog<'a, 
         width: Size::default().width(),
         id: DEFAULT_ID,
         keymap: default_keymap(),
+        pass_through: Vec::new(),
     }
 }
 
@@ -304,6 +314,13 @@ impl<'a, Message> Dialog<'a, Message> {
         self
     }
 
+    /// Chords the open dialog lets through to the app, such as the shortcut
+    /// that toggles it. Every other key press stops at the dialog.
+    pub fn pass_through(mut self, chords: impl IntoIterator<Item = Chord>) -> Self {
+        self.pass_through = chords.into_iter().collect();
+        self
+    }
+
     pub fn is_open(&self) -> bool {
         self.open
     }
@@ -325,6 +342,7 @@ impl<'a, Message: Clone + 'a> From<Dialog<'a, Message>> for Element<'a, Message>
             width,
             id,
             keymap,
+            pass_through,
         } = dialog;
 
         let guarded = Element::new(Guard {
@@ -362,6 +380,7 @@ impl<'a, Message: Clone + 'a> From<Dialog<'a, Message>> for Element<'a, Message>
             open,
             surface: id,
             keymap,
+            pass_through,
             on_escape: on_dismiss.filter(|_| dismiss_on_escape),
         })
     }
@@ -376,7 +395,7 @@ fn surface<'a, Message: Clone + 'a>(
     width: f32,
     id: widget::Id,
 ) -> Element<'a, Message> {
-    let mut header = column![].spacing(6);
+    let mut header = column![].spacing(space::XS);
     if let Some(title) = title {
         header = header.push(
             text(title)
@@ -435,22 +454,16 @@ fn surface<'a, Message: Clone + 'a>(
         .into()
 }
 
-/// The dialog surface: the page background with a border and a shadow.
+/// The dialog surface: the floating surface every overlay shares, with a
+/// larger radius.
 pub fn surface_style(tokens: &Tokens) -> container::Style {
+    let style = anchored::surface_style(tokens);
     container::Style {
-        background: Some(Background::Color(tokens.background)),
-        text_color: Some(tokens.foreground),
         border: Border {
-            color: tokens.border,
-            width: 1.0,
             radius: radius::LG.into(),
+            ..style.border
         },
-        shadow: Shadow {
-            color: fade(Color::BLACK, if tokens.is_dark { 0.5 } else { 0.1 }),
-            offset: Vector::new(0.0, 4.0),
-            blur_radius: 12.0,
-        },
-        snap: true,
+        ..style
     }
 }
 
@@ -605,14 +618,28 @@ impl<Message> Widget<Message, Theme, Renderer> for Guard<'_, Message> {
     }
 }
 
-/// Resolves the dialog's keymap and keeps focus inside the surface while
-/// the dialog is open.
+/// Resolves the dialog's keymap, keeps focus inside the surface and
+/// captures every other key press while the dialog is open.
 struct Scope<'a, Message> {
     content: Element<'a, Message>,
     open: bool,
     surface: widget::Id,
     keymap: Keymap<Action>,
+    pass_through: Vec<Chord>,
     on_escape: Option<Message>,
+}
+
+/// The key and modifiers of a key press or release.
+fn key_of(event: &Event) -> Option<(&keyboard::Key, keyboard::Modifiers, bool)> {
+    match event {
+        Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
+            Some((key, *modifiers, true))
+        }
+        Event::Keyboard(keyboard::Event::KeyReleased { key, modifiers, .. }) => {
+            Some((key, *modifiers, false))
+        }
+        _ => None,
+    }
 }
 
 /// Whether focus has moved into the dialog since it opened.
@@ -741,12 +768,23 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for Scope<'_, Message> {
             return;
         }
 
-        let Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) = event else {
+        let Some((key, modifiers, pressed)) = key_of(event) else {
             return;
         };
+        if self
+            .pass_through
+            .iter()
+            .any(|chord| chord.matches(key, modifiers))
+        {
+            return;
+        }
+        shell.capture_event();
+        if !pressed {
+            return;
+        }
         let Some(effect) = self
             .keymap
-            .resolve(key, *modifiers)
+            .resolve(key, modifiers)
             .and_then(|action| action.effect(self.on_escape.is_some()))
         else {
             return;
@@ -764,7 +802,6 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for Scope<'_, Message> {
                 shell.request_redraw();
             }
         }
-        shell.capture_event();
     }
 
     fn mouse_interaction(
@@ -1075,6 +1112,7 @@ mod tests {
         assert_eq!(d.width, Size::Md.width());
         assert_eq!(d.id, DEFAULT_ID);
         assert_eq!(d.keymap, default_keymap());
+        assert!(d.pass_through.is_empty());
     }
 
     #[test]
@@ -1092,7 +1130,9 @@ mod tests {
             .close_button(false)
             .size(Size::Lg)
             .id("custom")
-            .keymap(Keymap::new());
+            .keymap(Keymap::new())
+            .pass_through([Chord::character('k').command()]);
+        assert_eq!(d.pass_through, vec![Chord::character('k').command()]);
         assert!(d.is_open());
         assert_eq!(d.title.as_deref(), Some("Title"));
         assert_eq!(d.description.as_deref(), Some("Description"));
@@ -1237,11 +1277,13 @@ mod tests {
         for theme in [light(), dark()] {
             let tokens = Tokens::of(&theme);
             let style = surface_style(&tokens);
-            assert_eq!(style.background, Some(Background::Color(tokens.background)));
+            let shared = anchored::surface_style(&tokens);
+            assert_eq!(style.background, Some(Background::Color(tokens.popover)));
             assert_eq!(style.text_color, Some(tokens.foreground));
             assert_eq!(style.border.color, tokens.border);
             assert_eq!(style.border.width, 1.0);
             assert_eq!(style.border.radius, radius::LG.into());
+            assert_eq!(style.shadow, shared.shadow);
         }
     }
 

@@ -7,7 +7,8 @@
 //! desktop apps do.
 //!
 //! Keyboard shortcuts resolve through a [`Keymap`] of [`Action`]s; see
-//! [`default_keymap`], [`State::key_event`] and [`crate::keys`].
+//! [`default_keymap`]. The open menu handles its own keys; the app routes
+//! the opening chord through [`State::key_event`].
 
 use std::rc::Rc;
 
@@ -160,6 +161,7 @@ impl From<dropdown_menu::Action> for Action {
     fn from(action: dropdown_menu::Action) -> Self {
         use dropdown_menu::Action as Menu;
         match action {
+            Menu::Open => Action::Open,
             Menu::Next => Action::Next,
             Menu::Previous => Action::Previous,
             Menu::First => Action::First,
@@ -213,8 +215,10 @@ impl keys::Action for Action {
 /// | --- | --- |
 /// | `Shift+F10`, `Menu` | [`Action::Open`] |
 ///
-/// Unlike a dropdown menu, the arrow keys, Enter and Space do nothing
-/// while the menu is closed.
+/// The open menu resolves its keys itself; pass a changed keymap with
+/// [`ContextMenu::keymap`]. While it is closed, only [`Action::Open`] does
+/// anything, and the app routes it from [`keys::subscription`] through
+/// [`State::key_event`].
 pub fn default_keymap() -> Keymap<Action> {
     let open = Keymap::new()
         .bind(Chord::named(Named::F10).shift(), Action::Open)
@@ -231,6 +235,7 @@ pub struct ContextMenu<'a, Id, Message> {
     state: &'a State<Id>,
     content: Element<'a, Message>,
     width: f32,
+    keymap: Keymap<Action>,
     on_event: Option<Box<dyn Fn(Event<Id>) -> Message + 'a>>,
 }
 
@@ -239,6 +244,7 @@ impl<Id: std::fmt::Debug, Message> std::fmt::Debug for ContextMenu<'_, Id, Messa
         f.debug_struct("ContextMenu")
             .field("state", self.state)
             .field("width", &self.width)
+            .field("keymap", &self.keymap)
             .finish_non_exhaustive()
     }
 }
@@ -253,6 +259,7 @@ pub fn context_menu<'a, Id, Message>(
         state,
         content: content.into(),
         width: WIDTH,
+        keymap: default_keymap(),
         on_event: None,
     }
 }
@@ -261,6 +268,12 @@ impl<'a, Id, Message> ContextMenu<'a, Id, Message> {
     /// Width of the menu and its submenus.
     pub fn width(mut self, width: f32) -> Self {
         self.width = width;
+        self
+    }
+
+    /// Replaces the [`default_keymap`] the open menu resolves its keys with.
+    pub fn keymap(mut self, keymap: Keymap<Action>) -> Self {
+        self.keymap = keymap;
         self
     }
 
@@ -280,6 +293,7 @@ where
             state,
             content,
             width,
+            keymap,
             on_event,
         } = menu;
 
@@ -293,13 +307,10 @@ where
             }
             None => Some(dropdown_menu::panel(state.menu(), None, width)),
         };
-        let dismiss = on_event
-            .as_ref()
-            .map(|on_event| on_event(Event::Menu(dropdown_menu::Event::Close)));
 
         let area = Area {
             content,
-            on_open: on_event.map(|on_event| {
+            on_open: on_event.clone().map(|on_event| {
                 Box::new(move |point| on_event(Event::Open(point)))
                     as Box<dyn Fn(Point) -> Message + 'a>
             }),
@@ -308,11 +319,15 @@ where
             .content(panel)
             .at(state.position())
             .placement(Placement::new(Side::Bottom, Align::Start).gap(0.0))
-            .dismiss_on_anchor_press(true);
-        match dismiss {
-            Some(message) => anchored.on_dismiss(message).into(),
-            None => anchored.into(),
-        }
+            .dismiss_on_anchor_press(true)
+            .dismiss_keys([]);
+        let Some(on_event) = on_event.filter(|_| state.is_open()) else {
+            return anchored.into();
+        };
+        anchored
+            .on_dismiss(on_event(Event::Menu(dropdown_menu::Event::Close)))
+            .on_key(move |key| state.key_event(&keymap, key).map(&*on_event))
+            .into()
     }
 }
 
@@ -614,11 +629,14 @@ mod tests {
         let state = state();
         let menu: ContextMenu<'_, u8, ()> = context_menu(&state, text("Area"));
         assert_eq!(menu.width, WIDTH);
+        assert_eq!(menu.keymap, default_keymap());
         assert!(menu.on_event.is_none());
         let menu: ContextMenu<'_, u8, ()> = context_menu(&state, text("Area"))
             .width(180.0)
+            .keymap(Keymap::new())
             .on_event(|_| ());
         assert_eq!(menu.width, 180.0);
+        assert!(menu.keymap.is_empty());
         assert!(menu.on_event.is_some());
     }
 }

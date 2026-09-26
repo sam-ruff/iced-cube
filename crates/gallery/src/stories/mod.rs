@@ -334,7 +334,7 @@ crate::stories! {
     CommandInline => command::inline {
         id: "command/inline", component: "command", title: "Inline",
         description: "Grouped actions with icons, shortcut hints, keywords and a disabled row.",
-        file: "command/inline.rs", height: 380,
+        file: "command/inline.rs", height: 400,
     }
     CommandKeyboard => command::keyboard {
         id: "command/keyboard", component: "command", title: "Keyboard shortcuts",
@@ -345,6 +345,11 @@ crate::stories! {
         id: "command/async-search", component: "command", title: "Async results",
         description: "A background task streams file matches through the channel, tagged with their query. It waits with futures-timer, so it also runs in the browser.",
         file: "command/async_search.rs", height: 380, subscription: true,
+    }
+    CommandPalette => command::palette {
+        id: "command/palette", component: "command", title: "Command palette",
+        description: "The list in a dialog, opened by a button or Ctrl+K. Escape clears the query, then closes the palette; Ctrl+K passes through the dialog to close it too.",
+        file: "command/palette.rs", height: 460, subscription: true,
     }
     AccordionSingle => accordion::single {
         id: "accordion/single", component: "accordion", title: "Single",
@@ -428,8 +433,13 @@ crate::stories! {
     }
     DropdownMenuKeyboard => dropdown_menu::keyboard {
         id: "dropdown-menu/keyboard", component: "dropdown-menu", title: "Keyboard shortcuts",
-        description: "Key presses resolve through the default keymap, with typeahead for letters.",
+        description: "The open menu resolves its own keys through the keymap, with typeahead for letters. The app binds Alt+ArrowDown to open it.",
         file: "dropdown_menu/keyboard.rs", height: 400, subscription: true,
+    }
+    DropdownMenuInDialog => dropdown_menu::in_dialog {
+        id: "dropdown-menu/in-dialog", component: "dropdown-menu", title: "In a dialog",
+        description: "A menu inside a dialog. A click outside or Escape closes only the menu; the next one closes the dialog.",
+        file: "dropdown_menu/in_dialog.rs", height: 400,
     }
     ContextMenuDefault => context_menu::default {
         id: "context-menu/default", component: "context-menu", title: "Default",

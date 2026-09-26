@@ -6,7 +6,10 @@
 //!
 //! While the field has focus or the list is open, the combobox handles its
 //! own keys through a [`Keymap`] of [`Action`]s: arrows move the highlight,
-//! Enter chooses and Escape closes. See [`default_keymap`].
+//! Enter chooses and Escape closes. See [`default_keymap`]. The list is
+//! drawn in the shared [menu look](crate::overlay::menu) on the
+//! [anchored layer](crate::overlay::anchored), so a click outside closes
+//! only the list, even inside a dialog or popover.
 //!
 //! ```no_run
 //! use iced::Element;
@@ -39,28 +42,27 @@
 //! ```
 
 use std::fmt::{self, Display};
+use std::rc::Rc;
 
 use iced::keyboard::key::Named;
 use iced::mouse::ScrollDelta;
 use iced::widget::text::LineHeight;
 use iced::widget::text_input::{self, Status};
-use iced::widget::{self, Column, container, mouse_area, row, stack, text};
-use iced::{Alignment, Element, Length, Padding, Theme, mouse};
+use iced::widget::{self, Column, container, mouse_area, stack};
+use iced::{Alignment, Color, Element, Length, Padding, Theme};
 
 use crate::icon::tinted;
 use crate::keys::{self, Chord, Keymap};
-use crate::popup::{self, ROW_PADDING, scope};
+use crate::overlay::anchored::{Align, Placement, Side, anchored};
+use crate::overlay::menu::{self, DISABLED_ICON_OPACITY, Parts, RowStatus, Trailing};
 use crate::primitives::input::{self, Size};
-use crate::theme::{Tokens, fade, space, text_size};
-
-pub use crate::popup::{RowStatus, row_style, surface_style};
+use crate::theme::{Tokens, space};
 
 /// How many suggestions show at once unless the state sets its own number.
 pub const VISIBLE_ROWS: usize = 6;
 /// Shown when no option matches the query, unless the builder sets its own.
 pub const DEFAULT_EMPTY: &str = "No results found.";
 
-const ICON_SIZE: f32 = 16.0;
 // Matches the line height `input` uses, so the field is the same height.
 const LINE_HEIGHT: f32 = 1.3;
 
@@ -77,11 +79,11 @@ pub enum Event {
     /// Highlights the previous match, wrapping round. Opens a closed list.
     Previous,
     /// Chooses the highlighted match.
-    Confirm,
+    ActivateHighlighted,
     /// Highlights an option, by its index in [`State::options`].
     Highlight(usize),
     /// Chooses an option, by its index in [`State::options`].
-    Pick(usize),
+    Activate(usize),
     /// Scrolls the list by a number of rows, down when positive.
     Scroll(i32),
 }
@@ -203,14 +205,14 @@ impl<T> State<T> {
             Event::Next | Event::Previous if !self.open => self.open(),
             Event::Next => self.step(1),
             Event::Previous => self.step(-1),
-            Event::Confirm => {
+            Event::ActivateHighlighted => {
                 if !self.open {
                     return None;
                 }
                 let index = *self.matches.get(self.highlighted)?;
                 return self.choose(index);
             }
-            Event::Pick(index) => return self.choose(index),
+            Event::Activate(index) => return self.choose(index),
             Event::Highlight(index) => {
                 if let Some(position) = self.matches.iter().position(|&i| i == index) {
                     self.highlight(position);
@@ -296,7 +298,7 @@ impl<T> State<T> {
 pub enum Action {
     Next,
     Previous,
-    Confirm,
+    Activate,
     Close,
 }
 
@@ -307,7 +309,7 @@ impl Action {
         match self {
             Action::Next => Some(Event::Next),
             Action::Previous => Some(Event::Previous),
-            Action::Confirm => state.open.then_some(Event::Confirm),
+            Action::Activate => state.open.then_some(Event::ActivateHighlighted),
             Action::Close => state.open.then_some(Event::Close),
         }
     }
@@ -317,7 +319,7 @@ impl keys::Action for Action {
     const ALL: &'static [Self] = &[
         Action::Next,
         Action::Previous,
-        Action::Confirm,
+        Action::Activate,
         Action::Close,
     ];
 
@@ -329,7 +331,7 @@ impl keys::Action for Action {
         match self {
             Action::Next => "Next",
             Action::Previous => "Previous",
-            Action::Confirm => "Confirm",
+            Action::Activate => "Activate",
             Action::Close => "Close",
         }
     }
@@ -340,7 +342,7 @@ impl keys::Action for Action {
             Action::Previous => {
                 "Highlights the previous suggestion, opening the list if it is closed."
             }
-            Action::Confirm => "Chooses the highlighted suggestion and closes the list.",
+            Action::Activate => "Chooses the highlighted suggestion and closes the list.",
             Action::Close => "Closes the list and clears the query.",
         }
     }
@@ -352,7 +354,7 @@ impl keys::Action for Action {
 /// | --- | --- |
 /// | `ArrowDown` | [`Action::Next`] |
 /// | `ArrowUp` | [`Action::Previous`] |
-/// | `Enter` | [`Action::Confirm`] |
+/// | `Enter` | [`Action::Activate`] |
 /// | `Escape` | [`Action::Close`] |
 ///
 /// The combobox handles these itself while its field has focus or its list
@@ -362,7 +364,7 @@ pub fn default_keymap() -> Keymap<Action> {
     Keymap::new()
         .bind(Chord::named(Named::ArrowDown), Action::Next)
         .bind(Chord::named(Named::ArrowUp), Action::Previous)
-        .bind(Chord::named(Named::Enter), Action::Confirm)
+        .bind(Chord::named(Named::Enter), Action::Activate)
         .bind(Chord::named(Named::Escape), Action::Close)
 }
 
@@ -374,6 +376,7 @@ pub struct Combobox<'a, T, Message> {
     placeholder: String,
     empty: String,
     width: Length,
+    size: Size,
     id: Option<widget::Id>,
     keymap: Keymap<Action>,
     on_event: Option<Box<dyn Fn(Event) -> Message + 'a>>,
@@ -386,6 +389,7 @@ pub fn combobox<'a, T, Message>(state: &'a State<T>) -> Combobox<'a, T, Message>
         placeholder: String::new(),
         empty: DEFAULT_EMPTY.to_owned(),
         width: Length::Fixed(240.0),
+        size: Size::default(),
         id: None,
         keymap: default_keymap(),
         on_event: None,
@@ -399,6 +403,7 @@ impl<T: fmt::Debug, Message> fmt::Debug for Combobox<'_, T, Message> {
             .field("placeholder", &self.placeholder)
             .field("empty", &self.empty)
             .field("width", &self.width)
+            .field("size", &self.size)
             .field("enabled", &self.on_event.is_some())
             .finish_non_exhaustive()
     }
@@ -420,6 +425,13 @@ impl<'a, T, Message> Combobox<'a, T, Message> {
     /// Overrides the width. Defaults to 240 pixels.
     pub fn width(mut self, width: impl Into<Length>) -> Self {
         self.width = width.into();
+        self
+    }
+
+    /// The field's height, padding and text size, shared with
+    /// [`input`](crate::primitives::input). Defaults to [`Size::Md`].
+    pub fn size(mut self, size: Size) -> Self {
+        self.size = size;
         self
     }
 
@@ -458,6 +470,7 @@ where
             placeholder,
             empty,
             width,
+            size,
             id,
             keymap,
             on_event,
@@ -466,10 +479,11 @@ where
 
         let Some(on_event) = on_event else {
             let value = selected.unwrap_or_default();
-            return container(field(&placeholder, &value, id, None, false))
+            return container(field(&placeholder, &value, size, id, None, false))
                 .width(width)
                 .into();
         };
+        let on_event: Rc<dyn Fn(Event) -> Message + 'a> = Rc::from(on_event);
 
         let open = state.open;
         let (value, hint) = if open {
@@ -478,18 +492,29 @@ where
             (selected.unwrap_or_default(), placeholder)
         };
 
-        let bindings = popup::bindings(&keymap, |action| action.event(state).map(&on_event));
-        let list = open.then(|| suggestions(state, &empty, &on_event));
-        let on_press = (!open).then(|| on_event(Event::Open));
+        let list = open.then(|| suggestions(state, &empty, &*on_event));
+        let on_anchor_press = (!open).then(|| on_event(Event::Open));
         let on_dismiss = open.then(|| on_event(Event::Close));
-        let on_input = move |query| on_event(Event::Input(query));
+        let on_input: OnInput<'a, Message> = {
+            let on_event = Rc::clone(&on_event);
+            Box::new(move |query| on_event(Event::Input(query)))
+        };
+        let field = container(field(&hint, &value, size, id, Some(on_input), open)).width(width);
 
-        scope(container(field(&hint, &value, id, Some(Box::new(on_input)), open)).width(width))
-            .popup(list)
-            .bindings(bindings)
-            .always(open)
-            .on_press(on_press)
-            .on_dismiss(on_dismiss)
+        anchored(field)
+            .content(list)
+            .placement(Placement::new(Side::Bottom, Align::Start))
+            .match_width(true)
+            .dismiss_keys([])
+            .dismiss_on_blur(true)
+            .on_dismiss_maybe(on_dismiss)
+            .on_anchor_press_maybe(on_anchor_press)
+            .on_key(move |key| {
+                keymap
+                    .resolve_event(key)
+                    .and_then(|action| action.event(state))
+                    .map(&*on_event)
+            })
             .into()
     }
 }
@@ -499,14 +524,15 @@ type OnInput<'a, Message> = Box<dyn Fn(String) -> Message + 'a>;
 fn field<'a, Message: Clone + 'a>(
     placeholder: &str,
     value: &str,
+    size: Size,
     id: Option<widget::Id>,
     on_input: Option<OnInput<'a, Message>>,
     open: bool,
 ) -> Element<'a, Message> {
     let enabled = on_input.is_some();
-    let metrics = Size::Md.metrics();
+    let metrics = size.metrics();
     let mut padding = metrics.padding(false);
-    padding.right += ICON_SIZE + space::SM;
+    padding.right += metrics.icon + space::SM;
 
     let mut input = widget::text_input(placeholder, value)
         .size(metrics.text)
@@ -521,12 +547,11 @@ fn field<'a, Message: Clone + 'a>(
         input = input.on_input(on_input);
     }
 
-    let chevron =
-        tinted(crate::lucide!(ChevronsUpDown), ICON_SIZE, None).style(move |theme: &Theme, _| {
-            widget::svg::Style {
-                color: Some(chevron_colour(&Tokens::of(theme), enabled)),
-            }
-        });
+    let chevron = tinted(crate::lucide!(ChevronsUpDown), metrics.icon, None)
+        .style(move |theme: &Theme, _| widget::svg::Style {
+            color: Some(chevron_colour(&Tokens::of(theme))),
+        })
+        .opacity(chevron_opacity(enabled));
 
     stack![
         input,
@@ -543,7 +568,7 @@ fn field<'a, Message: Clone + 'a>(
 fn suggestions<'a, T: Display, Message: Clone + 'a>(
     state: &'a State<T>,
     empty: &str,
-    on_event: &impl Fn(Event) -> Message,
+    on_event: &dyn Fn(Event) -> Message,
 ) -> Element<'a, Message> {
     let rows: Vec<Element<'a, Message>> = state
         .visible()
@@ -553,60 +578,38 @@ fn suggestions<'a, T: Display, Message: Clone + 'a>(
             } else {
                 RowStatus::Idle
             };
-            let mut content = row![
-                text(option.to_string())
-                    .size(text_size::SM)
-                    .width(Length::Fill)
-            ]
-            .spacing(space::SM)
-            .align_y(Alignment::Center);
-            if state.selected == Some(index) {
-                content = content.push(tinted(crate::lucide!(Check), ICON_SIZE, None).style(
-                    move |theme: &Theme, _| widget::svg::Style {
-                        color: popup::row_style(&Tokens::of(theme), status, false).text_color,
-                    },
-                ));
-            }
-            let item = container(content)
-                .padding(ROW_PADDING)
-                .width(Length::Fill)
-                .style(move |theme| popup::row_style(&Tokens::of(theme), status, false));
-            mouse_area(item)
-                .on_enter(on_event(Event::Highlight(index)))
-                .on_press(on_event(Event::Pick(index)))
-                .interaction(mouse::Interaction::Pointer)
-                .into()
+            let label = option.to_string();
+            let trailing = if state.selected == Some(index) {
+                Trailing::Check
+            } else {
+                Trailing::None
+            };
+            let parts = Parts {
+                trailing,
+                ..Parts::label(&label)
+            };
+            let messages = (
+                on_event(Event::Highlight(index)),
+                on_event(Event::Activate(index)),
+            );
+            menu::item(parts, status, false, Some(messages))
         })
         .collect();
 
     let body: Element<'a, Message> = if rows.is_empty() {
-        container(
-            text(empty.to_owned())
-                .size(text_size::SM)
-                .style(|theme: &Theme| text::Style {
-                    color: Some(Tokens::of(theme).muted_foreground),
-                }),
-        )
-        .padding([space::XL, space::SM])
-        .center_x(Length::Fill)
-        .into()
+        menu::empty(empty)
     } else {
         Column::from_vec(rows).width(Length::Fill).into()
     };
 
     let down = on_event(Event::Scroll(1));
     let up = on_event(Event::Scroll(-1));
-    mouse_area(
-        container(body)
-            .padding(space::XS)
-            .width(Length::Fill)
-            .style(|theme| popup::surface_style(&Tokens::of(theme))),
-    )
-    .on_scroll(move |delta| match delta {
-        ScrollDelta::Lines { y, .. } | ScrollDelta::Pixels { y, .. } if y < 0.0 => down.clone(),
-        _ => up.clone(),
-    })
-    .into()
+    mouse_area(menu::surface(body).width(Length::Fill))
+        .on_scroll(move |delta| match delta {
+            ScrollDelta::Lines { y, .. } | ScrollDelta::Pixels { y, .. } if y < 0.0 => down.clone(),
+            _ => up.clone(),
+        })
+        .into()
 }
 
 /// The field style: the input style, drawn focused while the list is open.
@@ -619,13 +622,16 @@ pub fn style(tokens: &Tokens, status: Status, open: bool) -> text_input::Style {
     input::style(tokens, status, false)
 }
 
-/// The colour of the chevron at the end of the field.
-pub fn chevron_colour(tokens: &Tokens, enabled: bool) -> iced::Color {
-    if enabled {
-        tokens.muted_foreground
-    } else {
-        fade(tokens.muted_foreground, 0.5)
-    }
+/// The colour of the chevron at the end of the field. It stays opaque;
+/// [`chevron_opacity`] fades it when the combobox is disabled.
+pub fn chevron_colour(tokens: &Tokens) -> Color {
+    tokens.muted_foreground
+}
+
+/// The chevron's svg opacity. iced ignores the alpha of an svg tint, so a
+/// disabled chevron fades through its opacity instead.
+pub fn chevron_opacity(enabled: bool) -> f32 {
+    if enabled { 1.0 } else { DISABLED_ICON_OPACITY }
 }
 
 #[cfg(test)]
@@ -685,7 +691,7 @@ mod tests {
         let _ = state.update(Event::Input("kiwi".into()));
         assert!(state.matches().next().is_none());
         assert!(state.highlighted().is_none());
-        assert!(state.update(Event::Confirm).is_none());
+        assert!(state.update(Event::ActivateHighlighted).is_none());
         let _ = state.update(Event::Next);
         assert!(state.highlighted().is_none());
     }
@@ -714,7 +720,7 @@ mod tests {
     fn confirm_chooses_closes_and_clears_the_query() {
         let mut state = fruits();
         let _ = state.update(Event::Input("an".into()));
-        assert_eq!(state.update(Event::Confirm), Some("Banana"));
+        assert_eq!(state.update(Event::ActivateHighlighted), Some("Banana"));
         assert!(!state.is_open());
         assert_eq!(state.query(), "");
         assert_eq!(state.selected(), Some(&"Banana"));
@@ -724,7 +730,7 @@ mod tests {
     #[test]
     fn confirm_does_nothing_while_closed() {
         let mut state = fruits();
-        assert!(state.update(Event::Confirm).is_none());
+        assert!(state.update(Event::ActivateHighlighted).is_none());
         assert!(state.selected().is_none());
     }
 
@@ -738,8 +744,8 @@ mod tests {
         let _ = state.update(Event::Highlight(0));
         assert_eq!(state.highlighted(), Some(&"Blueberry"));
 
-        assert_eq!(state.update(Event::Pick(3)), Some("Cherry"));
-        assert!(state.update(Event::Pick(99)).is_none());
+        assert_eq!(state.update(Event::Activate(3)), Some("Cherry"));
+        assert!(state.update(Event::Activate(99)).is_none());
         assert_eq!(state.selected(), Some(&"Cherry"));
     }
 
@@ -791,7 +797,7 @@ mod tests {
         let _ = state.update(Event::Next);
         let _ = state.update(Event::Previous);
         let _ = state.update(Event::Scroll(3));
-        assert!(state.update(Event::Confirm).is_none());
+        assert!(state.update(Event::ActivateHighlighted).is_none());
         assert!(state.highlighted().is_none());
     }
 
@@ -800,7 +806,7 @@ mod tests {
         let keymap = default_keymap();
         assert_eq!(press(&keymap, "ArrowDown"), Some(Action::Next));
         assert_eq!(press(&keymap, "ArrowUp"), Some(Action::Previous));
-        assert_eq!(press(&keymap, "Enter"), Some(Action::Confirm));
+        assert_eq!(press(&keymap, "Enter"), Some(Action::Activate));
         assert_eq!(press(&keymap, "Escape"), Some(Action::Close));
 
         let custom = keymap
@@ -815,11 +821,14 @@ mod tests {
         let mut state = fruits();
         assert_eq!(Action::Next.event(&state), Some(Event::Next));
         assert_eq!(Action::Previous.event(&state), Some(Event::Previous));
-        assert_eq!(Action::Confirm.event(&state), None);
+        assert_eq!(Action::Activate.event(&state), None);
         assert_eq!(Action::Close.event(&state), None);
 
         let _ = state.update(Event::Open);
-        assert_eq!(Action::Confirm.event(&state), Some(Event::Confirm));
+        assert_eq!(
+            Action::Activate.event(&state),
+            Some(Event::ActivateHighlighted)
+        );
         assert_eq!(Action::Close.event(&state), Some(Event::Close));
     }
 
@@ -830,8 +839,14 @@ mod tests {
         assert!(!c.is_enabled());
         assert_eq!(c.empty, DEFAULT_EMPTY);
         assert_eq!(c.width, Length::Fixed(240.0));
+        assert_eq!(c.size, Size::Md);
         assert_eq!(c.keymap, default_keymap());
-        let c = c.placeholder("Pick").empty("None").on_event(|e| e);
+        let c = c
+            .placeholder("Pick")
+            .empty("None")
+            .size(Size::Sm)
+            .on_event(|e| e);
+        assert_eq!(c.size, Size::Sm);
         assert!(c.is_enabled());
         assert_eq!((c.placeholder.as_str(), c.empty.as_str()), ("Pick", "None"));
     }
@@ -861,11 +876,13 @@ mod tests {
     }
 
     #[test]
-    fn disabled_chevron_is_faded() {
+    fn disabled_chevron_fades_through_its_opacity() {
         for theme in [light(), dark()] {
             let tokens = Tokens::of(&theme);
-            assert_eq!(chevron_colour(&tokens, true), tokens.muted_foreground);
-            assert!(chevron_colour(&tokens, false).a < tokens.muted_foreground.a);
+            assert_eq!(chevron_colour(&tokens), tokens.muted_foreground);
+            assert_eq!(chevron_colour(&tokens).a, 1.0, "svg tints ignore alpha");
         }
+        assert_eq!(chevron_opacity(true), 1.0);
+        assert!(chevron_opacity(false) < 1.0);
     }
 }
