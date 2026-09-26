@@ -78,8 +78,12 @@ pub use overlay::tooltip;
 #[cfg(feature = "toast")]
 pub use overlay::{toast, toasts};
 
+#[cfg(feature = "button")]
+pub use primitives::button;
 #[cfg(feature = "checkbox")]
 pub use primitives::checkbox;
+#[cfg(feature = "icon-button")]
+pub use primitives::icon_button;
 #[cfg(feature = "input")]
 pub use primitives::input;
 #[cfg(feature = "scroll-area")]
@@ -88,8 +92,6 @@ pub use primitives::scroll_area;
 pub use primitives::slider;
 #[cfg(feature = "switch")]
 pub use primitives::switch;
-#[cfg(feature = "button")]
-pub use primitives::{button, icon_button};
 #[cfg(feature = "radio")]
 pub use primitives::{radio, radio_group};
 #[cfg(feature = "separator")]

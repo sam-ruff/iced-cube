@@ -26,6 +26,7 @@ full = ["primitives", "forms", "layout", "navigation", "overlay", "feedback"]
 
 primitives = [
     "button",
+    "icon-button",
     "input",
     "checkbox",
     "radio",
@@ -41,6 +42,7 @@ overlay = ["tooltip", "toast"]
 feedback = ["alert", "badge", "progress", "spinner"]
 
 button = []
+icon-button = ["button", "tooltip"]
 input = []
 checkbox = []
 radio = []
@@ -58,7 +60,7 @@ accordion = []
 command = ["iced/advanced"]
 tabs = []
 tooltip = []
-toast = ["button"]
+toast = ["button", "icon-button"]
 alert = []
 badge = []
 progress = []

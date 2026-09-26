@@ -110,18 +110,8 @@ pub fn button<'a, Message>(label: impl text::IntoFragment<'a>) -> Button<'a, Mes
     }
 }
 
-/// Creates a square icon-only button.
-pub fn icon_button<'a, Message>(glyph: Glyph) -> Button<'a, Message> {
-    Button {
-        label: None,
-        leading: Some(glyph),
-        trailing: None,
-        variant: Variant::Ghost,
-        size: Size::Icon,
-        width: Length::Shrink,
-        on_press: None,
-    }
-}
+#[cfg(feature = "icon-button")]
+pub use super::icon_button::icon_button;
 
 impl<'a, Message> Button<'a, Message> {
     pub fn variant(mut self, variant: Variant) -> Self {
@@ -354,14 +344,6 @@ mod tests {
                 .on_press_maybe(None)
                 .is_enabled()
         );
-    }
-
-    #[test]
-    fn icon_button_is_square_ghost() {
-        let b: Button<'_, ()> = icon_button(crate::lucide!(Plus));
-        assert_eq!(b.size, Size::Icon);
-        assert_eq!(b.variant, Variant::Ghost);
-        assert!(b.label.is_none());
     }
 
     #[test]

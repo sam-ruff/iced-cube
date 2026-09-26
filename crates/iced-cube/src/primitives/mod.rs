@@ -1,10 +1,12 @@
-//! Basic controls: buttons, checkboxes, inputs, radios, scroll areas,
-//! separators, sliders and switches.
+//! Basic controls: buttons, icon buttons, checkboxes, inputs, radios,
+//! scroll areas, separators, sliders and switches.
 
 #[cfg(feature = "button")]
 pub mod button;
 #[cfg(feature = "checkbox")]
 pub mod checkbox;
+#[cfg(feature = "icon-button")]
+pub mod icon_button;
 #[cfg(feature = "input")]
 pub mod input;
 #[cfg(feature = "radio")]
@@ -19,9 +21,11 @@ pub mod slider;
 pub mod switch;
 
 #[cfg(feature = "button")]
-pub use button::{Button, button, icon_button};
+pub use button::{Button, button};
 #[cfg(feature = "checkbox")]
 pub use checkbox::{CheckState, Checkbox, checkbox};
+#[cfg(feature = "icon-button")]
+pub use icon_button::{IconButton, icon_button};
 #[cfg(feature = "input")]
 pub use input::{Input, input};
 #[cfg(feature = "radio")]

@@ -12,6 +12,7 @@ pub mod card;
 pub mod checkbox;
 pub mod combobox;
 pub mod command;
+pub mod icon_button;
 pub mod input;
 pub mod label;
 pub mod progress;
@@ -50,6 +51,21 @@ crate::stories! {
         id: "button/counter", component: "button", title: "Enabled and disabled",
         description: "A button without a message renders disabled.",
         file: "button/counter.rs", height: 200,
+    }
+    IconButtonToolbar => icon_button::toolbar {
+        id: "icon-button/toolbar", component: "icon-button", title: "Formatting toolbar",
+        description: "Toggles that stay pressed while a format is on, with labels shown as tooltips.",
+        file: "icon_button/toolbar.rs", height: 200,
+    }
+    IconButtonVariants => icon_button::variants {
+        id: "icon-button/variants", component: "icon-button", title: "Variants",
+        description: "The same variants as a text button.",
+        file: "icon_button/variants.rs", height: 160,
+    }
+    IconButtonSizes => icon_button::sizes {
+        id: "icon-button/sizes", component: "icon-button", title: "Sizes",
+        description: "Small, medium and large squares.",
+        file: "icon_button/sizes.rs", height: 160,
     }
     InputDefault => input::default {
         id: "input/default", component: "input", title: "Default",

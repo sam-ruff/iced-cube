@@ -58,6 +58,7 @@ use iced::{
 use crate::icon::{Glyph, tinted};
 use crate::keys::{self, Chord, Keymap};
 use crate::primitives::button::{self, Size};
+use crate::primitives::icon_button::icon_button;
 use crate::theme::{Tokens, fade, mix, radius, space, text_size};
 
 /// How many toasts a producer can send before it has to wait.
@@ -571,7 +572,7 @@ fn card<'a, Message: Clone + 'a>(
     }
     content = content.push(
         container(
-            button::icon_button(crate::lucide!(X))
+            icon_button(crate::lucide!(X))
                 .size(Size::Sm)
                 .on_press_maybe(emit(Event::Dismiss(id))),
         )

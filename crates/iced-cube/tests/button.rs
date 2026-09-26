@@ -2,15 +2,14 @@
 
 use iced::Element;
 use iced::widget::column;
+use iced_cube::button;
 use iced_cube::primitives::button::{Size, Variant};
-use iced_cube::{button, icon_button, lucide};
 use iced_test::simulator;
 
 #[derive(Debug, Clone, PartialEq)]
 enum Message {
     Save,
     Delete,
-    Add,
 }
 
 fn view(enabled: bool) -> Element<'static, Message> {
@@ -19,9 +18,6 @@ fn view(enabled: bool) -> Element<'static, Message> {
         button("Delete")
             .variant(Variant::Destructive)
             .on_press_maybe(enabled.then_some(Message::Delete)),
-        icon_button(lucide!(Plus))
-            .size(Size::Icon)
-            .on_press(Message::Add),
     ]
     .into()
 }
