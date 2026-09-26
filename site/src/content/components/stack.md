@@ -23,7 +23,7 @@ api:
   - name: ".wrap()"
     description: "Moves children onto a new line when they run out of room."
   - name: ".padding(padding) / .width(length) / .height(length)"
-    description: "Sizing, as on any iced column or row."
+    description: "Sizing, as on any iced column or row. Without a width or height the stack follows its children: it shrinks to fit, or fills when a child fills."
   - name: "Gap::pixels()"
     description: "The gap in pixels: 0, 4, 8, 12, 16 or 24."
   - name: ".len() / .is_empty()"

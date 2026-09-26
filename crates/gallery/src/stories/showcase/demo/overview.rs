@@ -255,13 +255,11 @@ fn stat<'a>(
                     icon::icon(glyph, 16.0).into(),
                 ])
                 .align(Alignment::Center)
-                .width(Length::Fill)
                 .into(),
                 text(value.to_string()).size(28).font(semibold()).into(),
                 note,
             ])
-            .gap(Gap::Sm)
-            .width(Length::Fill),
+            .gap(Gap::Sm),
         )
         .width(width)
         .into()

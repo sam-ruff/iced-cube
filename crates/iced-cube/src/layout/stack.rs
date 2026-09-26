@@ -50,8 +50,10 @@ pub struct Stack<'a, Message> {
     gap: Gap,
     align: Alignment,
     padding: Padding,
-    width: Length,
-    height: Length,
+    /// `None` follows the children, as an iced column does: a stack with a
+    /// `Fill` child fills.
+    width: Option<Length>,
+    height: Option<Length>,
     wrap: bool,
 }
 
@@ -89,8 +91,8 @@ impl<'a, Message> Stack<'a, Message> {
             gap: Gap::default(),
             align: Alignment::Start,
             padding: Padding::ZERO,
-            width: Length::Shrink,
-            height: Length::Shrink,
+            width: None,
+            height: None,
             wrap: false,
         }
     }
@@ -118,13 +120,17 @@ impl<'a, Message> Stack<'a, Message> {
         self
     }
 
+    /// Overrides the width. Without it the stack shrinks to its children,
+    /// or fills when a child fills.
     pub fn width(mut self, width: impl Into<Length>) -> Self {
-        self.width = width.into();
+        self.width = Some(width.into());
         self
     }
 
+    /// Overrides the height, which otherwise follows the children as the
+    /// width does.
     pub fn height(mut self, height: impl Into<Length>) -> Self {
-        self.height = height.into();
+        self.height = Some(height.into());
         self
     }
 
@@ -152,12 +158,16 @@ impl<'a, Message: 'a> From<Stack<'a, Message>> for Element<'a, Message> {
         let gap = stack.gap.pixels();
         match stack.axis {
             Axis::Vertical => {
-                let column = Column::from_vec(stack.children)
+                let mut column = Column::with_children(stack.children)
                     .spacing(gap)
                     .align_x(stack.align)
-                    .padding(stack.padding)
-                    .width(stack.width)
-                    .height(stack.height);
+                    .padding(stack.padding);
+                if let Some(width) = stack.width {
+                    column = column.width(width);
+                }
+                if let Some(height) = stack.height {
+                    column = column.height(height);
+                }
                 if stack.wrap {
                     column.wrap().into()
                 } else {
@@ -165,12 +175,16 @@ impl<'a, Message: 'a> From<Stack<'a, Message>> for Element<'a, Message> {
                 }
             }
             Axis::Horizontal => {
-                let row = Row::from_vec(stack.children)
+                let mut row = Row::with_children(stack.children)
                     .spacing(gap)
                     .align_y(stack.align)
-                    .padding(stack.padding)
-                    .width(stack.width)
-                    .height(stack.height);
+                    .padding(stack.padding);
+                if let Some(width) = stack.width {
+                    row = row.width(width);
+                }
+                if let Some(height) = stack.height {
+                    row = row.height(height);
+                }
                 if stack.wrap {
                     row.wrap().into()
                 } else {
@@ -191,7 +205,8 @@ mod tests {
         assert_eq!(s.axis(), Axis::Vertical);
         assert_eq!(s.gap, Gap::Md);
         assert_eq!(s.align, Alignment::Start);
-        assert_eq!(s.width, Length::Shrink);
+        assert_eq!(s.width, None);
+        assert_eq!(s.height, None);
         assert!(!s.wrap);
         assert!(s.is_empty());
     }
@@ -226,7 +241,22 @@ mod tests {
             .wrap();
         assert_eq!(s.gap, Gap::Xl);
         assert_eq!(s.align, Alignment::Center);
-        assert_eq!(s.width, Length::Fill);
+        assert_eq!(s.width, Some(Length::Fill));
         assert!(s.wrap);
+    }
+
+    #[test]
+    fn an_unset_size_follows_the_children() {
+        let filling: Element<'_, ()> =
+            vstack([iced::widget::space().width(Length::Fill).into()]).into();
+        assert_eq!(filling.as_widget().size().width, Length::Fill);
+
+        let shrinking: Element<'_, ()> = vstack(["a".into()]).into();
+        assert_eq!(shrinking.as_widget().size().width, Length::Shrink);
+
+        let fixed: Element<'_, ()> = hstack([iced::widget::space().width(Length::Fill).into()])
+            .width(120)
+            .into();
+        assert_eq!(fixed.as_widget().size().width, Length::Fixed(120.0));
     }
 }

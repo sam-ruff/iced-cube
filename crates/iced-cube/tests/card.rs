@@ -50,3 +50,48 @@ fn card_without_header_renders_body() {
     let mut ui = simulator(element);
     assert!(ui.find("Only body").is_ok());
 }
+
+#[test]
+fn a_link_in_the_footer_lines_up_with_the_body() {
+    let element: Element<'_, Message> = card()
+        .title("Running now")
+        .body(text("Body text"))
+        .footer(
+            button("View all")
+                .variant(Variant::Link)
+                .on_press(Message::Save),
+        )
+        .into();
+    let mut ui = simulator(element);
+    let body = ui.find("Body text").expect("body is rendered").bounds().x;
+    let link = ui.find("View all").expect("link is rendered").bounds().x;
+    assert!((body - link).abs() < 0.5, "body at {body}, link at {link}");
+}
+
+#[cfg(feature = "stack")]
+#[test]
+fn a_stack_body_with_a_filling_row_fills_the_card() {
+    use iced::Length;
+    use iced::widget::space;
+    use iced_cube::{hstack, vstack};
+
+    let element: Element<'_, Message> = card()
+        .body(vstack([
+            hstack([
+                text("Left").into(),
+                space().width(Length::Fill).into(),
+                text("Right").into(),
+            ])
+            .into(),
+            text("Below").into(),
+        ]))
+        .width(400)
+        .into();
+    let mut ui = simulator(element);
+    let right = ui.find("Right").expect("row is rendered").bounds();
+    // 24 pixels of card padding and a 1 pixel border on each side.
+    assert!(
+        right.x + right.width > 400.0 - 24.0 - 2.0,
+        "the row reaches the card's right padding: {right:?}"
+    );
+}

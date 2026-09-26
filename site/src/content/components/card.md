@@ -24,4 +24,6 @@ api:
 
 A card is a container with a border, rounded corners and consistent padding. In light themes it sits on the page background with a faint shadow; in dark themes the surface is a shade lighter than the page so it still reads as raised.
 
-The footer takes any element, so you decide how actions are laid out. Buttons inside a card work exactly as they do anywhere else.
+The footer takes any element, so you decide how actions are laid out. Buttons inside a card work exactly as they do anywhere else. A link button has no padding at its sides, so a "View all" link in the footer lines up with the body above it.
+
+The body fills the card when it contains something that fills, such as a row with a spacer. A `vstack` or `hstack` follows its children the way an iced `column` does, so a stat card whose header row pushes an icon to the right needs no extra width settings. Give the card itself a width, or put it in a layout that sizes it, since a card on its own shrinks to fit.
