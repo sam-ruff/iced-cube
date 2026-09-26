@@ -81,10 +81,11 @@ impl<'a, Message: 'a> From<Card<'a, Message>> for Element<'a, Message> {
         if has_header {
             let mut header = column![].spacing(space::XS);
             if let Some(title) = card.title {
-                header = header.push(text(title).size(text_size::LG).font(iced::Font {
-                    weight: iced::font::Weight::Semibold,
-                    ..iced::Font::DEFAULT
-                }));
+                header = header.push(
+                    text(title)
+                        .size(text_size::LG)
+                        .font(crate::theme::semibold()),
+                );
             }
             if let Some(description) = card.description {
                 header = header.push(text(description).size(text_size::SM).style(

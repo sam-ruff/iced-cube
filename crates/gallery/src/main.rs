@@ -5,6 +5,7 @@ fn main() -> iced::Result {
     #[cfg(target_arch = "wasm32")]
     console_error_panic_hook::set_once();
 
+    iced_cube::theme::set_font(FONT);
     let (mode, story, theme) = launch_options();
 
     FONT_FILES

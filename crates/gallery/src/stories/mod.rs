@@ -286,7 +286,7 @@ crate::stories! {
     }
     TabsKeyboard => tabs::keyboard {
         id: "tabs/keyboard", component: "tabs", title: "Keyboard shortcuts",
-        description: "Key presses resolve through the default keymap, skipping disabled tabs.",
+        description: "Key presses resolve through the default keymap, skipping disabled tabs. In the browser, use the arrow keys, Home and End: browsers keep Ctrl+Tab for themselves.",
         file: "tabs/keyboard.rs", height: 200, subscription: true,
     }
     AccordionSingle => accordion::single {

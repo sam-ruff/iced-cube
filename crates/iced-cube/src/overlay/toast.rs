@@ -535,10 +535,11 @@ fn card<'a, Message: Clone + 'a>(
 ) -> Element<'a, Message> {
     let variant = toast.variant;
 
-    let mut body = column![text(&toast.title).size(text_size::SM).font(iced::Font {
-        weight: iced::font::Weight::Semibold,
-        ..iced::Font::DEFAULT
-    })]
+    let mut body = column![
+        text(&toast.title)
+            .size(text_size::SM)
+            .font(crate::theme::semibold())
+    ]
     .spacing(2)
     .width(Length::Fill);
     if let Some(description) = &toast.description {

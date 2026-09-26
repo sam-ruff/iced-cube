@@ -29,6 +29,7 @@ fn snapshot_path(id: &str, theme: ThemeChoice) -> String {
 
 #[test]
 fn every_story_matches_its_snapshot() {
+    iced_cube::theme::set_font(FONT);
     let mut mismatches = Vec::new();
 
     for meta in ALL {

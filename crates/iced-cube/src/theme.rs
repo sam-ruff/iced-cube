@@ -5,10 +5,37 @@
 //! and [`Config`] builds a theme with your own colours on top of either.
 
 use std::borrow::Cow;
+use std::sync::OnceLock;
 
+use iced::font::Weight;
 use iced::theme::Palette;
 use iced::theme::palette::{Extended, Pair, Secondary, deviate};
-use iced::{Color, Theme, color};
+use iced::{Color, Font, Theme, color};
+
+static BASE_FONT: OnceLock<Font> = OnceLock::new();
+
+/// Registers the font components use for emphasised text, such as card and
+/// toast titles. Pass the same font you give iced's `default_font`, before
+/// the first view. Returns `false` if a font was already set.
+///
+/// Without it, emphasised text uses iced's generic sans-serif family, which
+/// the system resolves and may differ from your default font.
+pub fn set_font(font: Font) -> bool {
+    BASE_FONT.set(font).is_ok()
+}
+
+/// The registered base font, or iced's default when none is set.
+pub fn font() -> Font {
+    BASE_FONT.get().copied().unwrap_or(Font::DEFAULT)
+}
+
+/// The base font at semibold weight.
+pub fn semibold() -> Font {
+    Font {
+        weight: Weight::Semibold,
+        ..font()
+    }
+}
 
 /// Corner radii in logical pixels.
 pub mod radius {
@@ -295,6 +322,13 @@ pub fn fade(color: Color, alpha: f32) -> Color {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn semibold_keeps_the_base_family() {
+        let font = semibold();
+        assert_eq!(font.weight, Weight::Semibold);
+        assert_eq!(font.family, super::font().family);
+    }
 
     #[test]
     fn mix_endpoints_return_inputs() {
