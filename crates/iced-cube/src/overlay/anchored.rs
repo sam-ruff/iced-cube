@@ -275,7 +275,10 @@ pub(crate) struct Behaviour<'a, Message> {
     pub(crate) closes_itself: bool,
     pub(crate) on_key: Option<OnKey<'a, Message>>,
     pub(crate) on_anchor_press: Option<Message>,
+    pub(crate) on_focus: Option<OnFocus<'a, Message>>,
 }
+
+type OnFocus<'a, Message> = Box<dyn Fn(bool) -> Message + 'a>;
 
 impl<Message> Default for Behaviour<'_, Message> {
     fn default() -> Self {
@@ -291,6 +294,7 @@ impl<Message> Default for Behaviour<'_, Message> {
             closes_itself: false,
             on_key: None,
             on_anchor_press: None,
+            on_focus: None,
         }
     }
 }
@@ -301,7 +305,16 @@ impl<Message> Behaviour<'_, Message> {
     }
 
     fn watches_focus(&self) -> bool {
-        self.on_key.is_some() || self.dismiss_on_blur
+        self.on_key.is_some() || self.dismiss_on_blur || self.on_focus.is_some()
+    }
+
+    /// The message for a change of focus inside the anchor, if it changed
+    /// and anyone listens.
+    fn focus_message(&self, was: bool, is: bool) -> Option<Message> {
+        if was == is {
+            return None;
+        }
+        self.on_focus.as_ref().map(|on_focus| on_focus(is))
     }
 }
 
@@ -425,6 +438,13 @@ impl<'a, Message> Anchored<'a, Message> {
         self
     }
 
+    /// Sent with `true` when a widget inside the anchor, such as a text
+    /// field, gains focus, and with `false` when it loses it.
+    pub fn on_focus(mut self, on_focus: impl Fn(bool) -> Message + 'a) -> Self {
+        self.behaviour.on_focus = Some(Box::new(on_focus));
+        self
+    }
+
     /// Sent when the pointer is pressed on the anchor, before the anchor
     /// sees the press.
     pub fn on_anchor_press_maybe(mut self, message: Option<Message>) -> Self {
@@ -536,6 +556,9 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for Anchored<'_, Message> 
 
         if state.unfocus {
             state.unfocus = false;
+            if let Some(message) = behaviour.focus_message(state.focused, false) {
+                shell.publish(message);
+            }
             state.focused = false;
             self.anchor
                 .as_widget_mut()
@@ -582,6 +605,9 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for Anchored<'_, Message> 
             && let Some(message) = &behaviour.on_dismiss
         {
             shell.publish(message.clone());
+        }
+        if let Some(message) = behaviour.focus_message(state.focused, focus.0) {
+            shell.publish(message);
         }
         state.focused = focus.0;
     }
@@ -1140,8 +1166,12 @@ mod tests {
             .dismiss_on_blur(true)
             .pass_through(true)
             .on_anchor_press_maybe(Some(2))
-            .on_key(|_| Some(3));
+            .on_key(|_| Some(3))
+            .on_focus(|focused| if focused { 4 } else { 5 });
         let behaviour = &anchored.behaviour;
+        assert_eq!(behaviour.focus_message(false, true), Some(4));
+        assert_eq!(behaviour.focus_message(true, false), Some(5));
+        assert_eq!(behaviour.focus_message(true, true), None);
         assert_eq!(behaviour.point, Some(Point::new(3.0, 4.0)));
         assert!(behaviour.match_width && behaviour.pass_through);
         assert!(behaviour.dismiss_on_anchor_press && behaviour.dismiss_on_blur);

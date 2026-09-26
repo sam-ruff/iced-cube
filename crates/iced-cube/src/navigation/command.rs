@@ -330,6 +330,8 @@ pub enum Event<Id> {
     Activate(usize),
     /// Scrolls the list by a number of rows, down when positive.
     Scroll(i32),
+    /// The search field gained or lost focus. The widget sends this itself.
+    Focus(bool),
 }
 
 /// What the app may need to act on after an [`Event`].
@@ -362,10 +364,13 @@ pub struct State<Id> {
     highlighted: Option<usize>,
     offset: usize,
     rows: usize,
+    focused: bool,
+    navigated: bool,
 }
 
 impl<Id> State<Id> {
-    /// Lists every item and highlights the first enabled one.
+    /// Lists every item and highlights the first enabled one. The highlight
+    /// shows once the field has focus or the user moves it.
     pub fn new(groups: impl IntoIterator<Item = Group<Id>>) -> Self {
         let mut state = Self {
             groups: groups.into_iter().collect(),
@@ -375,6 +380,8 @@ impl<Id> State<Id> {
             highlighted: None,
             offset: 0,
             rows: VISIBLE_ROWS,
+            focused: false,
+            navigated: false,
         };
         state.rank(false);
         state
@@ -421,6 +428,18 @@ impl<Id> State<Id> {
         self.highlighted
     }
 
+    /// Whether the highlighted row is drawn highlighted: while the search
+    /// field has focus, or once the user has moved the highlight. An idle
+    /// inline list shows no highlight, though Enter still has a target.
+    pub fn shows_highlight(&self) -> bool {
+        self.focused || self.navigated
+    }
+
+    /// Whether the search field has focus.
+    pub fn is_focused(&self) -> bool {
+        self.focused
+    }
+
     fn group(&self, entry: Entry) -> Option<&Group<Id>> {
         let groups = if entry.remote {
             &self.remote
@@ -448,6 +467,17 @@ impl<Id> State<Id> {
     where
         Id: Clone,
     {
+        if matches!(
+            event,
+            Event::Next
+                | Event::Previous
+                | Event::First
+                | Event::Last
+                | Event::Highlight(_)
+                | Event::Activate(_)
+        ) {
+            self.navigated = true;
+        }
         match event {
             Event::Ready(sender) => return Some(Output::Ready(sender)),
             Event::Received(batch) => self.receive(batch),
@@ -461,6 +491,12 @@ impl<Id> State<Id> {
             Event::Last => {
                 let last = (0..self.entries.len()).rev().find(|&p| self.is_enabled(p));
                 self.highlight(last);
+            }
+            Event::Focus(focused) => {
+                self.focused = focused;
+                if !focused {
+                    self.navigated = false;
+                }
             }
             Event::ActivateHighlighted => {
                 let id = self.highlighted()?.id.clone();
@@ -852,8 +888,10 @@ where
         let Some(on_event) = on_event else {
             return surface.into();
         };
+        let on_focus = on_event.clone();
         anchored(surface)
             .dismiss_keys([])
+            .on_focus(move |focused| on_focus(Event::Focus(focused)))
             .on_key(move |key| {
                 keymap
                     .resolve_event(key)
@@ -941,7 +979,7 @@ fn list<'a, Id, Message: Clone + 'a>(
         let enabled = on_event.is_some() && !item.disabled;
         let status = if !enabled {
             RowStatus::Disabled
-        } else if state.highlighted == Some(position) {
+        } else if state.shows_highlight() && state.highlighted == Some(position) {
             RowStatus::Highlighted
         } else {
             RowStatus::Idle
@@ -1129,6 +1167,42 @@ mod tests {
         assert_eq!(state.query(), "");
         assert!(State::<u8>::new([]).is_empty());
         assert!(State::<u8>::new([]).highlighted().is_none());
+    }
+
+    #[test]
+    fn the_highlight_shows_only_while_focused_or_after_navigating() {
+        let mut state = sample();
+        assert!(!state.shows_highlight());
+        assert!(!state.is_focused());
+
+        let _ = state.update(Event::Focus(true));
+        assert!(state.shows_highlight() && state.is_focused());
+        let _ = state.update(Event::Focus(false));
+        assert!(!state.shows_highlight());
+
+        for event in [
+            Event::Next,
+            Event::Previous,
+            Event::First,
+            Event::Last,
+            Event::Highlight(0),
+        ] {
+            let mut state = sample();
+            let _ = state.update(event);
+            assert!(state.shows_highlight());
+            let _ = state.update(Event::Focus(true));
+            let _ = state.update(Event::Focus(false));
+            assert!(!state.shows_highlight(), "leaving the field hides it again");
+        }
+    }
+
+    #[test]
+    fn typing_or_scrolling_alone_does_not_show_the_highlight() {
+        let mut state = sample();
+        let _ = state.update(Event::Input("set".into()));
+        let _ = state.update(Event::Scroll(1));
+        assert!(!state.shows_highlight());
+        assert!(state.highlighted().is_some(), "Enter still has a target");
     }
 
     #[test]

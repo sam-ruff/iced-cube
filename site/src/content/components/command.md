@@ -25,6 +25,8 @@ api:
     description: "Ready(sender) once the channel is open, Search(query) when the query changes, Activated(id) when an item is chosen, and Closed on Escape with an empty query."
   - name: "state.results() / state.highlighted() / state.query()"
     description: "The ranked results with their group labels, the highlighted item and the current query."
+  - name: "state.shows_highlight() / state.is_focused()"
+    description: "Whether the highlighted row is drawn highlighted, which it is while the field has focus or once the user has moved the highlight, and whether the field has focus."
   - name: "command::score(query, text)"
     description: "The matcher: case-insensitive, in-order letters, preferring exact matches, prefixes and word starts. None when there is no match."
   - name: "command::subscription()"
@@ -54,3 +56,5 @@ The list is embedded where you place it. For a command palette, put it in a [dia
 Results can also come from background work, such as a file index or a server. When `update` returns `Output::Search(query)`, start a producer with that query and a clone of the sender. It sends `command::results(query, group, items)` as matches arrive; anything tagged with an older query is dropped, so slow searches never overwrite newer ones. The async example waits with `futures-timer` rather than a thread, so it runs in the browser too.
 
 While the search field has focus, the list handles its keys itself, before a surrounding dialog or popover sees them. Home and End then move the highlight rather than the text cursor. Escape clears the query, and a second press returns `Output::Closed`.
+
+The first enabled row is always the target of Enter, but it is only drawn highlighted while the field has focus or after the user moves the highlight with the keys or the pointer. An inline list in a sidebar therefore sits quietly until someone uses it. The widget reports focus changes with `Event::Focus`, so route every event to `update`.

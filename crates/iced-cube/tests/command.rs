@@ -79,11 +79,12 @@ fn typing_filters_the_list() {
     let _ = ui.typewrite("b");
 
     let events = events(ui);
-    assert!(matches!(events.as_slice(), [Event::Input(query)] if query == "b"));
-    for event in events {
-        let output = state.update(event);
-        assert!(matches!(output, Some(Output::Search(query)) if query == "b"));
-    }
+    assert!(
+        matches!(events.as_slice(), [Event::Focus(true), Event::Input(query)] if query == "b"),
+        "{events:?}"
+    );
+    let outputs: Vec<_> = events.into_iter().map(|e| state.update(e)).collect();
+    assert!(matches!(outputs.as_slice(), [None, Some(Output::Search(query))] if query == "b"));
 
     let mut ui = simulator(view(&state));
     assert!(ui.find("Billing").is_ok());
@@ -104,7 +105,12 @@ fn arrows_and_enter_run_the_highlighted_item() {
     assert!(
         matches!(
             events.as_slice(),
-            [Event::Next, Event::Next, Event::ActivateHighlighted]
+            [
+                Event::Focus(true),
+                Event::Next,
+                Event::Next,
+                Event::ActivateHighlighted
+            ]
         ),
         "{events:?}"
     );
@@ -122,7 +128,10 @@ fn escape_clears_the_query() {
     let _ = ui.tap_key(Named::Escape);
 
     let events = events(ui);
-    assert!(matches!(events.as_slice(), [Event::Close]), "{events:?}");
+    assert!(
+        matches!(events.as_slice(), [Event::Focus(true), Event::Close]),
+        "{events:?}"
+    );
     for event in events {
         let _ = state.update(event);
     }
@@ -146,6 +155,26 @@ fn disabled_items_do_not_run() {
     ui.click("Calculator").expect("item is rendered");
     let events = events(ui);
     assert!(run(&mut state, events).is_empty());
+}
+
+#[test]
+fn focusing_and_leaving_the_field_toggle_the_highlight() {
+    let mut state = sample();
+    let mut ui = simulator(view(&state));
+    ui.click(search_id()).expect("search field is rendered");
+    ui.point_at(iced::Point::new(900.0, 700.0));
+    let _ = ui.simulate(iced_test::simulator::click());
+    let events = events(ui);
+    assert!(
+        matches!(events.as_slice(), [Event::Focus(true), Event::Focus(false)]),
+        "{events:?}"
+    );
+
+    assert!(!state.shows_highlight());
+    let _ = state.update(Event::Focus(true));
+    assert!(state.shows_highlight());
+    let _ = state.update(Event::Focus(false));
+    assert!(!state.shows_highlight());
 }
 
 #[test]
