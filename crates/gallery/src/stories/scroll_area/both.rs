@@ -1,5 +1,5 @@
 use iced::widget::{column, row, text};
-use iced::{Element, Font, Length, Padding};
+use iced::{Alignment, Element, Length, Padding};
 use iced_cube::primitives::scroll_area::Direction;
 use iced_cube::{card, scroll_area};
 
@@ -15,10 +15,10 @@ impl Example {
     pub fn view(&self) -> Element<'_, Message> {
         let grid = column((1..=30).map(|y| {
             row((1..=16).map(|x| {
-                text(format!("{:>3}", x * y))
-                    .font(Font::MONOSPACE)
+                text(x * y)
                     .size(13)
                     .width(40)
+                    .align_x(Alignment::End)
                     .into()
             }))
             .into()

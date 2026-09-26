@@ -111,7 +111,7 @@ jobs:
       - name: End-to-end tests
         working-directory: site
         run: |
-          npx playwright install chromium
+          npx playwright install --with-deps chromium
           npm run test:e2e
         env:
           CI: "true"
