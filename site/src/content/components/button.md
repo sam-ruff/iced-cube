@@ -14,7 +14,7 @@ api:
   - name: "button(label)"
     description: "Creates a text button. It renders disabled until it has a message."
   - name: ".variant(Variant)"
-    description: "Primary, Secondary, Destructive, Outline, Ghost or Link. Defaults to Primary."
+    description: "Primary, Secondary, Destructive, Outline, Ghost or Link. Defaults to Primary. Link has no side padding, so it lines up with nearby text."
   - name: ".size(Size)"
     description: "Sm, Md or Lg. Defaults to Md. The square Icon size is deprecated; use icon_button instead."
   - name: ".icon(glyph) / .trailing_icon(glyph)"

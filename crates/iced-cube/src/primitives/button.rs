@@ -76,6 +76,15 @@ impl Size {
     }
 }
 
+/// Horizontal padding inside a button. A link has none, so its text lines
+/// up with the content around it, such as a card's body above its footer.
+pub fn padding_x(size: Size, variant: Variant) -> f32 {
+    if variant == Variant::Link {
+        return 0.0;
+    }
+    size.metrics().padding_x
+}
+
 /// Resolved dimensions for a [`Size`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Metrics {
@@ -192,7 +201,10 @@ impl<'a, Message: Clone + 'a> From<Button<'a, Message>> for Element<'a, Message>
                 Length::Fixed(metrics.height),
                 Padding::from((metrics.height - metrics.icon) / 2.0),
             ),
-            _ => (button.width, Padding::from([0.0, metrics.padding_x])),
+            _ => (
+                button.width,
+                Padding::from([0.0, padding_x(button.size, variant)]),
+            ),
         };
 
         widget::button(
@@ -334,6 +346,16 @@ mod tests {
         assert_eq!(b.variant, Variant::Primary);
         assert_eq!(b.size, Size::Md);
         assert!(!b.is_enabled());
+    }
+
+    #[test]
+    fn links_have_no_side_padding_and_the_rest_keep_their_size() {
+        for size in Size::ALL {
+            assert_eq!(padding_x(size, Variant::Link), 0.0);
+            for variant in Variant::ALL.into_iter().filter(|v| *v != Variant::Link) {
+                assert_eq!(padding_x(size, variant), size.metrics().padding_x);
+            }
+        }
     }
 
     #[test]
