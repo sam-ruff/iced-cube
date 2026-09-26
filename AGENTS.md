@@ -55,7 +55,16 @@ cd site && npm run test:e2e                    # Playwright, mobile and desktop
 
 ## Keyboard shortcuts
 
-iced has no general focus model, so shortcuts are app-wide: the app subscribes with `keys::subscription()` and resolves each press through a component's `Keymap`.
+iced has no general focus model, so there is one rule: a key press goes to the innermost layer first, and each layer uses it or passes it on.
+
+- Open overlays resolve their own keymap first, innermost first: menus, context menus and the combobox and select lists. A popover checks its content, then closes on its keymap's Close chords. A closed menu claims no keys.
+- A focused text field keeps the keys it uses. Combobox and command resolve their keymap while their field has focus.
+- An open dialog captures every key its content leaves, except chords passed through with `.pass_through(...)`.
+- Whatever is left reaches `keys::subscription()`, and the app resolves it through a component's `Keymap` (tabs, slider, toast, opening a closed menu).
+- Overlays are built on `overlay::anchored`: content first, one `on_dismiss` sent once, outside clicks captured unless the panel passes them through (only Popover does), Escape read from the component's keymap. Menus and lists draw rows with `overlay::menu` and float on the `Tokens::popover` surface.
+- Every stateful overlay takes `.keymap(...)`. Use the shared words: Highlight, Activate and Close for events and actions, and `on_dismiss` for overlays the app opens with a flag.
+
+When adding one:
 
 - Every interactive component has an `Action` enum implementing `keys::Action` (`ALL`, `defaults`, `name`, `description`) and a `pub fn default_keymap() -> Keymap<Action>`, documented with a table of its chords.
 - Each action maps to the component's existing events or values through a pure function (`action.event(&state)`, `action.events(&state)`, `action.apply(...)`). Unit-test the defaults, an override, unbinding and the mapping.

@@ -6,12 +6,24 @@ description: Default shortcuts for interactive components, and how to change the
 
 Interactive components such as [Tabs](../components/tabs/), [Slider](../components/slider/) and [Toast](../components/toast/) come with default keyboard shortcuts. Each component page lists its defaults under Keyboard.
 
-iced has no focus model for most widgets, so these shortcuts are not tied to a focused control. Your app listens for key presses and decides which component they go to:
+Each component has an `Action` enum and a `default_keymap()`, a `Keymap<Action>` from chords to actions. `keymap.resolve_event(&key)` returns the action for a key press, or `None`, and a pure function on the action turns it into the component's own event or value, such as `action.event(&state)` for tabs or `action.apply(value, range, step)` for a slider.
 
-- `keys::subscription()` delivers every key press that no widget captured. A focused text input keeps the keys it uses, such as letters, arrows, Home and End, so typing in it never switches tabs.
-- Each component has an `Action` enum and a `default_keymap()`, a `Keymap<Action>` from chords to actions.
-- `keymap.resolve_event(&key)` returns the action for a key press, or `None`.
-- A pure function on the action turns it into the component's own event or value, such as `action.event(&state)` for tabs or `action.apply(value, range, step)` for a slider.
+## Where a key press goes
+
+iced has no general focus model, so iced-cube follows one rule: a key press goes to the innermost layer first, and each layer either uses it or passes it on.
+
+- **Open overlays.** An open dropdown menu or context menu, and the list of a combobox or select, resolve their own keymap before anything underneath sees the key. Overlays nest, so Escape in a menu inside a popover closes the menu and leaves the popover open. A popover checks its content first, then closes on the chords bound to its Close action.
+- **The focused field.** A focused text field keeps the keys it uses, such as letters, arrows, Home and End. A combobox or command list resolves its keymap while its field has focus, so Escape clears the query before anything around it closes.
+- **An open dialog.** A dialog captures every key press its content leaves, so nothing behind the scrim reacts. Let chosen chords through with `.pass_through([...])`, for example the shortcut that toggles a command palette.
+- **Your app.** Whatever is left arrives from `keys::subscription()`, and your app decides which keymap resolves it. This is how tabs, sliders, toasts and other app-wide shortcuts work, and how a closed menu opens from a chord bound to its Open action.
+
+A closed menu claims no keys, so the arrow keys, Enter and Space stay free for the rest of your app. Components that handle keys themselves take a changed keymap through `.keymap(...)`, and that keymap also decides which keys close them: unbind Escape there and Escape no longer closes the component.
+
+The same words mean the same thing everywhere. Highlight moves the highlight to a row, Activate chooses it, Close closes a menu or list, and an overlay the app opens with a flag, such as a popover or dialog, reports that it wants to close through `on_dismiss`.
+
+## Subscribing to key presses
+
+`keys::subscription()` delivers every key press that no widget captured, so typing in a text input never switches tabs, and nothing reaches it while a dialog is open.
 
 ## A complete example
 
@@ -109,7 +121,7 @@ The keymap lives in your app's state, so it can change at runtime, for example f
 - `clear()` removes everything, so you can build the keymap from scratch.
 - `grouped()` lists the chords for each action, which is handy for a help screen.
 
-When two components want the same key, such as the arrow keys for tabs and a slider, decide in `update` which keymap to ask. For example, resolve through the slider's keymap while the slider is the current control, and fall back to the tabs keymap otherwise.
+When two components you route yourself want the same key, such as the arrow keys for tabs and a slider, decide in `update` which keymap to ask. For example, resolve through the slider's keymap while the slider is the current control, and fall back to the tabs keymap otherwise. Menus, lists and dialogs never need this, because they take their keys before your app sees them.
 
 ## Chord syntax
 
