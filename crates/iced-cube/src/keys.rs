@@ -92,6 +92,7 @@ const NAMED: &[(Named, &[&str])] = &[
     (Named::End, &["End"]),
     (Named::PageUp, &["PageUp", "PgUp"]),
     (Named::PageDown, &["PageDown", "PgDn"]),
+    (Named::ContextMenu, &["Menu", "ContextMenu", "Apps"]),
     (Named::F1, &["F1"]),
     (Named::F2, &["F2"]),
     (Named::F3, &["F3"]),
@@ -121,7 +122,8 @@ const LOGO: &str = if cfg!(target_os = "macos") {
 /// and Ctrl elsewhere. Keys are a single character (`K`, `/`, `+`) or a
 /// name: `Enter`, `Tab`, `Space`, `Escape`, `Backspace`, `Delete`,
 /// `Insert`, `ArrowUp`, `ArrowDown`, `ArrowLeft`, `ArrowRight`, `Home`,
-/// `End`, `PageUp`, `PageDown` and `F1` to `F12`.
+/// `End`, `PageUp`, `PageDown`, `Menu` (the context menu key) and `F1` to
+/// `F12`.
 ///
 /// ```
 /// use iced_cube::keys::Chord;
@@ -476,6 +478,8 @@ mod tests {
         assert_eq!(chord("right"), Chord::named(Named::ArrowRight));
         assert_eq!(chord("Option+PgDn"), Chord::named(Named::PageDown).alt());
         assert_eq!(chord("Meta+S"), Chord::character('s').logo());
+        assert_eq!(chord("ContextMenu"), Chord::named(Named::ContextMenu));
+        assert_eq!(chord("Menu").to_string(), "Menu");
     }
 
     #[test]
