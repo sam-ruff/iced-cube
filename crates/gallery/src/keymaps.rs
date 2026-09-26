@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use iced_cube::forms::select;
+use iced_cube::forms::{combobox, select};
 use iced_cube::keys::{Action, Keymap};
 use iced_cube::layout::accordion;
 use iced_cube::navigation::tabs;
@@ -36,6 +36,7 @@ pub fn all() -> BTreeMap<&'static str, Vec<Binding>> {
     BTreeMap::from([
         ("accordion", bindings::<accordion::Action>()),
         ("checkbox", bindings::<checkbox::Action>()),
+        ("combobox", bindings::<combobox::Action>()),
         ("select", bindings::<select::Action>()),
         ("slider", bindings::<slider::Action>()),
         ("switch", bindings::<switch::Action>()),

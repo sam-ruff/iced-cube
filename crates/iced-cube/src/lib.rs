@@ -35,6 +35,8 @@ pub mod keys;
 pub mod layout;
 pub mod navigation;
 pub mod overlay;
+#[cfg(feature = "combobox")]
+mod popup;
 pub mod primitives;
 pub mod theme;
 
@@ -50,6 +52,8 @@ pub use feedback::progress;
 #[cfg(feature = "spinner")]
 pub use feedback::spinner;
 
+#[cfg(feature = "combobox")]
+pub use forms::combobox;
 #[cfg(feature = "select")]
 pub use forms::select;
 #[cfg(feature = "textarea")]

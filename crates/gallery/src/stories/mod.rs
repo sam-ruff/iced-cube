@@ -10,6 +10,7 @@ pub mod badge;
 pub mod button;
 pub mod card;
 pub mod checkbox;
+pub mod combobox;
 pub mod input;
 pub mod label;
 pub mod progress;
@@ -153,6 +154,26 @@ crate::stories! {
         id: "select/states", component: "select", title: "States",
         description: "Enum options, with enabled and disabled selects.",
         file: "select/states.rs",
+    }
+    ComboboxDefault => combobox::default {
+        id: "combobox/default", component: "combobox", title: "Default",
+        description: "Suggestions filter as you type. The list starts open here so you can see it.",
+        file: "combobox/default.rs", height: 400,
+    }
+    ComboboxEmpty => combobox::empty {
+        id: "combobox/empty", component: "combobox", title: "Empty results",
+        description: "A message in the list when nothing matches the query.",
+        file: "combobox/empty.rs", height: 200,
+    }
+    ComboboxField => combobox::field {
+        id: "combobox/field", component: "combobox", title: "In a field",
+        description: "A labelled combobox showing its selected value, above a disabled one.",
+        file: "combobox/field.rs", height: 360,
+    }
+    ComboboxKeyboard => combobox::keyboard {
+        id: "combobox/keyboard", component: "combobox", title: "Keyboard shortcuts",
+        description: "The default keymap with Ctrl+N and Ctrl+P added. The combobox handles its keys itself while it has focus.",
+        file: "combobox/keyboard.rs", height: 420,
     }
     SliderDefault => slider::default {
         id: "slider/default", component: "slider", title: "Default",

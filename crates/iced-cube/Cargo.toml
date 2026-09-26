@@ -34,7 +34,7 @@ primitives = [
     "scroll-area",
     "separator",
 ]
-forms = ["field", "select", "textarea"]
+forms = ["combobox", "field", "select", "textarea"]
 layout = ["card", "stack", "accordion"]
 navigation = ["tabs"]
 overlay = ["tooltip", "toast"]
@@ -48,6 +48,7 @@ switch = []
 slider = ["iced/advanced", "dep:num-traits"]
 scroll-area = []
 separator = []
+combobox = ["input", "iced/advanced"]
 field = []
 select = ["iced/advanced"]
 textarea = ["input"]
