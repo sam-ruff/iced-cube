@@ -5,9 +5,9 @@
 
 use iced::keyboard::key::Named;
 use iced::widget::{self, button::Status, column, container, row, rule, text};
-use iced::{Alignment, Color, Element, Length, Theme};
+use iced::{Alignment, Element, Length, Theme};
 
-use crate::icon::tinted;
+use crate::icon::{opacity, themed};
 use crate::keys::{self, Chord, Keymap};
 use crate::theme::{Tokens, fade, space, text_size};
 
@@ -306,8 +306,8 @@ fn section<'a, Message: Clone + 'a>(
     let header = widget::button(
         row![
             text(title).size(text_size::SM).width(Length::Fill),
-            tinted(chevron, 16.0, None).style(move |theme: &Theme, _| widget::svg::Style {
-                color: Some(chevron_colour(&Tokens::of(theme), enabled)),
+            themed(chevron, 16.0, opacity(enabled), |theme| {
+                Tokens::of(theme).muted_foreground
             }),
         ]
         .spacing(space::MD)
@@ -333,14 +333,6 @@ fn section<'a, Message: Clone + 'a>(
         snap: true,
     }))
     .into()
-}
-
-fn chevron_colour(tokens: &Tokens, enabled: bool) -> Color {
-    if enabled {
-        tokens.muted_foreground
-    } else {
-        fade(tokens.muted_foreground, 0.5)
-    }
 }
 
 /// The style of a section header.
@@ -505,11 +497,5 @@ mod tests {
             assert!(style(&tokens, Status::Disabled).text_color.a < 1.0);
             assert!(style(&tokens, Status::Active).background.is_none());
         }
-    }
-
-    #[test]
-    fn chevron_fades_when_disabled() {
-        let tokens = Tokens::of(&light());
-        assert!(chevron_colour(&tokens, false).a < chevron_colour(&tokens, true).a);
     }
 }

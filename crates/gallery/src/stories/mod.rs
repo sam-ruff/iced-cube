@@ -71,6 +71,11 @@ crate::stories! {
         description: "Small, medium and large squares.",
         file: "icon_button/sizes.rs", height: 160,
     }
+    IconButtonDisabled => icon_button::disabled {
+        id: "icon-button/disabled", component: "icon-button", title: "Enabled and disabled",
+        description: "Undo and redo turn off when there is nothing to undo or redo. A disabled icon is drawn at half opacity.",
+        file: "icon_button/disabled.rs", height: 160,
+    }
     InputDefault => input::default {
         id: "input/default", component: "input", title: "Default",
         description: "A controlled input that submits on Enter.",

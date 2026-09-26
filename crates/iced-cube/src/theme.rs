@@ -129,6 +129,11 @@ impl Tokens {
             is_dark: ext.is_dark,
         }
     }
+
+    /// Background of a disabled text field, select or combobox.
+    pub fn disabled_field(&self) -> Color {
+        mix(self.background, self.muted, 0.5)
+    }
 }
 
 /// The library's light theme.

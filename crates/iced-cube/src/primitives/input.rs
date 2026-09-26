@@ -4,10 +4,10 @@ use std::fmt;
 
 use iced::widget::text::LineHeight;
 use iced::widget::text_input::{Status, Style};
-use iced::widget::{self, Id, container, stack, text_input};
-use iced::{Alignment, Background, Border, Color, Element, Length, Padding, Theme};
+use iced::widget::{Id, container, stack, text_input};
+use iced::{Alignment, Background, Border, Color, Element, Length, Padding};
 
-use crate::icon::{Glyph, tinted};
+use crate::icon::{Glyph, opacity, themed};
 use crate::theme::{Tokens, fade, mix, radius, space, text_size};
 
 const LINE_HEIGHT: f32 = 1.3;
@@ -219,10 +219,9 @@ impl<'a, Message: Clone + 'a> From<Input<'a, Message>> for Element<'a, Message> 
         } else {
             Status::Disabled
         };
-        let icon =
-            tinted(glyph, metrics.icon, None).style(move |theme: &Theme, _| widget::svg::Style {
-                color: Some(style(&Tokens::of(theme), status, invalid).icon),
-            });
+        let icon = themed(glyph, metrics.icon, opacity(enabled), move |theme| {
+            style(&Tokens::of(theme), status, invalid).icon
+        });
         let icon = container(icon)
             .padding(Padding::ZERO.left(metrics.padding_x))
             .height(Length::Fill)
@@ -258,7 +257,7 @@ pub fn style(tokens: &Tokens, status: Status, invalid: bool) -> Style {
         return active;
     }
     Style {
-        background: Background::Color(fade(tokens.muted, 0.5)),
+        background: Background::Color(tokens.disabled_field()),
         border: Border {
             color: fade(border, 0.5),
             ..active.border
@@ -384,6 +383,10 @@ mod tests {
             assert!((disabled.value.a - active.value.a * 0.5).abs() < 1e-6);
             assert!((disabled.placeholder.a - active.placeholder.a * 0.5).abs() < 1e-6);
             assert_ne!(disabled.background, active.background);
+            assert_eq!(
+                disabled.background,
+                Background::Color(tokens.disabled_field())
+            );
         }
     }
 

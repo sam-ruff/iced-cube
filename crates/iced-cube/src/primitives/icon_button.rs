@@ -1,16 +1,58 @@
 //! Square, icon-only buttons with a label and an optional pressed state.
 //!
-//! Icon buttons share their [`Variant`], [`Size`] and colours with
-//! [`button`](crate::primitives::button). A pressed icon button stays
-//! highlighted, which suits toolbar toggles such as bold or italic.
+//! Icon buttons share their [`Size`] and colours with
+//! [`button`](crate::primitives::button), and every button variant except
+//! `Link`. A pressed icon button stays highlighted, which suits toolbar
+//! toggles such as bold or italic.
 
 use iced::widget::{self, button::Status, container, text};
-use iced::{Background, Border, Element, Length, Padding, Shadow, Theme};
+use iced::{Background, Border, Element, Length, Padding, Shadow};
 
-use crate::icon::{Glyph, tinted};
+use crate::icon::{Glyph, opacity, themed};
 use crate::overlay::tooltip::{Position, tooltip};
-use crate::primitives::button::{self, Colours, Size, Variant};
+use crate::primitives::button::{self, Colours, Size};
 use crate::theme::{Tokens, fade, mix, radius};
+
+/// Visual emphasis of an icon button.
+///
+/// These are the text button variants without `Link`, which needs text to
+/// read as a link and on an icon alone looks just like `Ghost`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum Variant {
+    Primary,
+    Secondary,
+    Destructive,
+    Outline,
+    #[default]
+    Ghost,
+}
+
+impl Variant {
+    pub const ALL: [Variant; 5] = [
+        Variant::Primary,
+        Variant::Secondary,
+        Variant::Destructive,
+        Variant::Outline,
+        Variant::Ghost,
+    ];
+
+    /// The text button variant with the same colours.
+    pub const fn button(self) -> button::Variant {
+        match self {
+            Variant::Primary => button::Variant::Primary,
+            Variant::Secondary => button::Variant::Secondary,
+            Variant::Destructive => button::Variant::Destructive,
+            Variant::Outline => button::Variant::Outline,
+            Variant::Ghost => button::Variant::Ghost,
+        }
+    }
+}
+
+impl From<Variant> for button::Variant {
+    fn from(variant: Variant) -> Self {
+        variant.button()
+    }
+}
 
 /// An icon button builder. Convert it into an [`Element`] to render.
 ///
@@ -34,7 +76,7 @@ pub fn icon_button<'a, Message>(glyph: Glyph) -> IconButton<'a, Message> {
         label: None,
         tooltip: Some(Position::default()),
         variant: Variant::Ghost,
-        size: Size::Icon,
+        size: Size::Md,
         pressed: false,
         id: None,
         on_press: None,
@@ -62,7 +104,7 @@ impl<'a, Message> IconButton<'a, Message> {
     }
 
     /// The side length follows the button [`Size`]: `Sm` is 32 pixels,
-    /// `Md` and `Icon` are 36 and `Lg` is 40.
+    /// `Md` is 36 and `Lg` is 40.
     pub fn size(mut self, size: Size) -> Self {
         self.size = size;
         self
@@ -117,16 +159,16 @@ impl<'a, Message: Clone + 'a> From<IconButton<'a, Message>> for Element<'a, Mess
             on_press,
         } = icon_button;
         let metrics = size.metrics();
-        let resting = if on_press.is_some() {
+        let enabled = on_press.is_some();
+        let resting = if enabled {
             Status::Active
         } else {
             Status::Disabled
         };
 
-        let glyph =
-            tinted(glyph, metrics.icon, None).style(move |theme: &Theme, _| widget::svg::Style {
-                color: Some(colours(&Tokens::of(theme), variant, pressed, resting).foreground),
-            });
+        let glyph = themed(glyph, metrics.icon, opacity(enabled), move |theme| {
+            colours(&Tokens::of(theme), variant, pressed, resting).foreground
+        });
 
         let button = widget::button(glyph)
             .width(Length::Fixed(metrics.height))
@@ -151,6 +193,7 @@ impl<'a, Message: Clone + 'a> From<IconButton<'a, Message>> for Element<'a, Mess
 /// A pressed button looks held down at rest and darkens a little more on
 /// hover, so it reads as on in every state.
 pub fn colours(tokens: &Tokens, variant: Variant, pressed: bool, status: Status) -> Colours {
+    let variant = variant.button();
     if !pressed {
         return button::colours(tokens, variant, status);
     }
@@ -206,10 +249,10 @@ mod tests {
     ];
 
     #[test]
-    fn defaults_to_a_ghost_icon_size_button_that_is_off_and_disabled() {
+    fn defaults_to_a_medium_ghost_button_that_is_off_and_disabled() {
         let b: IconButton<'_, ()> = icon_button(crate::lucide!(Plus));
         assert_eq!(b.variant, Variant::Ghost);
-        assert_eq!(b.size, Size::Icon);
+        assert_eq!(b.size, Size::Md);
         assert!(!b.is_pressed());
         assert!(!b.is_enabled());
         assert!(b.label_text().is_none());
@@ -242,11 +285,24 @@ mod tests {
                 for status in STATES {
                     assert_eq!(
                         colours(&tokens, variant, false, status),
-                        button::colours(&tokens, variant, status),
+                        button::colours(&tokens, variant.into(), status),
                         "{variant:?} {status:?}"
                     );
                 }
             }
+        }
+    }
+
+    #[test]
+    fn variants_map_to_every_button_variant_but_link() {
+        let mapped = Variant::ALL.map(Variant::button);
+        assert!(!mapped.contains(&button::Variant::Link));
+        for variant in button::Variant::ALL {
+            assert_eq!(
+                mapped.contains(&variant),
+                variant != button::Variant::Link,
+                "{variant:?}"
+            );
         }
     }
 

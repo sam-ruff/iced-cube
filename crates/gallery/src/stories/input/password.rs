@@ -1,6 +1,6 @@
 use iced::widget::row;
 use iced::{Alignment, Element, Length};
-use iced_cube::primitives::button::Variant;
+use iced_cube::primitives::icon_button::Variant;
 use iced_cube::{icon_button, input, lucide};
 
 #[derive(Debug, Clone)]

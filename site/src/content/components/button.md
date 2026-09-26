@@ -16,7 +16,7 @@ api:
   - name: ".variant(Variant)"
     description: "Primary, Secondary, Destructive, Outline, Ghost or Link. Defaults to Primary."
   - name: ".size(Size)"
-    description: "Sm, Md, Lg or Icon, a square size for icon buttons. Defaults to Md."
+    description: "Sm, Md or Lg. Defaults to Md. The square Icon size is deprecated; use icon_button instead."
   - name: ".icon(glyph) / .trailing_icon(glyph)"
     description: "Adds a Lucide icon before or after the label."
   - name: ".on_press(message) / .on_press_maybe(option)"

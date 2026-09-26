@@ -1,11 +1,16 @@
 #![cfg(feature = "icon-button")]
 
+use std::path::Path;
+
 use iced::widget::{self, container, row};
-use iced::{Element, Event, Length, mouse};
+use iced::{Element, Event, Length, Theme, mouse};
 use iced_cube::overlay::tooltip::Position;
-use iced_cube::primitives::button::{Size, Variant};
+use iced_cube::primitives::button::Size;
+use iced_cube::primitives::icon_button::Variant;
+use iced_cube::theme::{Tokens, dark, light};
 use iced_cube::{icon_button, lucide};
 use iced_test::simulator;
+use iced_test::simulator::Simulator;
 
 #[derive(Debug, Clone, PartialEq)]
 enum Message {
@@ -102,6 +107,75 @@ fn label_shows_as_a_tooltip_on_hover_unless_turned_off() -> Result<(), iced_test
     assert!(!with_tooltip.is_empty());
     assert_ne!(with_tooltip, turned_off);
     assert_eq!(turned_off, unlabelled);
+    Ok(())
+}
+
+/// Renders a lone ghost icon button and returns how far its most distinct
+/// pixel is from the background, as the largest difference in any channel.
+fn icon_contrast(theme: &Theme, enabled: bool, name: &str) -> Result<u8, iced_test::Error> {
+    let background = Tokens::of(theme).background;
+    let element: Element<'_, Message> = container(
+        icon_button(lucide!(Plus))
+            .tooltip(None)
+            .on_press_maybe(enabled.then_some(Message::Bold)),
+    )
+    .center(Length::Fill)
+    .style(move |_| container::Style::default().background(background))
+    .into();
+    let mut ui = Simulator::with_size(
+        iced::Settings::default(),
+        iced::Size::new(64.0, 64.0),
+        element,
+    );
+
+    let directory =
+        std::env::temp_dir().join(format!("iced-cube-icon-contrast-{}", std::process::id()));
+    let stem = directory.join(name);
+    let _ = ui.snapshot(theme)?.matches_image(&stem)?;
+    let written = directory.join(format!("{name}-tiny-skia.png"));
+    let pixels = read_rgba(&written)?;
+    std::fs::remove_file(written)?;
+
+    let Some(corner) = pixels.first().copied() else {
+        return Ok(0);
+    };
+    Ok(pixels
+        .iter()
+        .map(|pixel| {
+            (0..3)
+                .map(|channel| pixel[channel].abs_diff(corner[channel]))
+                .max()
+                .unwrap_or(0)
+        })
+        .max()
+        .unwrap_or(0))
+}
+
+fn read_rgba(path: &Path) -> Result<Vec<[u8; 4]>, iced_test::Error> {
+    let decoder = png::Decoder::new(std::io::BufReader::new(std::fs::File::open(path)?));
+    let mut reader = decoder.read_info()?;
+    let mut bytes = vec![0; reader.output_buffer_size().unwrap_or_default()];
+    let info = reader.next_frame(&mut bytes)?;
+    bytes.truncate(info.buffer_size());
+    Ok(bytes.as_chunks::<4>().0.to_vec())
+}
+
+#[test]
+fn a_disabled_icon_is_drawn_lighter_than_an_enabled_one() -> Result<(), iced_test::Error> {
+    for (theme, name) in [(light(), "light"), (dark(), "dark")] {
+        let enabled = icon_contrast(&theme, true, &format!("enabled-{name}"))?;
+        let disabled = icon_contrast(&theme, false, &format!("disabled-{name}"))?;
+
+        assert!(enabled > 150, "{name}: enabled icon contrast {enabled}");
+        assert!(
+            disabled > 40,
+            "{name}: disabled icon still visible, {disabled}"
+        );
+        assert!(
+            f32::from(disabled) < f32::from(enabled) * 0.7,
+            "{name}: disabled {disabled} should be well below enabled {enabled}"
+        );
+    }
     Ok(())
 }
 

@@ -14,16 +14,16 @@ use iced::advanced::{Clipboard, Shell, overlay, renderer};
 use iced::keyboard::key::Named;
 use iced::widget::pick_list::{self, Status};
 use iced::widget::text::LineHeight;
-use iced::widget::{self, Column, row, svg, text};
+use iced::widget::{self, Column, row, text};
 use iced::{
     Alignment, Background, Border, Element, Event, Length, Rectangle, Renderer, Size, Theme,
     Vector, mouse, touch,
 };
 
-use crate::icon::tinted;
+use crate::icon::{opacity, themed};
 use crate::keys::{self, Chord, Keymap};
 use crate::overlay::anchored::{self, Align, Behaviour, Placement, Side};
-use crate::overlay::menu::{self, DISABLED_ICON_OPACITY, Parts, ROW_PADDING, RowStatus, Trailing};
+use crate::overlay::menu::{self, Parts, ROW_PADDING, RowStatus, Trailing};
 use crate::theme::{Tokens, fade, mix, radius, space, text_size};
 
 /// Height of the closed select in logical pixels.
@@ -127,11 +127,12 @@ where
                 style.placeholder_color
             }
         };
-        let chevron = tinted(crate::lucide!(ChevronDown), CHEVRON_SIZE, None)
-            .style(|theme: &Theme, _| svg::Style {
-                color: Some(chevron_colour(&Tokens::of(theme))),
-            })
-            .opacity(chevron_opacity(enabled));
+        let chevron = themed(
+            crate::lucide!(ChevronDown),
+            CHEVRON_SIZE,
+            opacity(enabled),
+            move |theme| style(&Tokens::of(theme), Status::Active, enabled).handle_color,
+        );
         let field = row![
             text(label.or(placeholder).unwrap_or_default())
                 .size(text_size::SM)
@@ -213,18 +214,6 @@ pub fn option_style(tokens: &Tokens, status: widget::button::Status) -> widget::
         },
         ..widget::button::Style::default()
     }
-}
-
-/// The colour of the chevron. It stays opaque; [`chevron_opacity`] fades
-/// it when the select is disabled.
-pub fn chevron_colour(tokens: &Tokens) -> iced::Color {
-    tokens.muted_foreground
-}
-
-/// The chevron's svg opacity. iced ignores the alpha of an svg tint, so a
-/// disabled chevron fades through its opacity instead.
-pub fn chevron_opacity(enabled: bool) -> f32 {
-    if enabled { 1.0 } else { DISABLED_ICON_OPACITY }
 }
 
 /// The select widget: draws the field and floats the list while open.
@@ -429,7 +418,7 @@ pub fn style(tokens: &Tokens, status: Status, enabled: bool) -> pick_list::Style
         text_color: fade(tokens.foreground, 0.5),
         placeholder_color: fade(tokens.muted_foreground, 0.5),
         handle_color: fade(tokens.muted_foreground, 0.5),
-        background: Background::Color(tokens.muted),
+        background: Background::Color(tokens.disabled_field()),
         border: Border {
             color: fade(tokens.border, 0.5),
             ..style.border
@@ -600,13 +589,16 @@ mod tests {
     }
 
     #[test]
-    fn disabled_fades_text_and_uses_a_muted_background() {
+    fn disabled_fades_text_and_uses_the_disabled_field_background() {
         for theme in [light(), dark()] {
             let tokens = Tokens::of(&theme);
             for status in STATES {
                 let disabled = style(&tokens, status, false);
                 assert!((disabled.text_color.a - tokens.foreground.a * 0.5).abs() < 1e-6);
-                assert_eq!(disabled.background, Background::Color(tokens.muted));
+                assert_eq!(
+                    disabled.background,
+                    Background::Color(tokens.disabled_field())
+                );
             }
         }
     }
@@ -645,16 +637,5 @@ mod tests {
             field_status(true, true),
             Status::Opened { is_hovered: true }
         );
-    }
-
-    #[test]
-    fn disabled_chevron_fades_through_its_opacity() {
-        for theme in [light(), dark()] {
-            let tokens = Tokens::of(&theme);
-            assert_eq!(chevron_colour(&tokens), tokens.muted_foreground);
-            assert_eq!(chevron_colour(&tokens).a, 1.0, "svg tints ignore alpha");
-        }
-        assert_eq!(chevron_opacity(true), 1.0);
-        assert_eq!(chevron_opacity(false), DISABLED_ICON_OPACITY);
     }
 }

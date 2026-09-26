@@ -55,7 +55,7 @@ use iced::{
     Alignment, Background, Border, Color, Element, Length, Shadow, Subscription, Theme, Vector,
 };
 
-use crate::icon::{Glyph, tinted};
+use crate::icon::{Glyph, themed};
 use crate::keys::{self, Chord, Keymap};
 use crate::primitives::button::{self, Size};
 use crate::primitives::icon_button::icon_button;
@@ -555,10 +555,8 @@ fn card<'a, Message: Clone + 'a>(
 
     let mut content = row![].spacing(space::MD).align_y(Alignment::Center);
     if let Some(glyph) = variant.glyph() {
-        content = content.push(tinted(glyph, 18.0, None).style(move |theme: &Theme, _| {
-            widget::svg::Style {
-                color: Some(accent(&Tokens::of(theme), variant)),
-            }
+        content = content.push(themed(glyph, 18.0, 1.0, move |theme| {
+            accent(&Tokens::of(theme), variant)
         }));
     }
     content = content.push(body);

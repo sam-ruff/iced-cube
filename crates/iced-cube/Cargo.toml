@@ -79,6 +79,7 @@ num-traits = { version = "0.2.19", optional = true }
 futures = "0.3.34"
 iced = { version = "0.14.0", default-features = false, features = ["svg", "advanced", "tiny-skia"] }
 iced_test = "0.14.0"
+png = "0.18.1"
 
 [lints]
 workspace = true

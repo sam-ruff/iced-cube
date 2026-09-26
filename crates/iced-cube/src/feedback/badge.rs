@@ -3,7 +3,7 @@
 use iced::widget::{container, row, text};
 use iced::{Alignment, Background, Border, Color, Element, Padding, Shadow};
 
-use crate::icon::{Glyph, tinted};
+use crate::icon::{Glyph, themed};
 use crate::theme::{Tokens, on, radius, text_size};
 
 const ICON_SIZE: f32 = 12.0;
@@ -67,10 +67,8 @@ impl<'a, Message: 'a> From<Badge<'a>> for Element<'a, Message> {
 
         let mut content = row![].spacing(4).align_y(Alignment::Center);
         if let Some(glyph) = badge.icon {
-            content = content.push(tinted(glyph, ICON_SIZE, None).style(move |theme, _| {
-                iced::widget::svg::Style {
-                    color: Some(colours(&Tokens::of(theme), variant).foreground),
-                }
+            content = content.push(themed(glyph, ICON_SIZE, 1.0, move |theme| {
+                colours(&Tokens::of(theme), variant).foreground
             }));
         }
         content = content.push(text(badge.label).size(text_size::XS));

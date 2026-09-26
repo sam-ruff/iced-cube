@@ -1,10 +1,10 @@
 //! Checkboxes with checked, unchecked and indeterminate states.
 
 use iced::keyboard::key::Named;
-use iced::widget::{self, button::Status, container, mouse_area, row, space, svg, text};
+use iced::widget::{self, button::Status, container, mouse_area, row, space, text};
 use iced::{Alignment, Background, Border, Color, Element, Length, Shadow, Theme, mouse};
 
-use crate::icon::{Glyph, tinted};
+use crate::icon::{Glyph, opacity, themed};
 use crate::keys::{self, Chord, Keymap};
 use crate::theme::{Tokens, fade, mix, radius, space as spacing, text_size};
 
@@ -117,18 +117,18 @@ impl<'a, Message> Checkbox<'a, Message> {
 impl<'a, Message: Clone + 'a> From<Checkbox<'a, Message>> for Element<'a, Message> {
     fn from(checkbox: Checkbox<'a, Message>) -> Self {
         let state = checkbox.state;
-        let resting = if checkbox.on_toggle.is_some() {
+        let enabled = checkbox.on_toggle.is_some();
+        let resting = if enabled {
             Status::Active
         } else {
             Status::Disabled
         };
 
         let mark: Element<'a, Message> = match state.glyph() {
-            Some(glyph) => tinted(glyph, ICON_SIZE, None)
-                .style(move |theme: &Theme, _| svg::Style {
-                    color: Some(colours(&Tokens::of(theme), state, resting).icon),
-                })
-                .into(),
+            Some(glyph) => themed(glyph, ICON_SIZE, opacity(enabled), move |theme| {
+                colours(&Tokens::of(theme), state, resting).icon
+            })
+            .into(),
             None => space().into(),
         };
 

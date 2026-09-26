@@ -6,11 +6,12 @@ order: 2
 module: primitives::icon_button
 imports: |
   use iced_cube::{icon_button, lucide};
-  use iced_cube::primitives::button::{Size, Variant};
+  use iced_cube::primitives::button::Size;
+  use iced_cube::primitives::icon_button::Variant;
 keywords: [toolbar, icon only, pressed]
 related: [button, tooltip]
 hero: icon-button/toolbar
-stories: [icon-button/toolbar, icon-button/variants, icon-button/sizes]
+stories: [icon-button/toolbar, icon-button/variants, icon-button/sizes, icon-button/disabled]
 api:
   - name: "icon_button(glyph)"
     description: "Creates a square ghost button showing a Lucide icon. It renders disabled until it has a message."
@@ -21,9 +22,9 @@ api:
   - name: ".pressed(bool)"
     description: "Draws the button as switched on, for toolbar toggles. Pass the value your app holds."
   - name: ".variant(Variant)"
-    description: "The same variants as a text button. Defaults to Ghost."
+    description: "Primary, Secondary, Destructive, Outline or Ghost: the text button variants without Link. Defaults to Ghost."
   - name: ".size(Size)"
-    description: "Sm is 32 pixels square, Md and Icon are 36 and Lg is 40. Defaults to Icon."
+    description: "The button Size: Sm is 32 pixels square, Md is 36 and Lg is 40. Defaults to Md."
   - name: ".on_press(message) / .on_press_maybe(option)"
     description: "Sets the message emitted on press. None disables the button."
   - name: ".id(id)"
@@ -36,4 +37,6 @@ Give every icon button a label. The icon alone rarely says enough, and the label
 
 A pressed icon button is a toggle: the app holds the on or off value and passes it to `.pressed`, and the button's message flips it. Use pressed buttons for formatting in a toolbar, or for a group where exactly one option is on, such as text alignment.
 
-Icon buttons share their variants, sizes and colours with [Button](../button/). The `icon-button` feature turns on `button` and `tooltip` for that reason.
+Icon buttons share their sizes and colours with [Button](../button/). There is no Link variant, because a link needs text to read as one; on an icon alone it would look the same as Ghost. The `icon-button` feature turns on `button` and `tooltip`.
+
+A disabled icon button draws its icon at half opacity, like the label of a disabled text button.

@@ -1125,6 +1125,7 @@ dependencies = [
  "iced_test",
  "lucide-static-svg",
  "num-traits",
+ "png 0.18.1",
 ]
 
 [[package]]

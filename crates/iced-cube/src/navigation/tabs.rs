@@ -11,7 +11,7 @@ use iced::keyboard::key::Named;
 use iced::widget::{self, button::Status, column, container, row, rule, text};
 use iced::{Alignment, Background, Border, Color, Element, Length, Shadow, Theme, Vector};
 
-use crate::icon::{Glyph, tinted};
+use crate::icon::{Glyph, opacity, themed};
 use crate::keys::{self, Chord, Keymap};
 use crate::theme::{Tokens, fade, mix, radius, space, text_size};
 
@@ -310,15 +310,13 @@ fn item<'a, Id, Message: Clone + 'a>(
     let enabled = message.is_some();
     let mut label = row![].spacing(space::SM).align_y(Alignment::Center);
     if let Some(glyph) = tab.icon {
-        label = label.push(tinted(glyph, 16.0, None).style(move |theme: &Theme, _| {
-            let status = if enabled {
-                Status::Active
-            } else {
-                Status::Disabled
-            };
-            widget::svg::Style {
-                color: Some(foreground(&Tokens::of(theme), selected, status)),
-            }
+        let status = if enabled {
+            Status::Active
+        } else {
+            Status::Disabled
+        };
+        label = label.push(themed(glyph, 16.0, opacity(enabled), move |theme| {
+            foreground(&Tokens::of(theme), selected, status)
         }));
     }
     label = label.push(text(tab.label.as_str()).size(text_size::SM));

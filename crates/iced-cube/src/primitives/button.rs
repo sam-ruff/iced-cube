@@ -1,9 +1,9 @@
 //! Buttons with consistent variants, sizes and states.
 
 use iced::widget::{self, button::Status, row, text};
-use iced::{Alignment, Background, Border, Element, Length, Padding, Shadow, Theme};
+use iced::{Alignment, Background, Border, Element, Length, Padding, Shadow};
 
-use crate::icon::{Glyph, icon, tinted};
+use crate::icon::{Glyph, opacity, themed};
 use crate::theme::{Tokens, fade, mix, radius, text_size};
 
 /// Visual emphasis of a button.
@@ -37,13 +37,15 @@ pub enum Size {
     Md,
     Lg,
     /// Square, for icon-only buttons.
+    #[deprecated(note = "use icon_button")]
     Icon,
 }
 
 impl Size {
-    pub const ALL: [Size; 4] = [Size::Sm, Size::Md, Size::Lg, Size::Icon];
+    pub const ALL: [Size; 3] = [Size::Sm, Size::Md, Size::Lg];
 
     /// Height, horizontal padding, text size and icon size.
+    #[allow(deprecated)]
     pub const fn metrics(self) -> Metrics {
         match self {
             Size::Sm => Metrics {
@@ -163,16 +165,14 @@ impl<'a, Message: Clone + 'a> From<Button<'a, Message>> for Element<'a, Message>
         let enabled = button.is_enabled();
 
         let glyph = move |glyph: Glyph| -> Element<'a, Message> {
-            if variant == Variant::Link {
-                return icon(glyph, metrics.icon).into();
-            }
-            let theme_icon = tinted(glyph, metrics.icon, None).style(move |theme: &Theme, _| {
-                let colours = colours(&Tokens::of(theme), variant, status_for(enabled));
-                widget::svg::Style {
-                    color: Some(colours.foreground),
+            themed(glyph, metrics.icon, opacity(enabled), move |theme| {
+                let tokens = Tokens::of(theme);
+                if variant == Variant::Link {
+                    return tokens.foreground;
                 }
-            });
-            theme_icon.into()
+                colours(&tokens, variant, status_for(enabled)).foreground
+            })
+            .into()
         };
 
         let mut content = row![].spacing(8).align_y(Alignment::Center);
@@ -186,6 +186,7 @@ impl<'a, Message: Clone + 'a> From<Button<'a, Message>> for Element<'a, Message>
             content = content.push(glyph(trailing));
         }
 
+        #[allow(deprecated)]
         let (width, padding) = match button.size {
             Size::Icon => (
                 Length::Fixed(metrics.height),

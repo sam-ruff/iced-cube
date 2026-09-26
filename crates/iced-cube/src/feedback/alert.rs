@@ -1,9 +1,9 @@
 //! Inline callouts with a title, description and icon.
 
-use iced::widget::{column, container, row, svg, text};
+use iced::widget::{column, container, row, text};
 use iced::{Background, Border, Color, Element, Length, Shadow};
 
-use crate::icon::{Glyph, tinted};
+use crate::icon::{Glyph, themed};
 use crate::theme::{Tokens, mix, radius, space, text_size};
 
 const ICON_SIZE: f32 = 16.0;
@@ -93,8 +93,8 @@ impl<'a, Message: 'a> From<Alert<'a>> for Element<'a, Message> {
         let variant = alert.variant;
         let glyph = alert.glyph();
 
-        let icon = tinted(glyph, ICON_SIZE, None).style(move |theme, _| svg::Style {
-            color: Some(colours(&Tokens::of(theme), variant).accent),
+        let icon = themed(glyph, ICON_SIZE, 1.0, move |theme| {
+            colours(&Tokens::of(theme), variant).accent
         });
 
         let title = text(alert.title)
