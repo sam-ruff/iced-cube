@@ -476,4 +476,9 @@ crate::stories! {
         description: "Switches, a select, a slider, a badge and buttons working together in a card.",
         file: "showcase/settings.rs", height: 400,
     }
+    ShowcaseDemo => showcase::demo {
+        id: "showcase/demo", component: "showcase", title: "Operations console",
+        description: "Every component working together in one app: jobs streamed from a simulated worker, a command palette, menus, dialogs, toasts and settings.",
+        file: "showcase/demo/mod.rs", height: 480, subscription: true, theme: true, edge: true,
+    }
 }

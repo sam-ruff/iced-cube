@@ -61,9 +61,10 @@ macro_rules! stories {
             },
         )*];
 
+        /// Stories are boxed because a full app story is far larger than the rest.
         #[derive(Debug)]
         pub enum AnyStory {
-            $($variant($($module)::+::Example),)*
+            $($variant(Box<$($module)::+::Example>),)*
         }
 
         #[derive(Debug, Clone)]
@@ -75,7 +76,7 @@ macro_rules! stories {
             /// Creates the story with the given id.
             pub fn new(id: &str) -> Option<Self> {
                 match id {
-                    $($id => Some(Self::$variant(Default::default())),)*
+                    $($id => Some(Self::$variant(Box::default())),)*
                     _ => None,
                 }
             }
