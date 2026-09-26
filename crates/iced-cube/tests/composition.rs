@@ -166,7 +166,13 @@ fn escape_in_a_command_inside_a_popover_clears_the_query_first() {
     ui.click(widget::Id::new("search"))
         .expect("search field is rendered");
     let _ = ui.tap_key(Named::Escape);
-    assert_eq!(messages(ui), vec![Message::Command("Close".into())]);
+    assert_eq!(
+        messages(ui),
+        vec![
+            Message::Command("Focus(true)".into()),
+            Message::Command("Close".into())
+        ]
+    );
 }
 
 #[test]
