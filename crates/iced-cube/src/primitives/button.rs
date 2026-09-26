@@ -4,6 +4,7 @@ use iced::widget::{self, button::Status, row, text};
 use iced::{Alignment, Background, Border, Element, Length, Padding, Shadow};
 
 use crate::icon::{Glyph, opacity, themed};
+use crate::natural::natural;
 use crate::theme::{Tokens, fade, mix, radius, text_size};
 
 /// Visual emphasis of a button.
@@ -189,7 +190,11 @@ impl<'a, Message: Clone + 'a> From<Button<'a, Message>> for Element<'a, Message>
             content = content.push(glyph(leading));
         }
         if let Some(label) = button.label {
-            content = content.push(text(label).size(metrics.text));
+            content = content.push(
+                text(label)
+                    .size(metrics.text)
+                    .wrapping(text::Wrapping::None),
+            );
         }
         if let Some(trailing) = button.trailing {
             content = content.push(glyph(trailing));
@@ -207,19 +212,20 @@ impl<'a, Message: Clone + 'a> From<Button<'a, Message>> for Element<'a, Message>
             ),
         };
 
-        widget::button(
-            widget::container(content)
-                .height(Length::Fill)
-                .align_y(Alignment::Center)
-                .align_x(Alignment::Center)
-                .width(Length::Fill),
+        natural(
+            widget::button(
+                widget::container(content)
+                    .height(Length::Fill)
+                    .align_y(Alignment::Center)
+                    .align_x(Alignment::Center)
+                    .width(Length::Fill),
+            )
+            .width(width)
+            .height(Length::Fixed(metrics.height))
+            .padding(padding)
+            .on_press_maybe(button.on_press)
+            .style(move |theme, status| style(&Tokens::of(theme), variant, status)),
         )
-        .width(width)
-        .height(Length::Fixed(metrics.height))
-        .padding(padding)
-        .on_press_maybe(button.on_press)
-        .style(move |theme, status| style(&Tokens::of(theme), variant, status))
-        .into()
     }
 }
 

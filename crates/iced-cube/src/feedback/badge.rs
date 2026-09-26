@@ -4,6 +4,7 @@ use iced::widget::{container, row, text};
 use iced::{Alignment, Background, Border, Color, Element, Padding, Shadow};
 
 use crate::icon::{Glyph, themed};
+use crate::natural::natural;
 use crate::theme::{Tokens, on, radius, text_size};
 
 const ICON_SIZE: f32 = 12.0;
@@ -71,12 +72,17 @@ impl<'a, Message: 'a> From<Badge<'a>> for Element<'a, Message> {
                 colours(&Tokens::of(theme), variant).foreground
             }));
         }
-        content = content.push(text(badge.label).size(text_size::XS));
+        content = content.push(
+            text(badge.label)
+                .size(text_size::XS)
+                .wrapping(text::Wrapping::None),
+        );
 
-        container(content)
-            .padding(Padding::from([2.0, 10.0]))
-            .style(move |theme| style(&Tokens::of(theme), variant))
-            .into()
+        natural(
+            container(content)
+                .padding(Padding::from([2.0, 10.0]))
+                .style(move |theme| style(&Tokens::of(theme), variant)),
+        )
     }
 }
 

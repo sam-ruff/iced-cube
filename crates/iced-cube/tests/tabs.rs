@@ -1,6 +1,7 @@
 #![cfg(feature = "tabs")]
 
 use iced::Element;
+use iced::widget::column;
 use iced_cube::navigation::tabs::{self, Event, State, Variant, tab};
 use iced_test::simulator;
 
@@ -71,6 +72,27 @@ fn emitted_messages_drive_the_state() {
         let _ = state.update(event);
     }
     assert_eq!(state.selected(), Some(Page::Password));
+}
+
+#[test]
+fn triggers_stay_on_one_line_in_a_narrow_container() {
+    let state = State::new([
+        tab(Page::Account, "Account settings"),
+        tab(Page::Password, "Change password"),
+    ]);
+    for variant in [Variant::Underline, Variant::Pills] {
+        let element: Element<'_, Message> = column![view(&state, variant)].width(60).into();
+        let mut ui = simulator(element);
+        for label in ["Account settings", "Change password"] {
+            let bounds = ui.find(label).expect("trigger is rendered").bounds();
+            assert!(
+                bounds.height < 24.0,
+                "{variant:?} {label}: {}",
+                bounds.height
+            );
+            assert!(bounds.width > 60.0, "{variant:?} {label}: {}", bounds.width);
+        }
+    }
 }
 
 #[test]

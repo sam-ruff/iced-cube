@@ -8,11 +8,12 @@
 //! [`default_keymap`] and [`crate::keys`].
 
 use iced::keyboard::key::Named;
-use iced::widget::{self, button::Status, column, container, row, rule, text};
+use iced::widget::{self, button::Status, column, container, row, rule, scrollable, text};
 use iced::{Alignment, Background, Border, Color, Element, Length, Shadow, Theme, Vector};
 
 use crate::icon::{Glyph, opacity, themed};
 use crate::keys::{self, Chord, Keymap};
+use crate::natural::natural;
 use crate::theme::{Tokens, fade, mix, radius, space, text_size};
 
 /// How the tab list looks.
@@ -282,7 +283,7 @@ where
 
         match variant {
             Variant::Underline => column![
-                row(items).spacing(space::XS),
+                sideways(row(items).spacing(space::XS)),
                 rule::horizontal(1).style(|theme: &Theme| rule::Style {
                     color: Tokens::of(theme).border,
                     radius: 0.0.into(),
@@ -292,13 +293,21 @@ where
             ]
             .width(width.unwrap_or(Length::Fill))
             .into(),
-            Variant::Pills => container(row(items).spacing(space::XS))
+            Variant::Pills => container(sideways(row(items).spacing(space::XS)))
                 .padding(space::XS)
                 .width(width.unwrap_or(Length::Shrink))
                 .style(move |theme| list_style(&Tokens::of(theme), variant))
                 .into(),
         }
     }
+}
+
+/// Lets a tab list wider than its space scroll sideways rather than run off
+/// the edge or squeeze its triggers.
+fn sideways<'a, Message: 'a>(list: widget::Row<'a, Message>) -> widget::Scrollable<'a, Message> {
+    widget::scrollable(list).direction(scrollable::Direction::Horizontal(
+        scrollable::Scrollbar::hidden(),
+    ))
 }
 
 fn item<'a, Id, Message: Clone + 'a>(
@@ -319,7 +328,11 @@ fn item<'a, Id, Message: Clone + 'a>(
             foreground(&Tokens::of(theme), selected, status)
         }));
     }
-    label = label.push(text(tab.label.as_str()).size(text_size::SM));
+    label = label.push(
+        text(tab.label.as_str())
+            .size(text_size::SM)
+            .wrapping(text::Wrapping::None),
+    );
 
     let button = widget::button(label)
         .padding([6.0, space::MD])
@@ -327,18 +340,19 @@ fn item<'a, Id, Message: Clone + 'a>(
         .style(move |theme, status| style(&Tokens::of(theme), variant, selected, status));
 
     if variant == Variant::Pills {
-        return button.into();
+        return natural(button);
     }
 
-    column![
-        button,
-        container(iced::widget::space())
-            .width(Length::Fill)
-            .height(2)
-            .style(move |theme| indicator_style(&Tokens::of(theme), selected)),
-    ]
-    .width(Length::Shrink)
-    .into()
+    natural(
+        column![
+            button,
+            container(iced::widget::space())
+                .width(Length::Fill)
+                .height(2)
+                .style(move |theme| indicator_style(&Tokens::of(theme), selected)),
+        ]
+        .width(Length::Shrink),
+    )
 }
 
 fn foreground(tokens: &Tokens, selected: bool, status: Status) -> Color {

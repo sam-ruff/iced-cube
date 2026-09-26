@@ -33,6 +33,8 @@ pub mod icon;
 mod inert;
 pub mod keys;
 pub mod layout;
+#[cfg(any(feature = "badge", feature = "button", feature = "tabs"))]
+mod natural;
 pub mod navigation;
 pub mod overlay;
 pub mod primitives;

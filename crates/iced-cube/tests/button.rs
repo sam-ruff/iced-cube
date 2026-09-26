@@ -1,9 +1,9 @@
 #![cfg(feature = "button")]
 
-use iced::Element;
 use iced::widget::column;
-use iced_cube::button;
+use iced::{Element, Length};
 use iced_cube::primitives::button::{Size, Variant};
+use iced_cube::{button, lucide};
 use iced_test::simulator;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -39,6 +39,47 @@ fn disabled_button_emits_nothing() -> Result<(), iced_test::Error> {
     ui.click("Delete")?;
 
     assert_eq!(ui.into_messages().count(), 0);
+    Ok(())
+}
+
+#[test]
+fn label_stays_on_one_line_in_a_narrow_container() -> Result<(), iced_test::Error> {
+    let element: Element<'_, Message> = column![
+        button("Save changes")
+            .icon(lucide!(Save))
+            .on_press(Message::Save)
+    ]
+    .width(40)
+    .into();
+    let mut ui = simulator(element);
+
+    let bounds = ui.find("Save changes")?.bounds();
+    assert!(bounds.height < 24.0, "one line, got {}", bounds.height);
+    assert!(
+        bounds.width > 40.0,
+        "sized to its label, got {}",
+        bounds.width
+    );
+
+    ui.click("Save changes")?;
+    assert_eq!(ui.into_messages().collect::<Vec<_>>(), vec![Message::Save]);
+    Ok(())
+}
+
+#[test]
+fn fill_width_button_keeps_the_container_width() -> Result<(), iced_test::Error> {
+    let element: Element<'_, Message> =
+        column![button("Save").width(Length::Fill).on_press(Message::Save)]
+            .width(300)
+            .into();
+    let mut ui = simulator(element);
+
+    let label = ui.find("Save")?.bounds();
+    let centre = label.x + label.width / 2.0;
+    assert!(
+        (centre - 150.0).abs() < 1.0,
+        "label centred in 300px, got {centre}"
+    );
     Ok(())
 }
 
