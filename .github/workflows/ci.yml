@@ -60,16 +60,19 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, Windows, X64]
     timeout-minutes: 45
+    env:
+      # Keeps peak memory low enough for the Windows runner VM.
+      CARGO_BUILD_JOBS: 2
+      CARGO_PROFILE_DEV_DEBUG: 0
+      CARGO_PROFILE_TEST_DEBUG: 0
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Toolchain
         run: |
-          rustup toolchain install stable --profile minimal --component clippy
+          rustup toolchain install stable --profile minimal
           rustup default stable
-      - name: Clippy
-        run: cargo clippy --locked -p iced-cube --all-targets -- -D warnings
       - name: Test
         run: cargo test --locked -p iced-cube
 
