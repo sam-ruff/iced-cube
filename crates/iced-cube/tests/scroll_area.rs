@@ -1,3 +1,5 @@
+#![cfg(all(feature = "scroll-area", feature = "button"))]
+
 use iced::widget::{column, row, text};
 use iced::{Element, Length};
 use iced_cube::primitives::scroll_area::Direction;

@@ -1,6 +1,13 @@
 //! Themeable application components for [iced](https://iced.rs).
 //!
+//! Every component sits behind a Cargo feature named after it, such as
+//! `button` or `scroll-area`, and each group (`primitives`, `forms`,
+//! `layout`, `navigation`, `overlay`, `feedback`) enables its members. The
+//! default `full` feature enables all of them.
+//!
 //! ```no_run
+//! # #[cfg(feature = "button")]
+//! # fn main() {
 //! use iced_cube::{button, lucide};
 //! use iced_cube::primitives::button::Variant;
 //!
@@ -12,11 +19,17 @@
 //!     .variant(Variant::Primary)
 //!     .on_press(Message::Save)
 //!     .into();
+//! # }
+//! # #[cfg(not(feature = "button"))]
+//! # fn main() {}
 //! ```
+
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 pub mod feedback;
 pub mod forms;
 pub mod icon;
+#[cfg(any(feature = "select", feature = "slider"))]
 mod inert;
 pub mod keys;
 pub mod layout;
@@ -25,14 +38,53 @@ pub mod overlay;
 pub mod primitives;
 pub mod theme;
 
-pub use feedback::{alert, badge, progress, spinner};
-pub use forms::{field, label, select, textarea};
 pub use icon::{Glyph, Icon};
 pub use keys::{Chord, Keymap};
-pub use layout::{accordion, card, hstack, vstack};
+
+#[cfg(feature = "alert")]
+pub use feedback::alert;
+#[cfg(feature = "badge")]
+pub use feedback::badge;
+#[cfg(feature = "progress")]
+pub use feedback::progress;
+#[cfg(feature = "spinner")]
+pub use feedback::spinner;
+
+#[cfg(feature = "select")]
+pub use forms::select;
+#[cfg(feature = "textarea")]
+pub use forms::textarea;
+#[cfg(feature = "field")]
+pub use forms::{field, label};
+
+#[cfg(feature = "accordion")]
+pub use layout::accordion;
+#[cfg(feature = "card")]
+pub use layout::card;
+#[cfg(feature = "stack")]
+pub use layout::{hstack, vstack};
+
+#[cfg(feature = "tabs")]
 pub use navigation::{tab, tabs};
-pub use overlay::{toast, toasts, tooltip};
-pub use primitives::{
-    button, checkbox, icon_button, input, radio, radio_group, scroll_area, separator, slider,
-    switch, vertical_separator,
-};
+
+#[cfg(feature = "tooltip")]
+pub use overlay::tooltip;
+#[cfg(feature = "toast")]
+pub use overlay::{toast, toasts};
+
+#[cfg(feature = "checkbox")]
+pub use primitives::checkbox;
+#[cfg(feature = "input")]
+pub use primitives::input;
+#[cfg(feature = "scroll-area")]
+pub use primitives::scroll_area;
+#[cfg(feature = "slider")]
+pub use primitives::slider;
+#[cfg(feature = "switch")]
+pub use primitives::switch;
+#[cfg(feature = "button")]
+pub use primitives::{button, icon_button};
+#[cfg(feature = "radio")]
+pub use primitives::{radio, radio_group};
+#[cfg(feature = "separator")]
+pub use primitives::{separator, vertical_separator};

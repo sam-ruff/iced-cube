@@ -11,17 +11,61 @@ repository.workspace = true
 homepage = "https://sam-ruff.github.io/iced-cube/"
 documentation = "https://docs.rs/iced-cube"
 
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [features]
-default = ["x11", "wayland", "thread-pool"]
+default = ["x11", "wayland", "thread-pool", "full"]
 x11 = ["iced/x11"]
 wayland = ["iced/wayland"]
 thread-pool = ["iced/thread-pool"]
 tokio = ["iced/tokio"]
 
+full = ["primitives", "forms", "layout", "navigation", "overlay", "feedback"]
+
+primitives = [
+    "button",
+    "input",
+    "checkbox",
+    "radio",
+    "switch",
+    "slider",
+    "scroll-area",
+    "separator",
+]
+forms = ["field", "select", "textarea"]
+layout = ["card", "stack", "accordion"]
+navigation = ["tabs"]
+overlay = ["tooltip", "toast"]
+feedback = ["alert", "badge", "progress", "spinner"]
+
+button = []
+input = []
+checkbox = []
+radio = []
+switch = []
+slider = ["iced/advanced", "dep:num-traits"]
+scroll-area = []
+separator = []
+field = []
+select = ["iced/advanced"]
+textarea = ["input"]
+card = []
+stack = []
+accordion = []
+tabs = []
+tooltip = []
+toast = ["button"]
+alert = []
+badge = []
+progress = []
+spinner = ["iced/canvas"]
+
 [dependencies]
-iced = { version = "0.14.0", default-features = false, features = ["svg", "advanced", "canvas"] }
+iced = { version = "0.14.0", default-features = false, features = ["svg"] }
 lucide-static-svg = "1.48.0"
-num-traits = "0.2.19"
+num-traits = { version = "0.2.19", optional = true }
 
 [dev-dependencies]
 futures = "0.3.34"

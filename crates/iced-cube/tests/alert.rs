@@ -1,3 +1,5 @@
+#![cfg(feature = "alert")]
+
 use iced::Element;
 use iced_cube::alert;
 use iced_cube::feedback::alert::Variant;

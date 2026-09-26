@@ -1,3 +1,5 @@
+#![cfg(feature = "badge")]
+
 use iced::Element;
 use iced_cube::feedback::badge::Variant;
 use iced_cube::{badge, lucide};

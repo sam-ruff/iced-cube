@@ -1,3 +1,5 @@
+#![cfg(feature = "switch")]
+
 use iced::widget::column;
 use iced::{Element, Point};
 use iced_cube::primitives::switch;

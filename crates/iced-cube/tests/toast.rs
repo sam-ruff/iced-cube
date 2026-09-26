@@ -1,3 +1,5 @@
+#![cfg(feature = "toast")]
+
 use std::thread;
 
 use futures::executor::block_on;

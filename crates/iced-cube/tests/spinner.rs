@@ -1,3 +1,5 @@
+#![cfg(feature = "spinner")]
+
 use iced::widget::{row, text};
 use iced::{Element, Theme};
 use iced_cube::feedback::spinner::Size;

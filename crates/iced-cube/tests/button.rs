@@ -1,3 +1,5 @@
+#![cfg(feature = "button")]
+
 use iced::Element;
 use iced::widget::column;
 use iced_cube::primitives::button::{Size, Variant};

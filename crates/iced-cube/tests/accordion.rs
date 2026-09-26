@@ -1,3 +1,5 @@
+#![cfg(feature = "accordion")]
+
 use iced::Element;
 use iced::widget::text;
 use iced_cube::layout::accordion::{Event, Mode, State, accordion};

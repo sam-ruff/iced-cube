@@ -8,6 +8,8 @@
 //! [`unbind`](Keymap::unbind) or [`clear`](Keymap::clear) the defaults.
 //!
 //! ```no_run
+//! # #[cfg(feature = "tabs")]
+//! # mod example {
 //! use iced::Subscription;
 //! use iced::keyboard::key::Named;
 //! use iced_cube::keys::{self, Chord, Keymap};
@@ -49,6 +51,7 @@
 //!         keys::subscription().map(Message::Key)
 //!     }
 //! }
+//! # }
 //! ```
 
 use std::fmt;

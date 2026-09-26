@@ -1,3 +1,5 @@
+#![cfg(all(feature = "stack", feature = "button"))]
+
 use iced::Element;
 use iced::widget::text;
 use iced_cube::layout::stack::Gap;

@@ -1,3 +1,5 @@
+#![cfg(feature = "input")]
+
 use iced::keyboard::key::Named;
 use iced::widget::{Id, column};
 use iced::{Element, Point};

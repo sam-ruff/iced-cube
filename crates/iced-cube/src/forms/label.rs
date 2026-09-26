@@ -1,6 +1,8 @@
 //! Labels, and fields that stack a label, a control and helper text.
 //!
 //! ```no_run
+//! # #[cfg(feature = "input")]
+//! # fn main() {
 //! use iced_cube::{field, input};
 //!
 //! #[derive(Debug, Clone)]
@@ -11,6 +13,9 @@
 //!     .description("We never share it.")
 //!     .required(true)
 //!     .into();
+//! # }
+//! # #[cfg(not(feature = "input"))]
+//! # fn main() {}
 //! ```
 
 use std::fmt;

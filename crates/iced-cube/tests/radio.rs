@@ -1,3 +1,5 @@
+#![cfg(feature = "radio")]
+
 use std::fmt;
 
 use iced::Element;

@@ -1,3 +1,5 @@
+#![cfg(feature = "separator")]
+
 use iced::widget::{column, row, text};
 use iced::{Element, Size};
 use iced_cube::primitives::separator::Orientation;

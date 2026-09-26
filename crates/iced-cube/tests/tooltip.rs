@@ -1,3 +1,5 @@
+#![cfg(all(feature = "tooltip", feature = "button"))]
+
 use iced::Element;
 use iced_cube::button;
 use iced_cube::overlay::tooltip::{Position, tooltip};

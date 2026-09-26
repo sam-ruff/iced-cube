@@ -1,3 +1,5 @@
+#![cfg(all(feature = "card", feature = "button"))]
+
 use iced::Element;
 use iced::widget::{row, text};
 use iced_cube::primitives::button::Variant;

@@ -1,3 +1,5 @@
+#![cfg(feature = "select")]
+
 use iced::{Element, Event, Point, mouse};
 use iced_cube::forms::select;
 use iced_cube::forms::select::HEIGHT;

@@ -1,3 +1,5 @@
+#![cfg(feature = "slider")]
+
 use iced::{Element, Point, Settings, Size};
 use iced_cube::primitives::slider;
 use iced_cube::primitives::slider::HANDLE_RADIUS;

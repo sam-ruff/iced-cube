@@ -1,3 +1,5 @@
+#![cfg(all(feature = "field", feature = "input"))]
+
 use iced::Element;
 use iced::widget::Id;
 use iced_cube::forms::label::State;

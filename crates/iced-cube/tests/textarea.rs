@@ -1,3 +1,5 @@
+#![cfg(feature = "textarea")]
+
 use iced::Element;
 use iced::keyboard::key::Named;
 use iced::widget::Id;

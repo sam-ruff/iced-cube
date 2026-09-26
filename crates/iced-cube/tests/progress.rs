@@ -1,3 +1,5 @@
+#![cfg(feature = "progress")]
+
 use iced::Element;
 use iced_cube::feedback::progress::{Size, Variant};
 use iced_cube::progress;

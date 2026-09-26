@@ -37,6 +37,8 @@ jobs:
         run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
       - name: Test
         run: cargo test --locked --workspace
+      - name: Feature combinations
+        run: scripts/check-features.sh --locked
       - name: Docs
         run: cargo doc --locked -p iced-cube --no-deps
         env:

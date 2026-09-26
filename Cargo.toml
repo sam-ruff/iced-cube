@@ -10,6 +10,7 @@ repository = "https://github.com/sam-ruff/iced-cube"
 [workspace.lints.rust]
 unsafe_code = "forbid"
 missing_debug_implementations = "warn"
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(docsrs)"] }
 
 [workspace.lints.clippy]
 unwrap_used = "warn"

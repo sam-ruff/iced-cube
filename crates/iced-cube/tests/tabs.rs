@@ -1,3 +1,5 @@
+#![cfg(feature = "tabs")]
+
 use iced::Element;
 use iced_cube::navigation::tabs::{self, Event, State, Variant, tab};
 use iced_test::simulator;
