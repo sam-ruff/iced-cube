@@ -2,8 +2,8 @@
 //!
 //! Every component sits behind a Cargo feature named after it, such as
 //! `button` or `scroll-area`, and each group (`primitives`, `forms`,
-//! `layout`, `navigation`, `overlay`, `feedback`, `application`) enables its members. The
-//! default `full` feature enables all of them.
+//! `layout`, `navigation`, `overlay`, `feedback`, `application`, `data`)
+//! enables its members. The default `full` feature enables all of them.
 //!
 //! ```no_run
 //! # #[cfg(feature = "button")]
@@ -27,6 +27,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 pub mod application;
+pub mod data;
 pub mod feedback;
 pub mod forms;
 pub mod icon;
@@ -52,6 +53,11 @@ pub use application::menubar;
 pub use application::status_bar;
 #[cfg(feature = "toolbar")]
 pub use application::toolbar;
+
+#[cfg(feature = "data-table")]
+pub use data::data_table;
+#[cfg(feature = "tree")]
+pub use data::tree;
 
 #[cfg(feature = "alert")]
 pub use feedback::alert;

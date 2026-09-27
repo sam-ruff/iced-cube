@@ -14,6 +14,7 @@ pub mod combobox;
 pub mod command;
 pub mod command_palette;
 pub mod context_menu;
+pub mod data_table;
 pub mod dialog;
 pub mod dropdown_menu;
 pub mod icon_button;
@@ -38,6 +39,7 @@ pub mod theme;
 pub mod toast;
 pub mod toolbar;
 pub mod tooltip;
+pub mod tree;
 
 crate::stories! {
     ButtonVariants => button::variants {
@@ -484,6 +486,61 @@ crate::stories! {
         id: "command-palette/async-search", component: "command-palette", title: "Async results",
         description: "Typing asks the app to search, and a background task streams file matches through the command list's channel.",
         file: "command_palette/async_search.rs", height: 460, subscription: true, edge: true,
+    }
+    TreeFileExplorer => tree::file_explorer {
+        id: "tree/file-explorer", component: "tree", title: "File explorer",
+        description: "Folders that open and close, file sizes and a count badge, indentation guides, a disabled folder, a name too long to fit and a context menu on every node.",
+        file: "tree/file_explorer.rs", height: 380,
+    }
+    TreeCheckbox => tree::checkbox {
+        id: "tree/checkbox", component: "tree", title: "Checkboxes",
+        description: "Checking a group checks its members, and a group with some members checked shows a dash. The disabled permission keeps its state.",
+        file: "tree/checkbox.rs", height: 440,
+    }
+    TreeLazyLoading => tree::lazy_loading {
+        id: "tree/lazy-loading", component: "tree", title: "Lazy loading",
+        description: "Folders fetch their children when first opened. A simulated server sends them through the tree's channel after a short wait, using futures-timer so it also runs in the browser.",
+        file: "tree/lazy_loading.rs", height: 360, subscription: true,
+    }
+    TreeKeyboard => tree::keyboard {
+        id: "tree/keyboard", component: "tree", title: "Keyboard shortcuts",
+        description: "A multiple selection driven by the default keymap with J and K added. The tree resolves keys only while it has focus.",
+        file: "tree/keyboard.rs", height: 400,
+    }
+    DataTableDefault => data_table::default {
+        id: "data-table/default", component: "data-table", title: "Payments",
+        description: "Sortable headers, a search box, a status filter, a Columns menu, status badges and right-aligned amounts.",
+        file: "data_table/default.rs", height: 460,
+    }
+    DataTablePagination => data_table::pagination {
+        id: "data-table/pagination", component: "data-table", title: "Pagination",
+        description: "243 invoices in pages of 10, 25, 50 or 100. The rows scroll under a header that stays put, and only the rows in view are built.",
+        file: "data_table/pagination.rs", height: 480,
+    }
+    DataTableSelection => data_table::selection {
+        id: "data-table/selection", component: "data-table", title: "Selection and bulk actions",
+        description: "A checkbox on every row, and a header checkbox that selects or clears the rows on the page. Buttons above act on the selection.",
+        file: "data_table/selection.rs", height: 440,
+    }
+    DataTableRowActions => data_table::row_actions {
+        id: "data-table/row-actions", component: "data-table", title: "Row actions",
+        description: "One context menu shared by every row, opened by a right-click, a long press, the row's menu button or Shift+F10. The progress column is a custom cell.",
+        file: "data_table/row_actions.rs", height: 360,
+    }
+    DataTableLoading => data_table::loading {
+        id: "data-table/loading", component: "data-table", title: "Loading",
+        description: "Placeholder rows while the data loads. The switch toggles them.",
+        file: "data_table/loading.rs", height: 440,
+    }
+    DataTableEmpty => data_table::empty {
+        id: "data-table/empty", component: "data-table", title: "Empty",
+        description: "A message in place of rows when nothing matches, with a button that clears the search.",
+        file: "data_table/empty.rs", height: 340,
+    }
+    DataTableKeyboard => data_table::keyboard {
+        id: "data-table/keyboard", component: "data-table", title: "Keyboard shortcuts",
+        description: "The default keymap with J and K added. The table resolves keys only while it has focus, and the highlight moves on to the next page after the last row.",
+        file: "data_table/keyboard.rs", height: 440,
     }
     ThemeCustom => theme::custom {
         id: "theme/custom", component: "theme", title: "Custom palette",

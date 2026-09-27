@@ -65,3 +65,47 @@ fn settings_footer_fits_the_card() {
         save.x + save.width
     );
 }
+
+#[test]
+fn payments_become_cards_that_fit_the_phone() {
+    let gallery = open("data-table/default");
+    let mut ui = render(&gallery);
+    for text in [
+        "Columns",
+        "Paid",
+        "Processing",
+        "ken99@example.com",
+        "$316.00",
+        "monserrat44@example.com",
+    ] {
+        let bounds = ui.find(text).expect(text).bounds();
+        assert!(
+            bounds.x >= 0.0 && bounds.x + bounds.width <= PHONE.width,
+            "{text} runs off the edge: {bounds:?}"
+        );
+        assert!(bounds.height < 24.0, "{text} wraps: {bounds:?}");
+    }
+    let email = ui.find("ken99@example.com").expect("card line").bounds();
+    let label = ui.find("Email").expect("line label").bounds();
+    assert_eq!(
+        email.center_y().round(),
+        label.center_y().round(),
+        "a labelled line"
+    );
+}
+
+#[test]
+fn a_long_file_name_ends_in_an_ellipsis_on_a_phone() {
+    let gallery = open("tree/file-explorer");
+    let mut ui = render(&gallery);
+    let name = ui
+        .find("a_file_whose_name_is_far_too_long_for_the_row.rs")
+        .expect("the full name is reported")
+        .bounds();
+    assert!(
+        name.x + name.width <= PHONE.width,
+        "ends at {}",
+        name.x + name.width
+    );
+    assert!(name.height <= 20.0, "one line, got {}", name.height);
+}
