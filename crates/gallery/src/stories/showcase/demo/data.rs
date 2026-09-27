@@ -15,6 +15,8 @@ impl fmt::Display for JobId {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Status {
+    /// Waiting for its schedule, such as a nightly run.
+    Scheduled,
     Queued,
     Running,
     Paused,
@@ -25,6 +27,7 @@ pub enum Status {
 impl Status {
     pub fn label(self) -> &'static str {
         match self {
+            Status::Scheduled => "Scheduled",
             Status::Queued => "Queued",
             Status::Running => "Running",
             Status::Paused => "Paused",
@@ -35,6 +38,7 @@ impl Status {
 
     pub fn badge(self) -> BadgeVariant {
         match self {
+            Status::Scheduled => BadgeVariant::Outline,
             Status::Queued => BadgeVariant::Secondary,
             Status::Running => BadgeVariant::Default,
             Status::Paused => BadgeVariant::Warning,
@@ -56,10 +60,11 @@ pub enum StatusFilter {
 }
 
 impl StatusFilter {
-    pub const ALL: [StatusFilter; 6] = [
+    pub const ALL: [StatusFilter; 7] = [
         StatusFilter::All,
         StatusFilter::Only(Status::Running),
         StatusFilter::Only(Status::Queued),
+        StatusFilter::Only(Status::Scheduled),
         StatusFilter::Only(Status::Paused),
         StatusFilter::Only(Status::Failed),
         StatusFilter::Only(Status::Succeeded),
@@ -146,6 +151,10 @@ pub struct Job {
     pub speed: f32,
     pub started: String,
     pub checked: bool,
+    pub schedule: Schedule,
+    pub notes: String,
+    /// Automatic retries used since the job last started from the beginning.
+    pub attempts: u8,
 }
 
 impl Job {
@@ -167,6 +176,9 @@ impl Job {
             speed: 0.015 + (id.0 % 3) as f32 * 0.01,
             started: String::from("-"),
             checked: false,
+            schedule: Schedule::Once,
+            notes: String::new(),
+            attempts: 0,
         }
     }
 
@@ -181,6 +193,7 @@ impl Job {
     /// What the last column of the job list says.
     pub fn detail(&self) -> String {
         match self.status {
+            Status::Scheduled => format!("Next run: {}", self.schedule),
             Status::Queued => String::from("Waiting for a slot"),
             Status::Running | Status::Paused => format!("{}%", (self.progress * 100.0).round()),
             Status::Succeeded => format!("Finished, started {}", self.started),
@@ -485,6 +498,15 @@ impl Environment {
             Environment::Production => "Production",
             Environment::Staging => "Staging",
             Environment::Development => "Development",
+        }
+    }
+
+    /// A label short enough for the header on a phone.
+    pub fn short(self) -> &'static str {
+        match self {
+            Environment::Production => "Prod",
+            Environment::Staging => "Staging",
+            Environment::Development => "Dev",
         }
     }
 

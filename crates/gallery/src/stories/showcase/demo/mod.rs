@@ -18,10 +18,11 @@ use std::time::Duration;
 
 use iced::keyboard::key::Named;
 use iced::time::Instant;
-use iced::widget::{Text, column, container, responsive, row, text};
-use iced::{Element, Length, Size, Subscription, Theme};
+use iced::widget::{Text, column, container, responsive, row, sensor, space, text};
+use iced::{Element, Length, Size, Subscription, Task, Theme};
 use iced_cube::context_menu;
 use iced_cube::dropdown_menu::{self, Output as MenuOutput};
+use iced_cube::feedback::alert::Variant as AlertVariant;
 use iced_cube::feedback::spinner::advance;
 use iced_cube::forms::combobox;
 use iced_cube::keys::{self, Chord, Keymap};
@@ -34,11 +35,13 @@ use iced_cube::overlay::toast::{self, Variant as ToastVariant, toast, toasts};
 use iced_cube::primitives::checkbox::{self, CheckState};
 use iced_cube::primitives::switch;
 use iced_cube::theme::{self, Tokens, text_size};
-use iced_cube::{separator, vertical_separator};
+use iced_cube::{alert, separator, vertical_separator};
 
+use crate::app::ThemeChoice;
+use crate::bridge;
 use data::{
-    Environment, Job, JobId, LevelFilter, LogLine, Queue, Range, Runbook, Status, StatusFilter,
-    TEMPLATES,
+    Environment, Job, JobId, Level, LevelFilter, LogLine, Queue, Range, Runbook, Schedule, Status,
+    StatusFilter, TEMPLATES,
 };
 use feed::{Update, Worker};
 use new_job::Draft;
@@ -52,6 +55,8 @@ const SIDEBAR: f32 = 248.0;
 const LOG_LIMIT: usize = 200;
 const JOB_LIMIT: usize = 16;
 const QUEUE_LIMIT: usize = 4;
+/// Jobs that had finished before the demo started, for the Succeeded total.
+const EARLIER_SUCCESSES: usize = 214;
 const RUNBOOKS: [Runbook; 3] = [Runbook::Degraded, Runbook::Retry, Runbook::Escalation];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,6 +65,10 @@ pub enum Page {
     Jobs,
     Activity,
     Settings,
+}
+
+impl Page {
+    const ALL: [Page; 4] = [Page::Overview, Page::Jobs, Page::Activity, Page::Settings];
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -141,6 +150,7 @@ pub enum Message {
     ClosePalette,
     Palette(command::Event<Cmd>),
     Finder(command::Event<Cmd>),
+    CloseDrawer,
     Run(Cmd),
     OpenNewJob,
     CloseNewJob,
@@ -152,6 +162,8 @@ pub enum Message {
     CheckAll(bool),
     Cursor(JobId),
     RowMenu(context_menu::Event<RowAction, JobId>),
+    ListHover(bool),
+    ShowNew,
     PauseSelected,
     DeleteSelected,
     Confirm,
@@ -163,10 +175,13 @@ pub enum Message {
     Settings(settings::Message),
     Refresh,
     Feed(feed::Event),
+    Submit,
     Toast(toast::Event),
     Restore(Vec<Placed>),
     Tick(Instant),
     Key(keys::Event),
+    Resized(Size),
+    Host(bridge::Event),
 }
 
 /// Every keymap the app routes, one per component, with the demo's changes.
@@ -220,7 +235,11 @@ pub struct Example {
     menu: dropdown_menu::State<MenuItem>,
     theme: ThemeMode,
     environment: Environment,
+    /// The window width, for choices made in `update`.
+    width: f32,
     sidebar: bool,
+    /// The sidebar as a dialog, on windows too narrow to show it beside the page.
+    drawer: bool,
     compact: bool,
     help: bool,
     palette_open: bool,
@@ -231,12 +250,20 @@ pub struct Example {
     pending: Option<Pending>,
     jobs: Vec<Job>,
     next_id: u32,
+    next_template: usize,
+    succeeded: usize,
     search: String,
     filter: StatusFilter,
     cursor: Option<JobId>,
     row_menu: context_menu::State<RowAction, JobId>,
+    list_hovered: bool,
+    /// Submitted jobs held back behind the "new jobs" pill.
+    fresh: Vec<JobId>,
+    /// The rows on show, kept while something points at the list so no row
+    /// moves under the pointer or an open menu.
+    frozen: Option<Vec<JobId>>,
     logs: VecDeque<(u32, LogLine)>,
-    held: Vec<LogLine>,
+    held: VecDeque<LogLine>,
     clock: u32,
     live: bool,
     level: LevelFilter,
@@ -256,6 +283,11 @@ impl Default for Example {
     fn default() -> Self {
         let jobs = data::jobs();
         let next_id = jobs.iter().map(|job| job.id.0).max().unwrap_or(1000) + 1;
+        let succeeded = EARLIER_SUCCESSES
+            + jobs
+                .iter()
+                .filter(|job| job.status == Status::Succeeded)
+                .count();
         Self {
             page: tabs::State::new([
                 tab(Page::Overview, "Overview"),
@@ -271,7 +303,9 @@ impl Default for Example {
             menu: dropdown_menu::State::new(chrome::menu_entries()),
             theme: ThemeMode::System,
             environment: Environment::Production,
+            width: WIDE,
             sidebar: true,
+            drawer: false,
             compact: false,
             help: false,
             palette_open: false,
@@ -282,12 +316,17 @@ impl Default for Example {
             pending: None,
             jobs,
             next_id,
+            next_template: 0,
+            succeeded,
             search: String::new(),
             filter: StatusFilter::All,
             cursor: None,
             row_menu: context_menu::State::new(jobs::row_menu_entries()),
+            list_hovered: false,
+            fresh: Vec::new(),
+            frozen: None,
             logs: data::logs().into(),
-            held: Vec::new(),
+            held: VecDeque::new(),
             clock: 9 * 3600 + 41 * 60,
             live: true,
             level: LevelFilter::All,
@@ -305,7 +344,13 @@ impl Default for Example {
 }
 
 impl Example {
-    pub fn update(&mut self, message: Message) {
+    pub fn update(&mut self, message: Message) -> Task<Message> {
+        let task = self.handle(message);
+        self.settle_list();
+        task
+    }
+
+    fn handle(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Tabs(event) => {
                 let _ = self.page.update(event);
@@ -328,9 +373,11 @@ impl Example {
             },
             Message::Finder(event) => {
                 if let Some(command::Output::Activated(cmd)) = self.finder.update(event) {
+                    self.drawer = false;
                     self.run(cmd);
                 }
             }
+            Message::CloseDrawer => self.drawer = false,
             Message::Run(cmd) => self.run(cmd),
             Message::OpenNewJob => {
                 self.draft = Draft::default();
@@ -339,8 +386,14 @@ impl Example {
             Message::CloseNewJob => self.new_job_open = false,
             Message::Draft(message) => self.draft.update(message),
             Message::CreateJob => self.create_job(),
-            Message::Search(search) => self.search = search,
-            Message::Filter(filter) => self.filter = filter,
+            Message::Search(search) => {
+                self.search = search;
+                self.untick_hidden();
+            }
+            Message::Filter(filter) => {
+                self.filter = filter;
+                self.untick_hidden();
+            }
             Message::Check(id, checked) => {
                 if let Some(job) = self.job_mut(id) {
                     job.checked = checked;
@@ -355,23 +408,10 @@ impl Example {
                 }
             }
             Message::Cursor(id) => self.cursor = Some(id),
-            Message::RowMenu(event) => self.row_menu_event(event),
-            Message::PauseSelected => {
-                let paused = self
-                    .jobs
-                    .iter_mut()
-                    .filter(|job| job.checked)
-                    .fold(0, |n, job| {
-                        job.checked = false;
-                        if job.status != Status::Running {
-                            return n;
-                        }
-                        job.status = Status::Paused;
-                        n + 1
-                    });
-                self.notify(toast(format!("Paused {paused} running jobs")));
-                self.schedule();
-            }
+            Message::RowMenu(event) => return self.row_menu_event(event),
+            Message::ListHover(hovered) => self.list_hovered = hovered,
+            Message::ShowNew => self.show_new(),
+            Message::PauseSelected => self.pause_selected(),
             Message::DeleteSelected => self.pending = Some(Pending::DeleteSelected),
             Message::Confirm => self.confirm(),
             Message::Cancel => self.pending = None,
@@ -393,17 +433,19 @@ impl Example {
             }
             Message::Settings(message) => {
                 if self.settings.update(message) {
+                    let workspace = &self.settings.applied().workspace;
+                    let description = format!("Everyone in {workspace} sees the new settings.");
                     self.notify(
                         toast("Settings saved")
-                            .description("Everyone in the workspace sees the new settings.")
+                            .description(description)
                             .variant(ToastVariant::Success),
                     );
+                    self.schedule();
                 }
-                self.schedule();
             }
             Message::Refresh => {
                 self.log(LogLine::new(
-                    data::Level::Info,
+                    Level::Info,
                     "scheduler",
                     "Manual refresh requested",
                 ));
@@ -416,7 +458,13 @@ impl Example {
                 }
                 self.schedule();
             }
-            Message::Toast(event) => self.toast_event(event),
+            Message::Submit => {
+                let template = self.next_template;
+                self.next_template = (template + 1) % TEMPLATES.len();
+                self.apply(Update::Submitted(template));
+                self.schedule();
+            }
+            Message::Toast(event) => return self.toast_event(event),
             Message::Restore(jobs) => self.restore(jobs),
             Message::Tick(now) => {
                 if let Some(last) = self.last_tick {
@@ -425,7 +473,16 @@ impl Example {
                 self.last_tick = Some(now);
             }
             Message::Key(key) => self.key(&key),
+            Message::Resized(size) => {
+                self.width = size.width;
+                if self.width >= WIDE {
+                    self.drawer = false;
+                }
+            }
+            // The page's own toggle wins: the app follows the host again.
+            Message::Host(bridge::Event::Theme(_)) => self.apply_theme(ThemeMode::System),
         }
+        Task::none()
     }
 
     pub fn view(&self) -> Element<'_, Message> {
@@ -433,6 +490,9 @@ impl Example {
             let narrow = size.width < NARROW;
             self.dialogs(self.shell(size), narrow)
         });
+        let app = sensor(app)
+            .on_show(Message::Resized)
+            .on_resize(Message::Resized);
 
         toasts(&self.toasts, app).on_event(Message::Toast).into()
     }
@@ -451,7 +511,9 @@ impl Example {
 
         Subscription::batch([
             keys::subscription().map(Message::Key),
+            bridge::subscription().map(Message::Host),
             feed::subscription().map(Message::Feed),
+            feed::ticks(feed::SUBMIT_EVERY).map(|_| Message::Submit),
             toast::subscription().map(Message::Toast),
             toast::timer(&self.toasts).map(Message::Toast),
             worker,
@@ -468,38 +530,69 @@ impl Example {
         }
     }
 
-    /// The header, the sidebar on wide windows, the tabs and the open page.
+    /// The header, the sidebar on wide windows, the banner, the tabs and the
+    /// open page.
     fn shell(&self, size: Size) -> Element<'_, Message> {
         let narrow = size.width < NARROW;
         let sidebar = self.sidebar && size.width >= WIDE;
         let gutter = if narrow { 16.0 } else { 24.0 };
         let content = size.width - 2.0 * gutter - if sidebar { SIDEBAR + 1.0 } else { 0.0 };
 
-        let page = match self.page.selected().unwrap_or(Page::Overview) {
+        let selected = self.page.selected().unwrap_or(Page::Overview);
+        let page = match selected {
             Page::Overview => self.overview(content),
             Page::Jobs => self.jobs_page(narrow),
             Page::Activity => self.activity(narrow),
             Page::Settings => self.settings_page(narrow, gutter),
         };
-        let main = column![
-            container(
-                tabs::tabs(&self.page)
-                    .width(Length::Fill)
-                    .on_event(Message::Tabs)
-            )
-            .padding([12.0, gutter]),
-            container(page)
+        // Each page has a slot of its own, and the others hold empty space, so
+        // no page inherits another's widget state, such as a scroll position.
+        let mut page = Some(page);
+        let page = column(
+            Page::ALL.map(|slot| match page.take_if(|_| slot == selected) {
+                Some(page) => page,
+                None => space().into(),
+            }),
+        )
+        .height(Length::Fill);
+
+        let mut main = column![].width(Length::Fill).height(Length::Fill);
+        let banner = self.settings.applied().banner.trim();
+        if !banner.is_empty() {
+            main = main.push(
+                container(
+                    alert(banner)
+                        .variant(AlertVariant::Warning)
+                        .width(Length::Fill),
+                )
                 .padding(iced::Padding {
-                    top: 4.0,
+                    top: 12.0,
                     right: gutter,
                     bottom: 0.0,
                     left: gutter,
-                })
-                .width(Length::Fill)
-                .height(Length::Fill),
-        ]
-        .width(Length::Fill)
-        .height(Length::Fill);
+                }),
+            );
+        }
+        let main = main
+            .push(
+                container(
+                    tabs::tabs(&self.page)
+                        .width(Length::Fill)
+                        .on_event(Message::Tabs),
+                )
+                .padding([12.0, gutter]),
+            )
+            .push(
+                container(page)
+                    .padding(iced::Padding {
+                        top: 4.0,
+                        right: gutter,
+                        bottom: 0.0,
+                        left: gutter,
+                    })
+                    .width(Length::Fill)
+                    .height(Length::Fill),
+            );
 
         let body: Element<'_, Message> = if sidebar {
             row![self.sidebar_view(), vertical_separator(), main].into()
@@ -531,7 +624,7 @@ impl Example {
     fn key(&mut self, key: &keys::Event) {
         let toggles_palette = palette_chord().matches(&key.key, key.modifiers);
         // An open dialog keeps every key except the ones it passes through.
-        if self.palette_open || self.new_job_open || self.pending.is_some() {
+        if self.palette_open || self.new_job_open || self.pending.is_some() || self.drawer {
             if toggles_palette && self.palette_open {
                 self.palette_open = false;
             }
@@ -559,7 +652,7 @@ impl Example {
         if !self.toasts.is_empty()
             && let Some(action) = self.keys.toast.resolve_event(key)
         {
-            self.toast_events(action.events(&self.toasts));
+            let _ = self.toast_events(action.events(&self.toasts));
             return;
         }
 
@@ -569,7 +662,7 @@ impl Example {
             Some(Page::Activity) => self.activity_key(key),
             Some(Page::Settings) => match self.settings.key(&self.keys.settings, key) {
                 Some(message) => {
-                    self.update(Message::Settings(message));
+                    let _ = self.handle(Message::Settings(message));
                     true
                 }
                 None => false,
@@ -603,7 +696,7 @@ impl Example {
         let Some(action) = self.keys.switch.resolve_event(key) else {
             return false;
         };
-        self.update(Message::Live(action.apply(self.live)));
+        let _ = self.handle(Message::Live(action.apply(self.live)));
         true
     }
 
@@ -612,13 +705,13 @@ impl Example {
 
         if let Some(id) = self.cursor {
             if let Some(event) = self.row_menu.key_event(&self.keys.row_menu, key, id) {
-                self.row_menu_event(event);
+                let _ = self.row_menu_event(event);
                 return true;
             }
             if let Some(action) = self.keys.checkbox.resolve_event(key) {
                 let checked = self.job(id).is_some_and(|job| job.checked);
                 let checked = action.apply(CheckState::from(checked));
-                self.update(Message::Check(id, checked));
+                let _ = self.handle(Message::Check(id, checked));
                 return true;
             }
             if Chord::named(Named::Delete).matches(&key.key, key.modifiers) {
@@ -648,7 +741,7 @@ impl Example {
 
     fn menu_event(&mut self, event: dropdown_menu::Event<MenuItem>) {
         match self.menu.update(event) {
-            Some(MenuOutput::Toggled(MenuItem::Sidebar, on)) => self.sidebar = on,
+            Some(MenuOutput::Toggled(MenuItem::Sidebar, on)) => self.toggle_sidebar(on),
             Some(MenuOutput::Toggled(MenuItem::Compact, on)) => self.compact = on,
             Some(MenuOutput::Selected(item)) => self.menu_selected(item),
             Some(MenuOutput::Activated(MenuItem::Export)) => self.notify(
@@ -661,6 +754,17 @@ impl Example {
             ),
             _ => {}
         }
+    }
+
+    /// Shows or hides the sidebar, or opens it as a dialog when the window
+    /// is too narrow to show it beside the page.
+    fn toggle_sidebar(&mut self, on: bool) {
+        if self.width < WIDE {
+            self.drawer = true;
+        } else {
+            self.sidebar = on;
+        }
+        self.menu.set_checked(MenuItem::Sidebar, self.sidebar);
     }
 
     fn menu_selected(&mut self, item: MenuItem) {
@@ -677,7 +781,17 @@ impl Example {
         self.notify(toast(format!("Switched to {}", environment.label())));
     }
 
+    /// A theme picked in the app, which the hosting page follows.
     fn set_theme(&mut self, mode: ThemeMode) {
+        self.apply_theme(mode);
+        bridge::report_theme(match mode {
+            ThemeMode::System => None,
+            ThemeMode::Light => Some(ThemeChoice::Light),
+            ThemeMode::Dark => Some(ThemeChoice::Dark),
+        });
+    }
+
+    fn apply_theme(&mut self, mode: ThemeMode) {
         self.theme = mode;
         for (item, candidate) in [
             (MenuItem::System, ThemeMode::System),
@@ -701,7 +815,9 @@ impl Example {
             Cmd::FailedJobs => self.show_jobs(StatusFilter::Only(Status::Failed), ""),
             Cmd::RunningJobs => self.show_jobs(StatusFilter::Only(Status::Running), ""),
             Cmd::MyJobs => self.show_jobs(StatusFilter::All, data::ME),
-            Cmd::NewJob => self.update(Message::OpenNewJob),
+            Cmd::NewJob => {
+                let _ = self.handle(Message::OpenNewJob);
+            }
             Cmd::RetryFailed => {
                 let retried = self
                     .jobs
@@ -711,16 +827,13 @@ impl Example {
                         retry(job);
                         n + 1
                     });
-                self.notify(toast(format!("Retrying {retried} failed jobs")));
+                self.notify(toast(format!("Retrying {}", count(retried, "failed job"))));
                 self.schedule();
             }
             Cmd::ToggleScheduler => {
-                self.settings.scheduler = !self.settings.scheduler;
-                let state = if self.settings.scheduler {
-                    "resumed"
-                } else {
-                    "paused"
-                };
+                let on = !self.settings.applied().scheduler;
+                self.settings.set_scheduler(on);
+                let state = if on { "resumed" } else { "paused" };
                 self.notify(toast(format!("Scheduler {state}")));
                 self.schedule();
             }
@@ -729,12 +842,9 @@ impl Example {
                 ThemeMode::Dark => ThemeMode::Light,
                 ThemeMode::System | ThemeMode::Light => ThemeMode::Dark,
             }),
-            Cmd::ToggleSidebar => {
-                self.sidebar = !self.sidebar;
-                self.menu.set_checked(MenuItem::Sidebar, self.sidebar);
-            }
+            Cmd::ToggleSidebar => self.toggle_sidebar(!self.sidebar),
             Cmd::ClearToasts => {
-                self.toast_events(toast::Action::DismissAll.events(&self.toasts));
+                let _ = self.toast_events(toast::Action::DismissAll.events(&self.toasts));
             }
             Cmd::Shortcuts => self.help = true,
             Cmd::Open(id) => {
@@ -751,6 +861,7 @@ impl Example {
     fn show_jobs(&mut self, filter: StatusFilter, search: &str) {
         self.filter = filter;
         self.search = search.to_owned();
+        self.untick_hidden();
         self.go(Page::Jobs);
     }
 
@@ -762,23 +873,31 @@ impl Example {
         self.next_id += 1;
         let mut job = Job::new(id, submission.name, data::ME, submission.source);
         job.queue = submission.queue;
-        job.status = if submission.start_now {
+        job.schedule = submission.schedule;
+        job.notes = submission.notes;
+        job.status = if submission.schedule != Schedule::Once {
+            Status::Scheduled
+        } else if submission.start_now {
             Status::Queued
         } else {
             Status::Paused
         };
+        let region = self.settings.applied().region;
         self.notify(
             toast(format!("Created {}", job.name))
-                .description(format!("{id}, {}", submission.schedule))
+                .description(format!("{id}, {}, runs in {region}", submission.schedule))
                 .variant(ToastVariant::Success),
         );
         self.jobs.insert(0, job);
+        if let Some(frozen) = &mut self.frozen {
+            frozen.push(id);
+        }
         self.new_job_open = false;
         self.cursor = Some(id);
         self.schedule();
     }
 
-    fn row_menu_event(&mut self, event: context_menu::Event<RowAction, JobId>) {
+    fn row_menu_event(&mut self, event: context_menu::Event<RowAction, JobId>) -> Task<Message> {
         if let context_menu::Event::Open(id, _) | context_menu::Event::OpenFromKeyboard(id) = event
         {
             self.cursor = Some(id);
@@ -786,10 +905,10 @@ impl Example {
         }
         let output = self.row_menu.update(event);
         let Some(&target) = self.row_menu.target() else {
-            return;
+            return Task::none();
         };
         match output {
-            Some(MenuOutput::Activated(action)) => self.row_action(target, action),
+            Some(MenuOutput::Activated(action)) => return self.row_action(target, action),
             Some(MenuOutput::Selected(action)) => {
                 let queue = match action {
                     RowAction::High => Queue::High,
@@ -802,6 +921,7 @@ impl Example {
             }
             _ => {}
         }
+        Task::none()
     }
 
     /// Enables the actions that make sense for the job's status.
@@ -825,9 +945,9 @@ impl Example {
         }
     }
 
-    fn row_action(&mut self, id: JobId, action: RowAction) {
+    fn row_action(&mut self, id: JobId, action: RowAction) -> Task<Message> {
         let Some(job) = self.job_mut(id) else {
-            return;
+            return Task::none();
         };
         match action {
             RowAction::Logs => {
@@ -846,26 +966,50 @@ impl Example {
             RowAction::CopyId => {
                 let message = format!("Copied {id}");
                 self.notify(toast(message).description("Paste it into a ticket or a query."));
+                return bridge::copy(id.to_string());
             }
             RowAction::Delete => self.pending = Some(Pending::Delete(id)),
             RowAction::Queue | RowAction::High | RowAction::Normal | RowAction::Low => {}
         }
+        Task::none()
+    }
+
+    fn pause_selected(&mut self) {
+        let selected = self.selected();
+        let mut paused = 0;
+        for job in self
+            .jobs
+            .iter_mut()
+            .filter(|job| selected.contains(&job.id))
+        {
+            job.checked = false;
+            if job.status == Status::Running {
+                job.status = Status::Paused;
+                paused += 1;
+            }
+        }
+        self.notify(toast(format!("Paused {}", count(paused, "job"))));
+        self.schedule();
     }
 
     fn confirm(&mut self) {
         let Some(pending) = self.pending.take() else {
             return;
         };
+        let selected = self.selected();
         // Each removed job keeps its place in the list so Undo can put it back.
         let (removed, kept): (Vec<Placed>, Vec<Placed>) = std::mem::take(&mut self.jobs)
             .into_iter()
             .enumerate()
             .partition(|(_, job)| match pending {
                 Pending::Delete(id) => job.id == id,
-                Pending::DeleteSelected => job.checked,
+                Pending::DeleteSelected => selected.contains(&job.id),
                 Pending::ClearFinished => job.status.is_finished(),
             });
         self.jobs = kept.into_iter().map(|(_, job)| job).collect();
+        if removed.is_empty() {
+            return;
+        }
         if self
             .cursor
             .is_some_and(|id| removed.iter().any(|(_, job)| job.id == id))
@@ -874,12 +1018,13 @@ impl Example {
         }
 
         let title = match removed.as_slice() {
-            [(_, job)] => format!("Deleted {}", job.name),
-            jobs => format!("Deleted {} jobs", jobs.len()),
+            [(_, job)] => format!("Deleted {} ({})", job.name, job.id),
+            jobs => format!("Deleted {}", count(jobs.len(), "job")),
         };
+        let retention = self.settings.applied().retention;
         let _ = self.toasts.push_with(
             toast(title)
-                .description("Their logs are kept for the retention period.")
+                .description(format!("Logs are kept for {retention} days."))
                 .action("Undo"),
             Message::Restore(removed),
         );
@@ -890,9 +1035,12 @@ impl Example {
     fn restore(&mut self, jobs: Vec<Placed>) {
         let title = match jobs.as_slice() {
             [(_, job)] => format!("Restored {}", job.name),
-            jobs => format!("Restored {} jobs", jobs.len()),
+            jobs => format!("Restored {}", count(jobs.len(), "job")),
         };
         for (index, job) in jobs {
+            if let Some(frozen) = &mut self.frozen {
+                frozen.push(job.id);
+            }
             let index = index.min(self.jobs.len());
             self.jobs.insert(index, job);
         }
@@ -900,34 +1048,32 @@ impl Example {
         self.schedule();
     }
 
-    fn toast_event(&mut self, event: toast::Event) {
+    fn toast_event(&mut self, event: toast::Event) -> Task<Message> {
         let event = match event {
             toast::Event::Received(batch) => toast::Event::Received(self.allowed(batch)),
             event => event,
         };
         match self.toasts.update(event) {
             Some(toast::Output::Ready(sender)) => self.toast_sender = Some(sender),
-            Some(toast::Output::Payload(message)) => self.update(message),
+            Some(toast::Output::Payload(message)) => return self.handle(message),
             Some(toast::Output::Action(..)) | None => {}
         }
+        Task::none()
     }
 
-    fn toast_events(&mut self, events: Vec<toast::Event>) {
-        for event in events {
-            self.toast_event(event);
-        }
+    fn toast_events(&mut self, events: Vec<toast::Event>) -> Task<Message> {
+        Task::batch(events.into_iter().map(|event| self.toast_event(event)))
     }
 
     /// Worker toasts that the notification settings let through.
     fn allowed(&self, batch: Vec<toast::Toast>) -> Vec<toast::Toast> {
-        if !self.settings.toasts {
+        let settings = self.settings.applied();
+        if !settings.toasts {
             return Vec::new();
         }
         batch
             .into_iter()
-            .filter(|toast| {
-                !self.settings.failures_only || toast.variant == ToastVariant::Destructive
-            })
+            .filter(|toast| !settings.failures_only || toast.variant == ToastVariant::Destructive)
             .collect()
     }
 
@@ -943,44 +1089,89 @@ impl Example {
                 }
             }
             Update::Succeeded(id) => {
-                if let Some(job) = self.job_mut(id) {
-                    job.status = Status::Succeeded;
-                    job.progress = 1.0;
-                }
-            }
-            Update::Failed(id, progress) => {
-                if let Some(job) = self.job_mut(id) {
-                    job.status = Status::Failed;
-                    job.progress = progress;
-                }
-            }
-            Update::Log(line) => self.log(line),
-            Update::Submitted(template) => {
-                let Some((name, owner, source)) = TEMPLATES.get(template) else {
+                let Some(job) = self.job_mut(id) else {
                     return;
                 };
-                // A long queue turns further submissions away.
-                if self.count(Status::Queued) >= QUEUE_LIMIT {
+                if job.status == Status::Succeeded {
                     return;
                 }
-                let id = JobId(self.next_id);
-                self.next_id += 1;
-                let mut job = Job::new(id, *name, owner, *source);
-                job.queue = Queue::ALL[template % Queue::ALL.len()];
-                self.jobs.insert(0, job);
-                self.log(LogLine::new(
-                    data::Level::Info,
-                    "scheduler",
-                    format!("{name} ({id}) submitted by {owner}"),
-                ));
-                self.trim_jobs();
+                job.status = Status::Succeeded;
+                job.progress = 1.0;
+                self.succeeded += 1;
             }
+            Update::Failed(id, progress) => self.failed(id, progress),
+            Update::Log(line) => self.log(line),
+            Update::Submitted(template) => self.submitted(template),
+        }
+    }
+
+    /// Starts a failed job again while it has retries left, and otherwise
+    /// marks it failed and tells the owner.
+    fn failed(&mut self, id: JobId, progress: f32) {
+        let settings = self.settings.applied();
+        let (retries, channel) = (settings.retries, settings.channel);
+        let Some(job) = self.job_mut(id) else {
+            return;
+        };
+        if job.attempts < retries {
+            job.attempts += 1;
+            job.status = Status::Queued;
+            job.progress = 0.0;
+            let line = format!(
+                "{} ({id}) retrying, attempt {} of {retries}",
+                job.name, job.attempts
+            );
+            self.log(LogLine::new(Level::Warning, "scheduler", line));
+            return;
+        }
+        job.status = Status::Failed;
+        job.progress = progress;
+        let runs = usize::from(job.attempts) + 1;
+        let title = format!("{} failed", job.name);
+        let description = format!(
+            "It ran out of memory after {}. The owner was alerted by {}.",
+            count(runs, "attempt"),
+            channel.to_string().to_lowercase()
+        );
+        let failure = toast(title)
+            .description(description)
+            .variant(ToastVariant::Destructive);
+        for toast in self.allowed(vec![failure]) {
+            self.notify(toast);
+        }
+    }
+
+    fn submitted(&mut self, template: usize) {
+        let Some((name, owner, source)) = TEMPLATES.get(template) else {
+            return;
+        };
+        // A long queue turns further submissions away.
+        if self.count(Status::Queued) >= QUEUE_LIMIT {
+            return;
+        }
+        let id = JobId(self.next_id);
+        self.next_id += 1;
+        let mut job = Job::new(id, *name, owner, *source);
+        job.queue = Queue::ALL[template % Queue::ALL.len()];
+        self.jobs.insert(0, job);
+        self.log(LogLine::new(
+            Level::Info,
+            "scheduler",
+            format!("{name} ({id}) submitted by {owner}"),
+        ));
+        if self.holding() {
+            self.fresh.push(id);
+        } else {
+            self.trim_jobs();
         }
     }
 
     fn log(&mut self, line: LogLine) {
         if !self.live {
-            self.held.push(line);
+            self.held.push_back(line);
+            if self.held.len() > LOG_LIMIT {
+                let _ = self.held.pop_front();
+            }
             return;
         }
         self.clock += 3;
@@ -998,12 +1189,58 @@ impl Example {
         }
     }
 
-    /// Starts queued jobs, high priority first, while slots are free.
-    fn schedule(&mut self) {
-        if !self.settings.scheduler {
+    /// Whether something points at the job list: a menu, a dialog or the
+    /// pointer itself. New jobs wait and rows stay put until it stops.
+    fn holding(&self) -> bool {
+        self.row_menu.is_open()
+            || self.menu.is_open()
+            || self.list_hovered
+            || self.pending.is_some()
+            || self.new_job_open
+            || self.palette_open
+            || self.drawer
+    }
+
+    fn settle_list(&mut self) {
+        if self.holding() {
+            if self.frozen.is_none() {
+                self.frozen = Some(self.filtered().map(|job| job.id).collect());
+            }
             return;
         }
-        let slots = usize::from(self.settings.concurrency);
+        self.frozen = None;
+        if !self.fresh.is_empty() {
+            self.fresh.clear();
+            self.trim_jobs();
+        }
+    }
+
+    /// Lets the held jobs into the list, from the "new jobs" pill.
+    fn show_new(&mut self) {
+        self.fresh.clear();
+        self.frozen = None;
+        self.trim_jobs();
+    }
+
+    /// Unticks jobs that the search or filter has hidden, so bulk actions
+    /// only ever act on rows people can see.
+    fn untick_hidden(&mut self) {
+        self.frozen = None;
+        let shown: Vec<JobId> = self.filtered().map(|job| job.id).collect();
+        for job in &mut self.jobs {
+            if !shown.contains(&job.id) {
+                job.checked = false;
+            }
+        }
+    }
+
+    /// Starts queued jobs, high priority first, while slots are free.
+    fn schedule(&mut self) {
+        let settings = self.settings.applied();
+        if !settings.scheduler {
+            return;
+        }
+        let slots = usize::from(settings.concurrency);
         for queue in Queue::ALL {
             loop {
                 if self.count(Status::Running) >= slots {
@@ -1027,10 +1264,11 @@ impl Example {
     fn worker(&self) -> Option<Worker> {
         let feed = self.feed.clone()?;
         let toasts = self.toast_sender.clone()?;
+        let scheduler = self.settings.applied().scheduler;
         let jobs = self
             .jobs
             .iter()
-            .filter(|job| self.settings.scheduler && job.status == Status::Running)
+            .filter(|job| scheduler && job.status == Status::Running)
             .map(|job| feed::Running {
                 id: job.id,
                 name: job.name.clone(),
@@ -1050,16 +1288,47 @@ impl Example {
         self.jobs.iter_mut().find(|job| job.id == id)
     }
 
-    /// Jobs that pass the search and the status filter, in list order.
-    fn visible_jobs(&self) -> impl Iterator<Item = &Job> {
+    /// Jobs that pass the search and the status filter, leaving out new
+    /// jobs held behind the pill, in list order.
+    fn filtered(&self) -> impl Iterator<Item = &Job> {
+        self.jobs
+            .iter()
+            .filter(move |job| !self.fresh.contains(&job.id) && self.matches(job))
+    }
+
+    /// Whether a job passes the search and the status filter.
+    fn matches(&self, job: &Job) -> bool {
         let query = self.search.trim().to_lowercase();
-        self.jobs.iter().filter(move |job| {
-            self.filter.allows(job.status)
-                && (query.is_empty()
-                    || job.name.to_lowercase().contains(&query)
-                    || job.owner.to_lowercase().contains(&query)
-                    || job.id.to_string().to_lowercase().contains(&query))
+        self.filter.allows(job.status)
+            && (query.is_empty()
+                || job.name.to_lowercase().contains(&query)
+                || job.owner.to_lowercase().contains(&query)
+                || job.id.to_string().to_lowercase().contains(&query))
+    }
+
+    /// How many held jobs the list would show once they are let in.
+    fn fresh_shown(&self) -> usize {
+        self.fresh
+            .iter()
+            .filter(|id| self.job(**id).is_some_and(|job| self.matches(job)))
+            .count()
+    }
+
+    /// The rows on show: the filtered jobs, or the rows that were on show
+    /// when something started pointing at the list.
+    fn visible_jobs(&self) -> impl Iterator<Item = &Job> {
+        self.jobs.iter().filter(move |job| match &self.frozen {
+            Some(frozen) => frozen.contains(&job.id),
+            None => self.filtered().any(|shown| shown.id == job.id),
         })
+    }
+
+    /// The ticked jobs among the rows on show.
+    fn selected(&self) -> Vec<JobId> {
+        self.visible_jobs()
+            .filter(|job| job.checked)
+            .map(|job| job.id)
+            .collect()
     }
 
     fn count(&self, status: Status) -> usize {
@@ -1071,6 +1340,16 @@ fn retry(job: &mut Job) {
     job.status = Status::Queued;
     job.progress = 0.0;
     job.fails_at = None;
+    job.attempts = 0;
+}
+
+/// "1 job", "3 jobs": a number and a noun that agrees with it.
+fn count(n: usize, noun: &str) -> String {
+    if n == 1 {
+        format!("1 {noun}")
+    } else {
+        format!("{n} {noun}s")
+    }
 }
 
 /// Small secondary text.

@@ -15,7 +15,7 @@ use iced::futures::{SinkExt, Stream, StreamExt, stream};
 use iced::time::Instant;
 use iced_cube::overlay::toast::{self, Variant, toast};
 
-use super::data::{CHATTER, JobId, Level, LogLine, SERVICES, TEMPLATES};
+use super::data::{CHATTER, JobId, Level, LogLine, SERVICES};
 
 const CAPACITY: usize = 64;
 const BATCH: usize = 32;
@@ -29,7 +29,7 @@ pub enum Update {
     Succeeded(JobId),
     Failed(JobId, f32),
     Log(LogLine),
-    /// The scheduler submitted a job built from one of the templates.
+    /// Someone submitted a job built from one of the templates.
     Submitted(usize),
 }
 
@@ -49,7 +49,11 @@ fn stream() -> impl Stream<Item = Event> {
         .chain(receiver.ready_chunks(BATCH).map(Event::Received))
 }
 
-/// Instants at `period`, for animating spinners while something runs.
+/// How often someone submits a new job. It has its own timer, so it keeps
+/// going however often the worker restarts.
+pub const SUBMIT_EVERY: Duration = Duration::from_secs(18);
+
+/// Instants at `period`, for animating spinners and timing submissions.
 pub fn ticks(period: Duration) -> Subscription<Instant> {
     Subscription::run_with(period, |period| {
         stream::unfold(*period, |period| async move {
@@ -100,11 +104,9 @@ impl Worker {
             seed ^ u64::from(job.id.0).wrapping_mul(0xBF58_476D_1CE4_E5B9)
         });
         let mut rng = Rng(seed | 1);
-        let mut turn = 0;
 
         loop {
             Delay::new(TICK).await;
-            turn += 1;
 
             if !self.jobs.is_empty() {
                 let index = rng.below(self.jobs.len());
@@ -113,10 +115,6 @@ impl Worker {
             if rng.chance(0.55) {
                 let (level, service, message) = CHATTER[rng.below(CHATTER.len())];
                 self.send(Update::Log(LogLine::new(level, service, message)))
-                    .await;
-            }
-            if turn % 40 == 0 {
-                self.send(Update::Submitted(rng.below(TEMPLATES.len())))
                     .await;
             }
         }
@@ -129,6 +127,8 @@ impl Worker {
         job.progress = (job.progress + job.speed * (0.5 + rng.unit())).min(1.0);
         let job = job.clone();
 
+        // The app decides whether a failure is retried or reported, so only
+        // successes toast from here.
         if job.fails_at.is_some_and(|at| job.progress >= at) {
             self.jobs.remove(index);
             self.send(Update::Failed(job.id, job.progress)).await;
@@ -138,14 +138,6 @@ impl Worker {
                 format!("{} ({}) exited with status 137", job.name, job.id),
             )))
             .await;
-            let _ = self
-                .toasts
-                .send(
-                    toast(format!("{} failed", job.name))
-                        .description("The worker ran out of memory. Retry it from the job list.")
-                        .variant(Variant::Destructive),
-                )
-                .await;
         } else if job.progress >= 1.0 {
             self.jobs.remove(index);
             self.send(Update::Succeeded(job.id)).await;

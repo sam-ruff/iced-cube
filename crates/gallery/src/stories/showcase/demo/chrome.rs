@@ -22,13 +22,14 @@ use iced_cube::{
 };
 
 use super::{
-    Cmd, Example, MenuItem, Message, Page, Pending, SIDEBAR, caption, muted, palette_chord,
+    Cmd, Example, MenuItem, Message, Page, Pending, SIDEBAR, caption, count, muted, palette_chord,
 };
 
 const FINDER_ID: &str = "demo-finder";
 const PALETTE_ID: &str = "demo-palette";
 const PALETTE_DIALOG_ID: &str = "demo-palette-dialog";
 const NEW_JOB_DIALOG_ID: &str = "demo-new-job";
+const DRAWER_ID: &str = "demo-drawer";
 
 /// The toolbar's "More" menu: checkbox items, radio items and a submenu.
 pub fn menu_entries() -> Vec<Entry<MenuItem>> {
@@ -98,12 +99,12 @@ pub fn finder() -> command::State<Cmd> {
 impl Example {
     /// Builds the palette afresh on opening, so its labels match the app.
     pub(super) fn palette_state(&self) -> command::State<Cmd> {
-        let scheduler = if self.settings.scheduler {
+        let scheduler = if self.settings.applied().scheduler {
             command::item(Cmd::ToggleScheduler, "Pause scheduler").icon(lucide!(Pause))
         } else {
             command::item(Cmd::ToggleScheduler, "Resume scheduler").icon(lucide!(Play))
         };
-        let sidebar = if self.sidebar {
+        let sidebar = if self.sidebar && self.width >= super::WIDE {
             "Hide sidebar"
         } else {
             "Show sidebar"
@@ -156,9 +157,11 @@ impl Example {
             ),
             group(
                 "Open job",
+                // Names can repeat, so each job shows its ID too.
                 self.jobs.iter().map(|job| {
                     command::item(Cmd::Open(job.id), job.name.clone())
                         .icon(lucide!(Briefcase))
+                        .shortcut(job.id.to_string())
                         .keywords([job.owner.to_owned(), job.id.to_string()])
                 }),
             ),
@@ -191,9 +194,12 @@ impl Example {
         ]
         .spacing(10)
         .align_y(Alignment::Center);
-        if !narrow {
-            brand = brand.push(badge(self.environment.label()).variant(self.environment.badge()));
-        }
+        let environment = if narrow {
+            self.environment.short()
+        } else {
+            self.environment.label()
+        };
+        brand = brand.push(badge(environment).variant(self.environment.badge()));
 
         let below = Some(Position::Bottom);
         let search: Element<'_, Message> = if narrow {
@@ -254,16 +260,18 @@ impl Example {
         .on_event(Message::Menu);
 
         let mut tools = row![search, new_job].spacing(6).align_y(Alignment::Center);
+        // Phones have no keyboard to list shortcuts for.
         if !narrow {
-            tools = tools.push(
-                icon_button(lucide!(RefreshCw))
-                    .label("Refresh")
-                    .tooltip(below)
-                    .on_press(Message::Refresh),
-            );
+            tools = tools
+                .push(
+                    icon_button(lucide!(RefreshCw))
+                        .label("Refresh")
+                        .tooltip(below)
+                        .on_press(Message::Refresh),
+                )
+                .push(help);
         }
         let tools = tools
-            .push(help)
             .push(container(vertical_separator()).height(20))
             .push(more);
 
@@ -275,9 +283,20 @@ impl Example {
     }
 
     pub(super) fn sidebar_view(&self) -> Element<'_, Message> {
+        container(self.sidebar_body(Length::Fill))
+            .padding(16)
+            .width(SIDEBAR)
+            .height(Length::Fill)
+            .into()
+    }
+
+    /// The workspace, the finder and the scheduler, beside the page or in
+    /// the drawer dialog on narrow windows.
+    fn sidebar_body(&self, finder_height: Length) -> Element<'_, Message> {
+        let settings = self.settings.applied();
         let running = self.count(super::Status::Running);
-        let slots = self.settings.concurrency;
-        let status: Element<'_, Message> = if !self.settings.scheduler {
+        let slots = settings.concurrency;
+        let status: Element<'_, Message> = if !settings.scheduler {
             badge("Paused").variant(BadgeVariant::Warning).into()
         } else if running > 0 {
             spinner(self.phase).size(SpinnerSize::Sm).into()
@@ -286,10 +305,17 @@ impl Example {
         };
 
         column![
+            column![
+                caption("Workspace"),
+                text(settings.workspace.as_str())
+                    .size(text_size::SM)
+                    .font(semibold()),
+            ]
+            .spacing(2),
             label("Jump to"),
             command(&self.finder)
                 .placeholder("Filter views...")
-                .height(Length::Fill)
+                .height(finder_height)
                 .id(FINDER_ID)
                 .keymap(self.keys.command.clone())
                 .on_event(Message::Finder),
@@ -305,9 +331,6 @@ impl Example {
                 .label(format!("{running} of {slots} slots busy")),
         ]
         .spacing(12)
-        .padding(16)
-        .width(SIDEBAR)
-        .height(Length::Fill)
         .into()
     }
 
@@ -325,10 +348,14 @@ impl Example {
             .on_cancel(Message::Cancel)
             .on_confirm(Message::Confirm);
 
+        let settings = self.settings.applied();
         let new_job = dialog(confirmation)
             .open(self.new_job_open)
             .title("New job")
-            .description("Jobs run on the Fernhill scheduler in the default region.")
+            .description(format!(
+                "Jobs in {} run in {} unless their source lives elsewhere.",
+                settings.workspace, settings.region
+            ))
             .body(
                 self.draft
                     .view(&self.keys.combobox, narrow)
@@ -347,9 +374,19 @@ impl Example {
             .size(dialog::Size::Md)
             .id(NEW_JOB_DIALOG_ID)
             .keymap(self.keys.dialog.clone())
+            .on_confirm(Message::CreateJob)
             .on_dismiss(Message::CloseNewJob);
 
-        dialog(new_job)
+        let drawer = dialog(new_job)
+            .open(self.drawer)
+            .title("Sidebar")
+            .body(self.sidebar_body(Length::Fixed(280.0)))
+            .size(dialog::Size::Sm)
+            .id(DRAWER_ID)
+            .keymap(self.keys.dialog.clone())
+            .on_dismiss(Message::CloseDrawer);
+
+        dialog(drawer)
             .open(self.palette_open)
             .title("Command palette")
             .body(
@@ -369,11 +406,14 @@ impl Example {
             .into()
     }
 
-    fn pending_text(&self) -> (String, String, &'static str) {
-        let undo = "You can undo this from the notification for a few seconds.";
+    pub(super) fn pending_text(&self) -> (String, String, &'static str) {
+        let undo = "Undo it from the notification, or with Alt+Z, for at least ten seconds.";
         match self.pending {
             Some(Pending::Delete(id)) => {
-                let name = self.job(id).map_or("this job", |job| job.name.as_str());
+                let name = self.job(id).map_or_else(
+                    || String::from("this job"),
+                    |job| format!("{} ({id})", job.name),
+                );
                 (
                     format!("Delete {name}?"),
                     format!(
@@ -383,21 +423,21 @@ impl Example {
                 )
             }
             Some(Pending::DeleteSelected) => {
-                let count = self.jobs.iter().filter(|job| job.checked).count();
+                let selected = self.selected().len();
                 (
-                    format!("Delete {count} selected jobs?"),
+                    format!("Delete {}?", count(selected, "selected job")),
                     format!("Running jobs stop straight away. {undo}"),
                     "Delete jobs",
                 )
             }
             Some(Pending::ClearFinished) => {
-                let count = self
+                let finished = self
                     .jobs
                     .iter()
                     .filter(|job| job.status.is_finished())
                     .count();
                 (
-                    format!("Clear {count} finished jobs?"),
+                    format!("Clear {}?", count(finished, "finished job")),
                     format!("Succeeded and failed jobs leave the list. {undo}"),
                     "Clear jobs",
                 )
@@ -418,6 +458,7 @@ fn shortcuts<'a>() -> Element<'a, Message> {
         ("Space", "Tick the job, or change the setting"),
         ("Shift+F10", "Actions for the current job"),
         ("Delete", "Delete the current job"),
+        ("Alt+Z", "Undo from the newest notification"),
         ("Escape", "Close the newest notification"),
     ];
 

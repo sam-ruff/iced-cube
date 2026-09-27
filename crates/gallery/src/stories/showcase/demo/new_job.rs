@@ -28,6 +28,7 @@ pub struct Submission {
     pub source: String,
     pub schedule: Schedule,
     pub queue: Queue,
+    pub notes: String,
     pub start_now: bool,
 }
 
@@ -85,6 +86,7 @@ impl Draft {
             source: (*source).to_owned(),
             schedule,
             queue: self.queue,
+            notes: self.notes.text().trim().to_owned(),
             start_now: self.start_now,
         })
     }
@@ -93,6 +95,7 @@ impl Draft {
         let name_error = (self.attempted && self.name.trim().is_empty()).then_some("Name the job.");
         let source_error =
             (self.attempted && self.source.selected().is_none()).then_some("Pick a source.");
+        let runs_once = self.schedule == Some(Schedule::Once);
 
         let schedule = field(
             "Schedule",
@@ -127,6 +130,7 @@ impl Draft {
                 combobox(&self.source)
                     .placeholder("Search datasets...")
                     .width(Length::Fill)
+                    .invalid(source_error.is_some())
                     .keymap(keymap.clone())
                     .on_event(Message::Source),
             )
@@ -140,10 +144,12 @@ impl Draft {
                     .placeholder("What should the on-call engineer know?")
                     .min_height(64.0)
                     .on_action(Message::Notes),
-            ),
-            checkbox(self.start_now)
+            )
+            .description("Shown beside the job in the list."),
+            // A scheduled job waits for its schedule instead.
+            checkbox(self.start_now && runs_once)
                 .label("Start as soon as a slot is free")
-                .on_toggle(Message::StartNow),
+                .on_toggle_maybe(runs_once.then_some(Message::StartNow)),
         ]
         .spacing(16)
         .into()

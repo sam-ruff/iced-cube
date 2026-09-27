@@ -43,7 +43,7 @@ impl Example {
                 "Running",
                 lucide!(Loader),
                 count(Status::Running),
-                badge(format!("{} slots", self.settings.concurrency))
+                badge(format!("{} slots", self.settings.applied().concurrency))
                     .variant(BadgeVariant::Secondary)
                     .into(),
                 stat_width,
@@ -72,7 +72,8 @@ impl Example {
             stat(
                 "Succeeded",
                 lucide!(CircleCheck),
-                count(Status::Succeeded) + 214,
+                // A running total, so clearing finished jobs never lowers it.
+                self.succeeded,
                 tooltip(
                     badge("+12%")
                         .variant(BadgeVariant::Success)

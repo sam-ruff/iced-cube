@@ -104,6 +104,40 @@ impl Default for Keys {
     }
 }
 
+/// The settings the rest of the app runs on. The form edits a copy and
+/// only hands it over on Save.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Values {
+    pub workspace: String,
+    pub banner: String,
+    pub scheduler: bool,
+    pub concurrency: u8,
+    pub retries: u8,
+    pub region: Region,
+    pub channel: Channel,
+    pub toasts: bool,
+    pub failures_only: bool,
+    pub retention: u8,
+}
+
+impl Default for Values {
+    fn default() -> Self {
+        Self {
+            workspace: String::from("Fernhill Analytics"),
+            banner: String::from("Planned maintenance on Sunday from 02:00 to 04:00."),
+            scheduler: true,
+            concurrency: 3,
+            retries: 2,
+            region: Region::London,
+            channel: Channel::Chat,
+            toasts: true,
+            failures_only: false,
+            retention: 30,
+        }
+    }
+}
+
+/// The settings form: the fields being edited, and the values last saved.
 #[derive(Debug)]
 pub struct Settings {
     pub workspace: String,
@@ -117,25 +151,27 @@ pub struct Settings {
     pub failures_only: bool,
     pub retention: u8,
     pub current: Control,
-    saved: bool,
+    pub(super) saved: Values,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self {
-            workspace: String::from("Fernhill Analytics"),
-            banner: Content::with_text("Planned maintenance on Sunday from 02:00 to 04:00."),
+        let mut settings = Self {
+            workspace: String::new(),
+            banner: Content::new(),
             scheduler: true,
-            concurrency: 3,
-            retries: 2,
+            concurrency: 0,
+            retries: 0,
             region: Region::London,
             channel: Channel::Chat,
             toasts: true,
             failures_only: false,
-            retention: 30,
+            retention: 0,
             current: Control::Scheduler,
-            saved: true,
-        }
+            saved: Values::default(),
+        };
+        settings.restore();
+        settings
     }
 }
 
@@ -144,17 +180,57 @@ const RETRIES: std::ops::RangeInclusive<u8> = 0..=5;
 const RETENTION: std::ops::RangeInclusive<u8> = 7..=90;
 
 impl Settings {
-    /// Applies a change and returns whether it was a save.
+    /// The values the app runs on: the last saved ones.
+    pub fn applied(&self) -> &Values {
+        &self.saved
+    }
+
+    /// The form as it stands, saved or not.
+    pub fn draft(&self) -> Values {
+        Values {
+            workspace: self.workspace.clone(),
+            banner: self.banner.text().trim_end().to_owned(),
+            scheduler: self.scheduler,
+            concurrency: self.concurrency,
+            retries: self.retries,
+            region: self.region,
+            channel: self.channel,
+            toasts: self.toasts,
+            failures_only: self.failures_only,
+            retention: self.retention,
+        }
+    }
+
+    pub fn is_dirty(&self) -> bool {
+        self.draft() != self.saved
+    }
+
+    /// Pauses or resumes the scheduler straight away, from outside the form.
+    pub fn set_scheduler(&mut self, on: bool) {
+        self.scheduler = on;
+        self.saved.scheduler = on;
+    }
+
+    /// Puts the form back to the last saved values.
+    fn restore(&mut self) {
+        let saved = self.saved.clone();
+        self.workspace = saved.workspace;
+        self.banner = Content::with_text(&saved.banner);
+        self.scheduler = saved.scheduler;
+        self.concurrency = saved.concurrency;
+        self.retries = saved.retries;
+        self.region = saved.region;
+        self.channel = saved.channel;
+        self.toasts = saved.toasts;
+        self.failures_only = saved.failures_only;
+        self.retention = saved.retention;
+    }
+
+    /// Applies a change to the form and returns whether it was a save.
     pub fn update(&mut self, message: Message) -> bool {
         match message {
             Message::Workspace(name) => self.workspace = name,
-            Message::Banner(action) => {
-                let edits = action.is_edit();
-                self.banner.perform(action);
-                if !edits {
-                    return false;
-                }
-            }
+            Message::Banner(action) => self.banner.perform(action),
             Message::Scheduler(on) => self.select(Control::Scheduler, |s| s.scheduler = on),
             Message::Concurrency(value) => {
                 self.select(Control::Concurrency, |s| s.concurrency = value)
@@ -167,24 +243,17 @@ impl Settings {
                 self.select(Control::FailuresOnly, |s| s.failures_only = on)
             }
             Message::Retention(days) => self.select(Control::Retention, |s| s.retention = days),
-            Message::Focus(control) => {
-                self.current = control;
-                return false;
-            }
-            Message::ClearFinished => return false,
+            Message::Focus(control) => self.current = control,
+            Message::ClearFinished => {}
             Message::Save => {
-                self.saved = true;
+                if self.workspace.trim().is_empty() {
+                    return false;
+                }
+                self.saved = self.draft();
                 return true;
             }
-            Message::Reset => {
-                *self = Self {
-                    current: self.current,
-                    ..Self::default()
-                };
-                return false;
-            }
+            Message::Reset => self.restore(),
         }
-        self.saved = false;
         false
     }
 
@@ -239,7 +308,8 @@ impl Settings {
     }
 
     pub fn view(&self, narrow: bool) -> Element<'_, Message> {
-        let status = if self.saved {
+        let dirty = self.is_dirty();
+        let status = if !dirty {
             badge("Saved")
                 .variant(BadgeVariant::Success)
                 .icon(lucide!(Check))
@@ -304,7 +374,7 @@ impl Settings {
                 self.setting(
                     Control::Retries,
                     "Retry attempts",
-                    "Before a failed job pages the owner.",
+                    "Times a failed job starts again before the owner is alerted.",
                     slider::slider(RETRIES, self.retries)
                         .step(1)
                         .show_value()
@@ -359,7 +429,7 @@ impl Settings {
                 self.setting(
                     Control::Retention,
                     "Log retention",
-                    "Older lines are deleted every night.",
+                    "How long logs are kept, including those of deleted jobs.",
                     slider::slider(RETENTION, self.retention)
                         .step(1)
                         .show_value()
@@ -376,10 +446,10 @@ impl Settings {
             space::horizontal(),
             button("Reset")
                 .variant(Variant::Ghost)
-                .on_press(Message::Reset),
-            button("Save")
-                .icon(lucide!(Save))
-                .on_press_maybe((!self.saved).then_some(Message::Save)),
+                .on_press_maybe(dirty.then_some(Message::Reset)),
+            button("Save").icon(lucide!(Save)).on_press_maybe(
+                (dirty && !self.workspace.trim().is_empty()).then_some(Message::Save),
+            ),
         ]
         .spacing(8)
         .align_y(Alignment::Center);
@@ -405,7 +475,7 @@ impl Settings {
             alert("Settings apply to the whole workspace")
                 .variant(AlertVariant::Info)
                 .description(
-                    "Up and Down move between controls; Space, Left and Right change them."
+                    "Changes apply when you save; Reset goes back to the last save. Up and Down move between controls; Space, Left and Right change them."
                 )
                 .width(Length::Fill),
             workspace,
