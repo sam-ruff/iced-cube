@@ -1,6 +1,6 @@
 [package]
 name = "iced-cube"
-version = "0.0.1"
+version = "0.0.2"
 description = "Themeable application components for the iced GUI library, with Lucide icons"
 readme = "README.md"
 keywords = ["iced", "gui", "components", "ui", "widgets"]
