@@ -12,12 +12,14 @@ pub mod card;
 pub mod checkbox;
 pub mod combobox;
 pub mod command;
+pub mod command_palette;
 pub mod context_menu;
 pub mod dialog;
 pub mod dropdown_menu;
 pub mod icon_button;
 pub mod input;
 pub mod label;
+pub mod menubar;
 pub mod popover;
 pub mod progress;
 pub mod radio;
@@ -28,11 +30,13 @@ pub mod showcase;
 pub mod slider;
 pub mod spinner;
 pub mod stack;
+pub mod status_bar;
 pub mod switch;
 pub mod tabs;
 pub mod textarea;
 pub mod theme;
 pub mod toast;
+pub mod toolbar;
 pub mod tooltip;
 
 crate::stories! {
@@ -455,6 +459,31 @@ crate::stories! {
         id: "context-menu/keyboard", component: "context-menu", title: "One menu for every row",
         description: "A file list shares one menu. Up and Down pick a file, and Shift+F10 or the Menu key opens its menu below it.",
         file: "context_menu/keyboard.rs", height: 400, subscription: true,
+    }
+    MenubarEditor => menubar::editor {
+        id: "menubar/editor", component: "menubar", title: "Editor menus",
+        description: "File, Edit, View and Help with shortcut hints, a submenu, checkbox and radio items. Once a menu is open, moving onto another title switches to it. F10 or Alt focuses the bar and the arrows move through it.",
+        file: "menubar/editor.rs", height: 400, subscription: true, edge: true,
+    }
+    ToolbarFormatting => toolbar::formatting {
+        id: "toolbar/formatting", component: "toolbar", title: "Formatting toolbar",
+        description: "Toggles, a single-choice alignment group, undo and redo. Drag the slider: whatever does not fit moves into the More menu. Ctrl+F10 focuses the toolbar for the arrow keys.",
+        file: "toolbar/formatting.rs", height: 360, subscription: true,
+    }
+    StatusBarBackground => status_bar::background {
+        id: "status-bar/background", component: "status-bar", title: "Background updates",
+        description: "A simulated worker sends git sync, build progress and cursor updates through the channel. It waits with futures-timer, so it also runs in the browser.",
+        file: "status_bar/background.rs", height: 200, subscription: true, edge: true,
+    }
+    CommandPalettePages => command_palette::pages {
+        id: "command-palette/pages", component: "command-palette", title: "Pages and recent commands",
+        description: "Ctrl+K or Ctrl+Shift+P opens it anywhere. Recent commands come first, and Change theme opens a page of its own; Backspace on an empty query goes back.",
+        file: "command_palette/pages.rs", height: 460, subscription: true, edge: true,
+    }
+    CommandPaletteAsyncSearch => command_palette::async_search {
+        id: "command-palette/async-search", component: "command-palette", title: "Async results",
+        description: "Typing asks the app to search, and a background task streams file matches through the command list's channel.",
+        file: "command_palette/async_search.rs", height: 460, subscription: true, edge: true,
     }
     ThemeCustom => theme::custom {
         id: "theme/custom", component: "theme", title: "Custom palette",

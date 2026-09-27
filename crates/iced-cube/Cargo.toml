@@ -22,7 +22,7 @@ wayland = ["iced/wayland"]
 thread-pool = ["iced/thread-pool"]
 tokio = ["iced/tokio"]
 
-full = ["primitives", "forms", "layout", "navigation", "overlay", "feedback"]
+full = ["primitives", "forms", "layout", "navigation", "overlay", "feedback", "application"]
 
 primitives = [
     "button",
@@ -40,6 +40,7 @@ layout = ["card", "stack", "accordion"]
 navigation = ["command", "tabs"]
 overlay = ["tooltip", "toast", "dialog", "popover", "dropdown-menu", "context-menu"]
 feedback = ["alert", "badge", "progress", "spinner"]
+application = ["menubar", "toolbar", "status-bar", "command-palette"]
 
 button = ["iced/advanced"]
 icon-button = ["button", "tooltip"]
@@ -69,6 +70,10 @@ alert = []
 badge = ["iced/advanced"]
 progress = []
 spinner = ["iced/advanced"]
+menubar = ["dropdown-menu"]
+toolbar = ["icon-button", "dropdown-menu", "separator"]
+status-bar = ["button", "badge", "progress", "spinner", "tooltip"]
+command-palette = ["command", "dialog", "button"]
 
 [dependencies]
 iced = { version = "0.14.0", default-features = false, features = ["svg"] }

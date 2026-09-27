@@ -2,7 +2,7 @@ import { defineCollection } from "astro:content";
 import { glob } from "astro/loaders";
 import { z } from "astro/zod";
 
-export const GROUPS = ["Actions", "Forms", "Layout", "Navigation", "Overlays", "Feedback"] as const;
+export const GROUPS = ["Actions", "Forms", "Layout", "Navigation", "Overlays", "Feedback", "Application"] as const;
 
 const components = defineCollection({
   loader: glob({ pattern: "*.md", base: "./src/content/components" }),

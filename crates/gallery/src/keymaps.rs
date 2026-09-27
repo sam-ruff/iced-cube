@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 
+use iced_cube::application::{command_palette, menubar, toolbar};
 use iced_cube::forms::{combobox, select};
 use iced_cube::keys::{Action, Keymap};
 use iced_cube::layout::accordion;
@@ -38,15 +39,18 @@ pub fn all() -> BTreeMap<&'static str, Vec<Binding>> {
         ("checkbox", bindings::<checkbox::Action>()),
         ("combobox", bindings::<combobox::Action>()),
         ("command", bindings::<command::Action>()),
+        ("command-palette", bindings::<command_palette::Action>()),
         ("context-menu", bindings::<context_menu::Action>()),
         ("dialog", bindings::<dialog::Action>()),
         ("dropdown-menu", bindings::<dropdown_menu::Action>()),
+        ("menubar", bindings::<menubar::Action>()),
         ("popover", bindings::<popover::Action>()),
         ("select", bindings::<select::Action>()),
         ("slider", bindings::<slider::Action>()),
         ("switch", bindings::<switch::Action>()),
         ("tabs", bindings::<tabs::Action>()),
         ("toast", bindings::<toast::Action>()),
+        ("toolbar", bindings::<toolbar::Action>()),
     ])
 }
 

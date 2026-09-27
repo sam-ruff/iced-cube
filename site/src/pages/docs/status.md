@@ -33,13 +33,9 @@ These are next on the roadmap, roughly in order:
 - Combobox
 - Command
 - Sidebar
-- Toolbar
-- Menubar
-- Status bar
 - Tree
 - Data table
 - Split pane
-- Command palette
 
 ## Changelog
 
