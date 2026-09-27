@@ -1,10 +1,14 @@
 name: Release
 
+# CI dispatches this once main passes. crates.io trusted publishing refuses workflow_run
+# triggers, so the release cannot simply follow CI.
 on:
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
-    branches: [main]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: The main commit CI tested
+        type: string
+        required: true
 
 permissions:
   contents: read
@@ -16,10 +20,7 @@ concurrency:
 jobs:
   release:
     name: Release
-    if: >-
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'push' &&
-      github.event.workflow_run.head_repository.full_name == github.repository
+    if: github.ref == 'refs/heads/main'
     runs-on: [self-hosted, sophie]
     timeout-minutes: 30
     environment: crates-io
@@ -38,10 +39,12 @@ jobs:
           persist-credentials: false
       - name: Only release the commit CI tested
         run: |
-          if [ "$(git rev-parse HEAD)" != "${{ github.event.workflow_run.head_sha }}" ]; then
+          if [ "$(git rev-parse HEAD)" != "$TESTED" ]; then
             echo "main has moved on since the tested commit; a later CI run will release it."
             echo "skip=true" >> "$GITHUB_ENV"
           fi
+        env:
+          TESTED: ${{ inputs.sha }}
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         if: env.skip != 'true'
         with:
