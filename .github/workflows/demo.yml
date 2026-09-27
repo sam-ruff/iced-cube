@@ -37,7 +37,7 @@ jobs:
           rustup toolchain install stable --profile minimal --target x86_64-pc-windows-gnu
           rustup default stable
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends mingw-w64 zip
+          sudo apt-get install -y --no-install-recommends mingw-w64 zip jq curl
       - name: Linux
         run: |
           cargo build --locked --release -p gallery --bin iced-cube-demo
@@ -52,12 +52,23 @@ jobs:
           (cd dist && zip -qr iced-cube-demo-windows-x86_64.zip iced-cube-demo-windows-x86_64)
         env:
           RUSTFLAGS: -C target-feature=+crt-static
+      # The runners have no gh, so this talks to the releases API directly.
       - name: Attach to the release
         run: |
-          gh release upload "$TAG" --clobber \
-            dist/iced-cube-demo-linux-x86_64.tar.gz \
-            dist/iced-cube-demo-windows-x86_64.zip
+          api="$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases"
+          auth=(-H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json")
+          release=$(curl --fail-with-body -sS "${auth[@]}" "$api/tags/$TAG")
+          id=$(printf '%s' "$release" | jq -r .id)
+          for file in dist/iced-cube-demo-linux-x86_64.tar.gz dist/iced-cube-demo-windows-x86_64.zip; do
+            name=$(basename "$file")
+            old=$(printf '%s' "$release" | jq -r --arg name "$name" '.assets[] | select(.name == $name) | .id')
+            if [ -n "$old" ]; then
+              curl --fail-with-body -sS -X DELETE "${auth[@]}" "$api/assets/$old"
+            fi
+            curl --fail-with-body -sS -X POST "${auth[@]}" \
+              -H "Content-Type: application/octet-stream" --data-binary "@$file" \
+              "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$id/assets?name=$name" > /dev/null
+          done
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
           TAG: ${{ inputs.tag }}
