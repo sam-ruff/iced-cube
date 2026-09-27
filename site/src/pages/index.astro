@@ -4,19 +4,13 @@ import Icon from "../components/Icon.astro";
 import Preview from "../components/Preview.astro";
 import ComponentGrid from "../components/ComponentGrid.astro";
 import { href } from "../lib/paths";
-import { components } from "../lib/nav";
-
-const count = (await components()).length;
 ---
 
 <Base title="iced-cube: components for iced" description="Themeable application components for iced, the Rust GUI library, with Lucide icons and live examples.">
   <main id="main" class="home" tabindex="-1">
     <section class="hero">
-      <p class="pill"><Icon name="Sparkles" size={14} /> {count} {count === 1 ? "component" : "components"} for iced 0.14</p>
       <h1>Components for iced applications</h1>
-      <p class="tagline">
-        Buttons, form controls, tabs, toasts and feedback for iced desktop apps. Themeable, tested, and running live in your browser.
-      </p>
+      <p class="tagline">Themeable, tested widgets for Rust desktop apps, running live in your browser.</p>
       <div class="ctas">
         <a class="btn primary" href={href("/docs/installation/")}>Get started <Icon name="ArrowRight" size={16} /></a>
         <a class="btn" href={href("/docs/components/")}>Browse components</a>
@@ -40,8 +34,8 @@ const count = (await components()).length;
     <section class="features">
       <div>
         <Icon name="Palette" size={20} />
-        <h2>One set of tokens</h2>
-        <p>Every colour comes from the active theme, so light, dark and custom palettes stay consistent.</p>
+        <h2>Light, dark or your own colours</h2>
+        <p>Components take every colour from the iced theme, so switching to dark mode or your brand palette restyles the whole app at once.</p>
       </div>
       <div>
         <Icon name="Radio" size={20} />
@@ -104,32 +98,17 @@ const count = (await components()).length;
     padding: 72px 0 40px;
   }
 
-  .pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    margin: 0 0 20px;
-    padding: 4px 12px;
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    font-size: 13px;
-    color: var(--fg-muted);
-    background: var(--bg-subtle);
-  }
-
-  .pill :global(svg) {
-    color: var(--accent);
-  }
-
   h1 {
     font-size: clamp(34px, 6vw, 56px);
     letter-spacing: -0.035em;
-    max-width: 14ch;
+    max-width: 24ch;
+    text-wrap: balance;
   }
 
   .tagline {
     margin: 20px 0 28px;
-    max-width: 56ch;
+    max-width: 72ch;
+    text-wrap: balance;
     font-size: 18px;
     color: var(--fg-muted);
   }

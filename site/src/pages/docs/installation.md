@@ -101,7 +101,27 @@ fn main() -> iced::Result {
 
 The toast background job example also needs `cargo add futures-timer`.
 
-## Features
+## Choosing components
+
+By default you get every component. To compile only the ones you use, turn off the defaults and name the components you want. Each component's feature has the same name as its page in these docs, such as `button`, `dropdown-menu` or `scroll-area`:
+
+```sh
+cargo add iced-cube --no-default-features --features button,input,dialog
+```
+
+In `Cargo.toml` that reads:
+
+```toml
+[dependencies]
+iced = "0.14"
+iced-cube = { version = "0.0", default-features = false, features = ["button", "input", "dialog"] }
+```
+
+A component turns on anything it is built from, so `dialog` brings in `button` and `icon-button` for you. You can also ask for a whole group: `primitives`, `forms`, `layout`, `navigation`, `overlay` or `feedback`. `full` is every component, and it is what the defaults include. The theme, icons and keyboard shortcut modules are always there.
+
+Turning the defaults off also drops `x11`, `wayland` and `thread-pool`, described below. That makes no difference in an app that depends on iced with its own defaults, which is the usual case.
+
+## Other features
 
 - `x11`, `wayland` and `thread-pool` are on by default and turn on the iced features of the same name. They let the crate build on its own and on docs.rs. In your app, iced's own default features already turn them on, so switching them off in iced-cube changes nothing unless you also turn off iced's defaults.
 - `tokio` turns on iced's `tokio` feature, which makes tokio iced's executor, and makes the toast timer use `iced::time::every`. Without it, the toast timer runs on a small thread that sleeps between ticks, so toasts close on time whichever executor you use. If your app already runs on tokio, add it with `cargo add iced-cube --features tokio`.
