@@ -19,14 +19,18 @@ const TIMEZONES: &[&str] = &[
     "Tokyo (JST)",
 ];
 
+const OFFICES: &[&str] = &["Edinburgh", "Leeds", "London", "Manchester"];
+
 #[derive(Debug, Clone)]
 pub enum Message {
     Timezone(combobox::Event),
+    Office(combobox::Event),
 }
 
 #[derive(Debug)]
 pub struct Example {
     timezone: State<&'static str>,
+    office: State<&'static str>,
     region: State<&'static str>,
 }
 
@@ -34,6 +38,7 @@ impl Default for Example {
     fn default() -> Self {
         Self {
             timezone: State::new(TIMEZONES.iter().copied()).with_selected(&"London (GMT)"),
+            office: State::new(OFFICES.iter().copied()),
             region: State::new(["Europe"]).with_selected(&"Europe"),
         }
     }
@@ -41,11 +46,24 @@ impl Default for Example {
 
 impl Example {
     pub fn update(&mut self, message: Message) {
-        let Message::Timezone(event) = message;
-        let _ = self.timezone.update(event);
+        match message {
+            Message::Timezone(event) => {
+                let _ = self.timezone.update(event);
+            }
+            Message::Office(event) => {
+                let _ = self.office.update(event);
+            }
+        }
     }
 
     pub fn view(&self) -> Element<'_, Message> {
+        // A required value that is still missing shows as invalid.
+        let office_error = self
+            .office
+            .selected()
+            .is_none()
+            .then_some("Pick the office you work from.");
+
         column![
             field(
                 "Timezone",
@@ -56,6 +74,16 @@ impl Example {
                     .on_event(Message::Timezone),
             )
             .description("Meeting times are shown in this timezone."),
+            field(
+                "Office",
+                combobox(&self.office)
+                    .placeholder("Search offices...")
+                    .width(Length::Fill)
+                    .invalid(office_error.is_some())
+                    .on_event(Message::Office),
+            )
+            .required(true)
+            .error_maybe(office_error),
             field("Region", combobox(&self.region).width(Length::Fill))
                 .description("Set by your organisation.")
                 .disabled(true),

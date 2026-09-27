@@ -44,12 +44,15 @@
 use std::fmt::{self, Display};
 use std::rc::Rc;
 
+use iced::advanced::layout::{self, Layout};
+use iced::advanced::widget::{Operation, Tree, Widget, operation, tree};
+use iced::advanced::{Clipboard, Shell, overlay, renderer};
 use iced::keyboard::key::Named;
-use iced::mouse::ScrollDelta;
+use iced::mouse::{self, ScrollDelta};
 use iced::widget::text::LineHeight;
 use iced::widget::text_input::{self, Status};
 use iced::widget::{self, Column, container, mouse_area, stack};
-use iced::{Alignment, Element, Length, Padding};
+use iced::{Alignment, Element, Length, Padding, Renderer, Theme};
 
 use crate::icon::{opacity, themed};
 use crate::keys::{self, Chord, Keymap};
@@ -378,6 +381,7 @@ pub struct Combobox<'a, T, Message> {
     width: Length,
     size: Size,
     id: Option<widget::Id>,
+    invalid: bool,
     keymap: Keymap<Action>,
     on_event: Option<Box<dyn Fn(Event) -> Message + 'a>>,
 }
@@ -391,6 +395,7 @@ pub fn combobox<'a, T, Message>(state: &'a State<T>) -> Combobox<'a, T, Message>
         width: Length::Fixed(240.0),
         size: Size::default(),
         id: None,
+        invalid: false,
         keymap: default_keymap(),
         on_event: None,
     }
@@ -404,6 +409,7 @@ impl<T: fmt::Debug, Message> fmt::Debug for Combobox<'_, T, Message> {
             .field("empty", &self.empty)
             .field("width", &self.width)
             .field("size", &self.size)
+            .field("invalid", &self.invalid)
             .field("enabled", &self.on_event.is_some())
             .finish_non_exhaustive()
     }
@@ -441,6 +447,14 @@ impl<'a, T, Message> Combobox<'a, T, Message> {
         self
     }
 
+    /// Draws the field with the destructive border, as
+    /// [`input`](crate::primitives::input) does, for example when a required
+    /// value is missing.
+    pub fn invalid(mut self, invalid: bool) -> Self {
+        self.invalid = invalid;
+        self
+    }
+
     /// Replaces the [`default_keymap`].
     pub fn keymap(mut self, keymap: Keymap<Action>) -> Self {
         self.keymap = keymap;
@@ -472,6 +486,7 @@ where
             width,
             size,
             id,
+            invalid,
             keymap,
             on_event,
         } = combobox;
@@ -479,7 +494,7 @@ where
 
         let Some(on_event) = on_event else {
             let value = selected.unwrap_or_default();
-            return container(field(&placeholder, &value, size, id, None, false))
+            return container(field(&placeholder, &value, size, id, None, false, invalid))
                 .width(width)
                 .into();
         };
@@ -499,9 +514,22 @@ where
             let on_event = Rc::clone(&on_event);
             Box::new(move |query| on_event(Event::Input(query)))
         };
-        let field = container(field(&hint, &value, size, id, Some(on_input), open)).width(width);
+        let field = container(field(
+            &hint,
+            &value,
+            size,
+            id,
+            Some(on_input),
+            open,
+            invalid,
+        ))
+        .width(width);
+        let field = CaretToEnd {
+            content: field.into(),
+            watch: (open, state.selected),
+        };
 
-        anchored(field)
+        anchored(Element::new(field))
             .content(list)
             .placement(Placement::new(Side::Bottom, Align::Start))
             .match_width(true)
@@ -528,6 +556,7 @@ fn field<'a, Message: Clone + 'a>(
     id: Option<widget::Id>,
     on_input: Option<OnInput<'a, Message>>,
     open: bool,
+    invalid: bool,
 ) -> Element<'a, Message> {
     let enabled = on_input.is_some();
     let metrics = size.metrics();
@@ -539,7 +568,7 @@ fn field<'a, Message: Clone + 'a>(
         .line_height(LineHeight::Relative(LINE_HEIGHT))
         .padding(padding)
         .width(Length::Fill)
-        .style(move |theme, status| style(&Tokens::of(theme), status, open));
+        .style(move |theme, status| style(&Tokens::of(theme), status, open, invalid));
     if let Some(id) = id {
         input = input.id(id);
     }
@@ -613,14 +642,192 @@ fn suggestions<'a, T: Display, Message: Clone + 'a>(
         .into()
 }
 
-/// The field style: the input style, drawn focused while the list is open.
-pub fn style(tokens: &Tokens, status: Status, open: bool) -> text_input::Style {
+/// The field style: the input style, drawn focused while the list is open
+/// and with the destructive border while `invalid`.
+pub fn style(tokens: &Tokens, status: Status, open: bool, invalid: bool) -> text_input::Style {
     let status = match status {
         Status::Active if open => Status::Focused { is_hovered: false },
         Status::Hovered if open => Status::Focused { is_hovered: true },
         status => status,
     };
-    input::style(tokens, status, false)
+    input::style(tokens, status, invalid)
+}
+
+/// Wraps the field and moves its caret to the end whenever the list closes
+/// or the selection changes, so a picked value reads from its end rather
+/// than from wherever the caret was in the query.
+struct CaretToEnd<'a, Message> {
+    content: Element<'a, Message>,
+    /// Whether the list is open, and the selected option.
+    watch: (bool, Option<usize>),
+}
+
+/// The caret goes to the end once the list is closed, if it just closed or
+/// the selection changed.
+fn moves_caret(before: Option<(bool, Option<usize>)>, now: (bool, Option<usize>)) -> bool {
+    let Some(before) = before else {
+        return false;
+    };
+    let (open, selected) = now;
+    !open && (before.0 || before.1 != selected)
+}
+
+struct MoveCaretToEnd;
+
+impl Operation for MoveCaretToEnd {
+    fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation)) {
+        operate(self);
+    }
+
+    fn text_input(
+        &mut self,
+        _id: Option<&widget::Id>,
+        _bounds: iced::Rectangle,
+        state: &mut dyn operation::TextInput,
+    ) {
+        state.move_cursor_to_end();
+    }
+}
+
+impl<Message> Widget<Message, Theme, Renderer> for CaretToEnd<'_, Message> {
+    fn size(&self) -> iced::Size<Length> {
+        self.content.as_widget().size()
+    }
+
+    fn size_hint(&self) -> iced::Size<Length> {
+        self.content.as_widget().size_hint()
+    }
+
+    fn tag(&self) -> tree::Tag {
+        tree::Tag::of::<Option<(bool, Option<usize>)>>()
+    }
+
+    fn state(&self) -> tree::State {
+        tree::State::new(None::<(bool, Option<usize>)>)
+    }
+
+    fn children(&self) -> Vec<Tree> {
+        vec![Tree::new(&self.content)]
+    }
+
+    fn diff(&self, tree: &mut Tree) {
+        tree.diff_children(std::slice::from_ref(&self.content));
+    }
+
+    // Layout runs after every change to the view, before the next draw, so
+    // the caret moves without waiting for another event.
+    fn layout(
+        &mut self,
+        tree: &mut Tree,
+        renderer: &Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
+        let node = self
+            .content
+            .as_widget_mut()
+            .layout(&mut tree.children[0], renderer, limits);
+        let seen = tree.state.downcast_mut::<Option<(bool, Option<usize>)>>();
+        let before = seen.replace(self.watch);
+        if moves_caret(before, self.watch) {
+            self.content.as_widget_mut().operate(
+                &mut tree.children[0],
+                Layout::new(&node),
+                renderer,
+                &mut MoveCaretToEnd,
+            );
+        }
+        node
+    }
+
+    fn draw(
+        &self,
+        tree: &Tree,
+        renderer: &mut Renderer,
+        theme: &Theme,
+        style: &renderer::Style,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &iced::Rectangle,
+    ) {
+        self.content.as_widget().draw(
+            &tree.children[0],
+            renderer,
+            theme,
+            style,
+            layout,
+            cursor,
+            viewport,
+        );
+    }
+
+    fn operate(
+        &mut self,
+        tree: &mut Tree,
+        layout: Layout<'_>,
+        renderer: &Renderer,
+        operation: &mut dyn Operation,
+    ) {
+        self.content
+            .as_widget_mut()
+            .operate(&mut tree.children[0], layout, renderer, operation);
+    }
+
+    fn update(
+        &mut self,
+        tree: &mut Tree,
+        event: &iced::Event,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        renderer: &Renderer,
+        clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, Message>,
+        viewport: &iced::Rectangle,
+    ) {
+        self.content.as_widget_mut().update(
+            &mut tree.children[0],
+            event,
+            layout,
+            cursor,
+            renderer,
+            clipboard,
+            shell,
+            viewport,
+        );
+    }
+
+    fn mouse_interaction(
+        &self,
+        tree: &Tree,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &iced::Rectangle,
+        renderer: &Renderer,
+    ) -> mouse::Interaction {
+        self.content.as_widget().mouse_interaction(
+            &tree.children[0],
+            layout,
+            cursor,
+            viewport,
+            renderer,
+        )
+    }
+
+    fn overlay<'b>(
+        &'b mut self,
+        tree: &'b mut Tree,
+        layout: Layout<'b>,
+        renderer: &Renderer,
+        viewport: &iced::Rectangle,
+        translation: iced::Vector,
+    ) -> Option<overlay::Element<'b, Message, Theme, Renderer>> {
+        self.content.as_widget_mut().overlay(
+            &mut tree.children[0],
+            layout,
+            renderer,
+            viewport,
+            translation,
+        )
+    }
 }
 
 #[cfg(test)]
@@ -830,12 +1037,15 @@ mod tests {
         assert_eq!(c.width, Length::Fixed(240.0));
         assert_eq!(c.size, Size::Md);
         assert_eq!(c.keymap, default_keymap());
+        assert!(!c.invalid);
         let c = c
             .placeholder("Pick")
             .empty("None")
             .size(Size::Sm)
+            .invalid(true)
             .on_event(|e| e);
         assert_eq!(c.size, Size::Sm);
+        assert!(c.invalid);
         assert!(c.is_enabled());
         assert_eq!((c.placeholder.as_str(), c.empty.as_str()), ("Pick", "None"));
     }
@@ -854,9 +1064,9 @@ mod tests {
             let tokens = Tokens::of(&theme);
             let focused = input::style(&tokens, Status::Focused { is_hovered: false }, false);
             for status in STATES {
-                let closed = style(&tokens, status, false);
+                let closed = style(&tokens, status, false, false);
                 assert_eq!(closed, input::style(&tokens, status, false), "{status:?}");
-                let open = style(&tokens, status, true);
+                let open = style(&tokens, status, true, false);
                 if status != Status::Disabled {
                     assert_eq!(open.border.color, focused.border.color, "{status:?}");
                 }
@@ -869,12 +1079,54 @@ mod tests {
         for theme in [light(), dark()] {
             let tokens = Tokens::of(&theme);
             for open in [false, true] {
-                let disabled = style(&tokens, Status::Disabled, open);
+                let disabled = style(&tokens, Status::Disabled, open, false);
                 assert_eq!(
                     disabled.background,
                     iced::Background::Color(tokens.disabled_field())
                 );
             }
         }
+    }
+
+    #[test]
+    fn invalid_field_uses_the_input_invalid_style() {
+        for theme in [light(), dark()] {
+            let tokens = Tokens::of(&theme);
+            for status in STATES {
+                assert_eq!(
+                    style(&tokens, status, false, true),
+                    input::style(&tokens, status, true),
+                    "{status:?}"
+                );
+                let valid = style(&tokens, status, false, false);
+                if status != Status::Disabled {
+                    assert_ne!(
+                        style(&tokens, status, false, true).border.color,
+                        valid.border.color,
+                        "{status:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_caret_moves_to_the_end_when_the_list_closes_or_the_pick_changes() {
+        assert!(
+            !moves_caret(None, (false, None)),
+            "nothing to move on first layout"
+        );
+        assert!(moves_caret(Some((true, None)), (false, Some(2))), "a pick");
+        assert!(
+            moves_caret(Some((true, Some(2))), (false, Some(2))),
+            "Escape"
+        );
+        assert!(
+            moves_caret(Some((false, Some(1))), (false, Some(2))),
+            "set by the app"
+        );
+        assert!(!moves_caret(Some((false, Some(2))), (false, Some(2))));
+        assert!(!moves_caret(Some((false, None)), (true, None)), "opening");
+        assert!(!moves_caret(Some((true, None)), (true, None)), "typing");
     }
 }

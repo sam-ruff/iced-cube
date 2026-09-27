@@ -193,8 +193,8 @@ crate::stories! {
     }
     ComboboxField => combobox::field {
         id: "combobox/field", component: "combobox", title: "In a field",
-        description: "A labelled combobox showing its selected value, above a disabled one.",
-        file: "combobox/field.rs", height: 360,
+        description: "A labelled combobox showing its selected value, a required one marked invalid until something is picked, and a disabled one.",
+        file: "combobox/field.rs", height: 440,
     }
     ComboboxKeyboard => combobox::keyboard {
         id: "combobox/keyboard", component: "combobox", title: "Keyboard shortcuts",

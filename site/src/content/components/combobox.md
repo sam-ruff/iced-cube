@@ -29,6 +29,8 @@ api:
     description: "Text shown in the empty field, and in the list when nothing matches. The empty text defaults to \"No results found.\""
   - name: ".width(length) / .size(Size) / .id(id)"
     description: "Overrides the width (240 pixels by default), takes the input sizes Sm, Md (the default) or Lg, and sets the text field's widget id."
+  - name: ".invalid(bool)"
+    description: "Draws the field with the destructive border, as input does, for example when a required value is missing."
   - name: ".keymap(keymap)"
     description: "Replaces the default keymap. The combobox resolves its own key presses while its field has focus or its list is open."
   - name: "combobox::default_keymap()"
@@ -39,6 +41,6 @@ api:
 
 Use a combobox when the list is long enough that people would rather type than scroll, such as timezones or countries. For a handful of options, a [select](../select/) is simpler.
 
-The app owns a `combobox::State` and passes every event to `update`. Clicking the field or pressing the down arrow opens the list; typing filters it. The selected value shows in the field while the list is closed, and as the placeholder while you type. The list is as wide as the field, draws its rows like every other menu and list, and stays inside the window.
+The app owns a `combobox::State` and passes every event to `update`. Clicking the field or pressing the down arrow opens the list; typing filters it. The selected value shows in the field while the list is closed, with the caret at its end, and as the placeholder while you type. In a [field](../field/) with an error, set `.invalid(true)` so the border matches the message, as the field example does. The list is as wide as the field, draws its rows like every other menu and list, and stays inside the window.
 
 The combobox handles its own keys while its field has focus or its list is open, so there is no need to subscribe to key presses. Inside a dialog or popover, Escape closes the list first and leaves the dialog or popover open. The list closes when the field loses focus or when you click elsewhere; that click goes no further and the field gives up focus. Long lists show a window of rows that follows the highlight and scrolls with the mouse wheel.

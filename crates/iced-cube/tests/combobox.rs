@@ -1,9 +1,13 @@
 #![cfg(feature = "combobox")]
 
+use futures::executor::block_on;
 use iced::keyboard::key::Named;
 use iced::{Element, Point, widget};
 use iced_cube::forms::combobox::{Event, State, combobox};
 use iced_cube::primitives::input::Size;
+use iced_test::core::clipboard;
+use iced_test::core::widget::operation::{focusable, text_input};
+use iced_test::runtime::user_interface::{self, UserInterface};
 use iced_test::simulator::{Simulator, click, simulator};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -219,4 +223,74 @@ fn disabled_combobox_ignores_input() {
     let _ = ui.typewrite("a");
     let _ = ui.tap_key(Named::ArrowDown);
     assert_eq!(ui.into_messages().count(), 0);
+}
+
+#[test]
+fn invalid_combobox_renders_differently() -> Result<(), iced_test::Error> {
+    let state = State::new(FRUITS);
+    let path = std::env::temp_dir()
+        .join(format!("iced-cube-combobox-{}", std::process::id()))
+        .join("invalid");
+    let matches = |invalid: bool| -> Result<bool, iced_test::Error> {
+        let element: Element<'_, Message> = combobox(&state)
+            .invalid(invalid)
+            .on_event(Message::Fruit)
+            .into();
+        let mut ui = simulator(element);
+        ui.snapshot(&iced_cube::theme::light())?.matches_hash(&path)
+    };
+    // The first render records its hash; the valid field must differ.
+    assert!(matches(true)?);
+    assert!(!matches(false)?);
+    Ok(())
+}
+
+/// Builds the combobox of `state` on top of the widget state left by the
+/// previous build, as the runtime does after every update.
+fn rebuild<'a>(
+    state: &'a State<&'static str>,
+    cache: user_interface::Cache,
+    renderer: &mut iced_test::renderer::Renderer,
+) -> UserInterface<'a, Message, iced::Theme, iced_test::renderer::Renderer> {
+    UserInterface::build(view(state), iced::Size::new(800.0, 600.0), cache, renderer)
+}
+
+#[test]
+fn picking_moves_the_caret_to_the_end() {
+    use iced_test::core::renderer::Headless;
+
+    let Some(mut renderer) = block_on(<iced_test::renderer::Renderer as Headless>::new(
+        iced::Font::with_name("Fira Sans"),
+        iced::Pixels(16.0),
+        Some("tiny-skia"),
+    )) else {
+        panic!("a headless renderer");
+    };
+
+    // "Blue" typed with the caret moved back after "Bl".
+    let mut state = State::new(FRUITS);
+    let _ = state.update(Event::Input("Blue".into()));
+    let mut ui = rebuild(&state, user_interface::Cache::default(), &mut renderer);
+    ui.operate(&renderer, &mut focusable::focus(field_id()));
+    ui.operate(&renderer, &mut text_input::move_cursor_to(field_id(), 2));
+    let cache = ui.into_cache();
+
+    let _ = state.update(Event::ActivateHighlighted);
+    assert_eq!(state.selected(), Some(&"Blueberry"));
+    let mut ui = rebuild(&state, cache, &mut renderer);
+
+    let mut messages = Vec::new();
+    let events: Vec<iced::Event> = iced_test::simulator::typewrite("X").collect();
+    let _ = ui.update(
+        &events,
+        iced::mouse::Cursor::Unavailable,
+        &mut renderer,
+        &mut clipboard::Null,
+        &mut messages,
+    );
+    assert_eq!(
+        messages,
+        [Message::Fruit(Event::Input("BlueberryX".into()))],
+        "typing after a pick continues from the end"
+    );
 }
