@@ -1,8 +1,9 @@
 #![cfg(feature = "context-menu")]
 
 use iced::keyboard::{Key, Modifiers, key::Named};
+use iced::time::{Duration, Instant};
 use iced::widget::{column, container, text};
-use iced::{Element, Point, mouse};
+use iced::{Element, Point, mouse, touch, window};
 use iced_cube::keys;
 use iced_cube::overlay::context_menu::{Event, State, context_menu, default_keymap, keyed};
 use iced_cube::overlay::dropdown_menu::{self, Output, item, separator};
@@ -298,5 +299,103 @@ fn a_shared_menu_shows_once_below_the_row_it_opened_on() {
         row_messages(ui),
         vec![Event::Menu(dropdown_menu::Event::Close)],
         "only the row with the open menu answers the key"
+    );
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum TouchMessage {
+    Context(Event<u8>),
+    Tapped,
+}
+
+fn touch_view(state: &State<u8>) -> Element<'_, TouchMessage> {
+    context_menu(
+        state,
+        container(iced::widget::button("Tap me").on_press(TouchMessage::Tapped))
+            .width(300)
+            .height(200),
+    )
+    .on_event(TouchMessage::Context)
+    .into()
+}
+
+const FINGER: touch::Finger = touch::Finger(1);
+
+fn finger(ui: &mut Simulator<'_, TouchMessage>, event: touch::Event) {
+    let _ = ui.simulate([iced::Event::Touch(event)]);
+}
+
+fn redraw(ui: &mut Simulator<'_, TouchMessage>, at: Instant) {
+    let _ = ui.simulate([iced::Event::Window(window::Event::RedrawRequested(at))]);
+}
+
+/// Presses a finger on the button, keeps it there for `held` and lifts it.
+fn hold(ui: &mut Simulator<'_, TouchMessage>, held: Duration, drift: f32) -> Point {
+    let Ok(button) = ui.find("Tap me") else {
+        panic!("button is rendered");
+    };
+    let position = button.bounds().center();
+    ui.point_at(position);
+    finger(
+        ui,
+        touch::Event::FingerPressed {
+            id: FINGER,
+            position,
+        },
+    );
+    let start = Instant::now();
+    redraw(ui, start);
+    let moved = Point::new(position.x + drift, position.y);
+    ui.point_at(moved);
+    finger(
+        ui,
+        touch::Event::FingerMoved {
+            id: FINGER,
+            position: moved,
+        },
+    );
+    redraw(ui, start + held);
+    finger(
+        ui,
+        touch::Event::FingerLifted {
+            id: FINGER,
+            position: moved,
+        },
+    );
+    position
+}
+
+#[test]
+fn a_long_press_opens_at_the_finger_and_does_not_tap() {
+    let closed = state();
+    let mut ui = simulator::simulator(touch_view(&closed));
+    let position = hold(&mut ui, Duration::from_millis(600), 3.0);
+    let messages: Vec<_> = ui.into_messages().collect();
+    assert_eq!(
+        messages,
+        vec![TouchMessage::Context(Event::Open((), position))],
+        "the lift that ends a long press is not a tap"
+    );
+}
+
+#[test]
+fn a_short_press_is_a_tap() {
+    let closed = state();
+    let mut ui = simulator::simulator(touch_view(&closed));
+    let _ = hold(&mut ui, Duration::from_millis(200), 0.0);
+    assert_eq!(
+        ui.into_messages().collect::<Vec<_>>(),
+        vec![TouchMessage::Tapped]
+    );
+}
+
+#[test]
+fn dragging_cancels_a_long_press() {
+    let closed = state();
+    let mut ui = simulator::simulator(touch_view(&closed));
+    let _ = hold(&mut ui, Duration::from_millis(600), 40.0);
+    assert!(
+        ui.into_messages()
+            .all(|message| !matches!(message, TouchMessage::Context(_)))
     );
 }

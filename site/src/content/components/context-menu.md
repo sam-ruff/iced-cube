@@ -1,13 +1,13 @@
 ---
 title: Context menu
-description: A menu that opens at the pointer when you right-click an area.
+description: A menu that opens at the pointer when you right-click an area, or at the finger on a long press.
 group: Overlays
 order: 5
 module: overlay::context_menu
 imports: |
   use iced_cube::context_menu::{self, Event, State, context_menu, keyed};
   use iced_cube::dropdown_menu::{Output, checkbox_item, item, separator, submenu};
-keywords: [right click, right-click menu, shortcut menu, row menu]
+keywords: [right click, right-click menu, shortcut menu, row menu, long press, touch]
 related: [dropdown-menu, popover]
 hero: context-menu/default
 stories: [context-menu/default, context-menu/keyboard]
@@ -15,7 +15,7 @@ api:
   - name: "State::new(entries)"
     description: "Holds the entries, closed. Build them with the dropdown menu's item, checkbox_item, radio_item, submenu, group_label and separator. State<Id> serves one area; State<Id, Key> serves many areas told apart by Key."
   - name: "state.update(Event)"
-    description: "Open(key, point) opens at a right-click on the area key, OpenFromKeyboard(key) opens below that area on the first item, and Menu(event) navigates as a dropdown menu does. Returns the dropdown menu's Output when an item is chosen. The key is () for a single area."
+    description: "Open(key, point) opens at a right-click or long press on the area key, OpenFromKeyboard(key) opens below that area on the first item, and Menu(event) navigates as a dropdown menu does. Returns the dropdown menu's Output when an item is chosen. The key is () for a single area."
   - name: "state.is_open() / state.is_open_on(&key) / state.target()"
     description: "Whether the menu is open, whether it is open on one area, and the area it last opened on, which stays set after it closes so you know which row a chosen item belongs to."
   - name: "state.position() / state.menu()"
@@ -23,7 +23,9 @@ api:
   - name: "state.is_checked(id) / state.set_checked(id, bool) / state.set_disabled(id, bool)"
     description: "Reads and changes items, as on a dropdown menu."
   - name: "context_menu(&state, content)"
-    description: "Makes the content a right-click area. Right-clicks do nothing until .on_event is set."
+    description: "Makes the content an area that opens the menu on a right-click or a long press. Neither does anything until .on_event is set."
+  - name: "LONG_PRESS / LONG_PRESS_SLOP"
+    description: "How long a finger rests on the area before the menu opens (500 ms), and how far it may drift meanwhile (10 logical pixels)."
   - name: "keyed(&state, key, content)"
     description: "Makes the content one of many areas sharing one menu, such as a row in a list. The menu shows on it only while open on key, and its open events carry key."
   - name: ".on_event(f)"
@@ -43,6 +45,8 @@ api:
 A context menu offers actions for whatever is under the pointer: a file in a list, a selection in an editor, a node on a canvas. It shares its entries, rows and navigation with the [dropdown menu](../dropdown-menu/), so everything on that page applies here too.
 
 A right-click inside the area opens the menu with its top left corner at the pointer. It flips up or to the left near the edges of the window. Right-clicking somewhere else in the area moves the menu there, and a left-click anywhere outside the menu closes it. Clicks inside the menu never reach the area underneath.
+
+Touch screens have no right-click, so holding a finger still on the area for half a second opens the menu at the finger instead. Moving the finger more than a few pixels first counts as a scroll and cancels it, and lifting early is an ordinary tap. The lift that ends a long press does not reach the content, so a button in a row is not pressed as the menu opens. A long press is easy to miss, so in a list on a narrow screen consider a visible button that opens the same menu, as the demo's job list does.
 
 Keyboard users open it with Shift+F10 or the Menu key, as in desktop apps: route presses from `keys::subscription()` through `state.key_event`, as the second example does. The menu then opens just below the area, lined up with its start so it never covers the area's label, with its first item highlighted. It handles the arrow keys, Enter and Escape itself until it closes. While it is closed, only the opening chords do anything, so a context menu shares the keyboard with the rest of your app.
 

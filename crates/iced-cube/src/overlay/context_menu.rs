@@ -1,10 +1,12 @@
-//! A menu that opens at the pointer on a right-click inside an area.
+//! A menu that opens at the pointer on a right-click inside an area, or at
+//! the finger on a long press.
 //!
 //! It uses the dropdown menu's entries, rows and navigation: build the
 //! entries with [`dropdown_menu::item`](crate::overlay::dropdown_menu::item)
-//! and friends. [`State`] adds where the menu opened. From the keyboard,
-//! Shift+F10 or the Menu key opens it just below the area, aligned with its
-//! start, as desktop apps do.
+//! and friends. [`State`] adds where the menu opened. On a touch screen, a
+//! finger held still on the area for [`LONG_PRESS`] opens it. From the
+//! keyboard, Shift+F10 or the Menu key opens it just below the area, aligned
+//! with its start, as desktop apps do.
 //!
 //! One [`State`] can serve many areas, such as every row of a list: give
 //! each area a key with [`keyed`], and the open events carry the key of the
@@ -23,8 +25,11 @@ use iced::advanced::renderer;
 use iced::advanced::widget::{Operation, Tree, Widget, tree};
 use iced::advanced::{Clipboard, Shell};
 use iced::keyboard::key::Named;
+use iced::time::{Duration, Instant};
+use iced::touch::{self, Finger};
 use iced::{
     Element, Event as IcedEvent, Length, Point, Rectangle, Renderer, Size, Theme, Vector, mouse,
+    window,
 };
 
 use crate::keys::{self, Chord, Keymap};
@@ -35,8 +40,9 @@ use crate::overlay::dropdown_menu::{self, Entry, Output, WIDTH};
 /// it is `()` for a menu with a single area.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Event<Id, Key = ()> {
-    /// A right-click on the area `Key` at this point, relative to the area's
-    /// top left corner. Opens the menu there with nothing highlighted.
+    /// A right-click or a long press on the area `Key` at this point,
+    /// relative to the area's top left corner. Opens the menu there with
+    /// nothing highlighted.
     Open(Key, Point),
     /// Opens the menu below the area `Key` on its first item.
     OpenFromKeyboard(Key),
@@ -267,6 +273,81 @@ pub fn default_keymap() -> Keymap<Action> {
 /// Gap between an area and a menu opened from the keyboard below it.
 pub const KEYBOARD_GAP: f32 = 4.0;
 
+/// How long a finger rests on an area before the menu opens.
+pub const LONG_PRESS: Duration = Duration::from_millis(500);
+
+/// How far, in logical pixels, a finger may drift during a long press. Any
+/// further and it counts as a scroll or a drag.
+pub const LONG_PRESS_SLOP: f32 = 10.0;
+
+/// A finger held on an area. Time only comes in through [`LongPress::tick`],
+/// which the area calls on every redraw, so the timing is testable.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+struct LongPress {
+    finger: Option<Finger>,
+    origin: Point,
+    since: Option<Instant>,
+    fired: bool,
+}
+
+impl LongPress {
+    /// Starts timing a finger pressed at `position`, replacing any other.
+    fn press(&mut self, finger: Finger, position: Point) {
+        *self = Self {
+            finger: Some(finger),
+            origin: position,
+            since: None,
+            fired: false,
+        };
+    }
+
+    /// Cancels the press once the finger drifts beyond [`LONG_PRESS_SLOP`].
+    fn moved(&mut self, finger: Finger, position: Point) {
+        if self.finger != Some(finger) || self.fired {
+            return;
+        }
+        if self.origin.distance(position) > LONG_PRESS_SLOP {
+            *self = Self::default();
+        }
+    }
+
+    /// Ends the press. Returns whether it had opened the menu, in which case
+    /// the lift must not reach the content as a tap.
+    fn lift(&mut self, finger: Finger) -> bool {
+        if self.finger != Some(finger) {
+            return false;
+        }
+        let fired = self.fired;
+        *self = Self::default();
+        fired
+    }
+
+    /// Starts the clock on the first redraw after the press, and returns
+    /// where the press began once, when it has been held for [`LONG_PRESS`].
+    fn tick(&mut self, now: Instant) -> Option<Point> {
+        if self.finger.is_none() || self.fired {
+            return None;
+        }
+        let since = *self.since.get_or_insert(now);
+        if now.saturating_duration_since(since) < LONG_PRESS {
+            return None;
+        }
+        self.fired = true;
+        Some(self.origin)
+    }
+
+    /// When the area next needs a redraw to keep timing, if it does.
+    fn redraw(&self) -> Option<window::RedrawRequest> {
+        if self.finger.is_none() || self.fired {
+            return None;
+        }
+        Some(match self.since {
+            None => window::RedrawRequest::NextFrame,
+            Some(since) => window::RedrawRequest::At(since + LONG_PRESS),
+        })
+    }
+}
+
 type OnEvent<'a, Id, Key, Message> = dyn Fn(Event<Id, Key>) -> Message + 'a;
 
 /// A context menu builder. Convert it into an [`Element`] to render.
@@ -403,10 +484,56 @@ where
     }
 }
 
-/// Wraps content and reports right-clicks on it with their position.
+/// Wraps content and reports right-clicks and long presses on it with their
+/// position.
 struct Area<'a, Message> {
     content: Element<'a, Message>,
     on_open: Option<Box<dyn Fn(Point) -> Message + 'a>>,
+}
+
+/// Where the cursor or finger is, relative to the area's top left corner.
+fn relative(cursor: mouse::Cursor, bounds: Rectangle) -> Option<Point> {
+    let position = cursor.position()?;
+    Some(Point::new(position.x - bounds.x, position.y - bounds.y))
+}
+
+impl<Message> Area<'_, Message> {
+    /// Times a finger held on the area and opens the menu once it has been
+    /// held long enough. The cursor follows the finger, and unlike the
+    /// event's position it is already translated inside scroll areas.
+    fn long_press(
+        &self,
+        press: &mut LongPress,
+        event: &IcedEvent,
+        bounds: Rectangle,
+        cursor: mouse::Cursor,
+        shell: &mut Shell<'_, Message>,
+    ) {
+        let Some(on_open) = &self.on_open else {
+            return;
+        };
+        match event {
+            IcedEvent::Touch(touch::Event::FingerPressed { id, .. }) => {
+                if let Some(position) = cursor.position_in(bounds) {
+                    press.press(*id, position);
+                }
+            }
+            IcedEvent::Touch(touch::Event::FingerMoved { id, .. }) => {
+                if let Some(position) = relative(cursor, bounds) {
+                    press.moved(*id, position);
+                }
+            }
+            IcedEvent::Window(window::Event::RedrawRequested(now)) => {
+                if let Some(position) = press.tick(*now) {
+                    shell.publish(on_open(position));
+                }
+            }
+            _ => {}
+        }
+        if let Some(request) = press.redraw() {
+            shell.request_redraw_at(request);
+        }
+    }
 }
 
 impl<Message> Widget<Message, Theme, Renderer> for Area<'_, Message> {
@@ -419,19 +546,19 @@ impl<Message> Widget<Message, Theme, Renderer> for Area<'_, Message> {
     }
 
     fn tag(&self) -> tree::Tag {
-        self.content.as_widget().tag()
+        tree::Tag::of::<LongPress>()
     }
 
     fn state(&self) -> tree::State {
-        self.content.as_widget().state()
+        tree::State::new(LongPress::default())
     }
 
     fn children(&self) -> Vec<Tree> {
-        self.content.as_widget().children()
+        vec![Tree::new(&self.content)]
     }
 
     fn diff(&self, tree: &mut Tree) {
-        self.content.as_widget().diff(tree);
+        tree.diff_children(std::slice::from_ref(&self.content));
     }
 
     fn layout(
@@ -440,7 +567,9 @@ impl<Message> Widget<Message, Theme, Renderer> for Area<'_, Message> {
         renderer: &Renderer,
         limits: &layout::Limits,
     ) -> layout::Node {
-        self.content.as_widget_mut().layout(tree, renderer, limits)
+        self.content
+            .as_widget_mut()
+            .layout(&mut tree.children[0], renderer, limits)
     }
 
     fn draw(
@@ -453,9 +582,15 @@ impl<Message> Widget<Message, Theme, Renderer> for Area<'_, Message> {
         cursor: mouse::Cursor,
         viewport: &Rectangle,
     ) {
-        self.content
-            .as_widget()
-            .draw(tree, renderer, theme, style, layout, cursor, viewport);
+        self.content.as_widget().draw(
+            &tree.children[0],
+            renderer,
+            theme,
+            style,
+            layout,
+            cursor,
+            viewport,
+        );
     }
 
     fn operate(
@@ -467,7 +602,7 @@ impl<Message> Widget<Message, Theme, Renderer> for Area<'_, Message> {
     ) {
         self.content
             .as_widget_mut()
-            .operate(tree, layout, renderer, operation);
+            .operate(&mut tree.children[0], layout, renderer, operation);
     }
 
     fn update(
@@ -481,8 +616,27 @@ impl<Message> Widget<Message, Theme, Renderer> for Area<'_, Message> {
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) {
+        let press = tree.state.downcast_mut::<LongPress>();
+        // The finger that opened the menu lifts over it, not as a tap.
+        if let IcedEvent::Touch(
+            touch::Event::FingerLifted { id, .. } | touch::Event::FingerLost { id, .. },
+        ) = event
+            && press.lift(*id)
+        {
+            shell.capture_event();
+            return;
+        }
+        self.long_press(press, event, layout.bounds(), cursor, shell);
+
         self.content.as_widget_mut().update(
-            tree, event, layout, cursor, renderer, clipboard, shell, viewport,
+            &mut tree.children[0],
+            event,
+            layout,
+            cursor,
+            renderer,
+            clipboard,
+            shell,
+            viewport,
         );
         if shell.is_event_captured() {
             return;
@@ -506,9 +660,13 @@ impl<Message> Widget<Message, Theme, Renderer> for Area<'_, Message> {
         viewport: &Rectangle,
         renderer: &Renderer,
     ) -> mouse::Interaction {
-        self.content
-            .as_widget()
-            .mouse_interaction(tree, layout, cursor, viewport, renderer)
+        self.content.as_widget().mouse_interaction(
+            &tree.children[0],
+            layout,
+            cursor,
+            viewport,
+            renderer,
+        )
     }
 
     fn overlay<'b>(
@@ -519,9 +677,13 @@ impl<Message> Widget<Message, Theme, Renderer> for Area<'_, Message> {
         viewport: &Rectangle,
         translation: Vector,
     ) -> Option<overlay::Element<'b, Message, Theme, Renderer>> {
-        self.content
-            .as_widget_mut()
-            .overlay(tree, layout, renderer, viewport, translation)
+        self.content.as_widget_mut().overlay(
+            &mut tree.children[0],
+            layout,
+            renderer,
+            viewport,
+            translation,
+        )
     }
 }
 
@@ -757,6 +919,67 @@ mod tests {
             modifiers: Modifiers::empty(),
         };
         assert_eq!(state.key_event(&keymap, &menu_key, ()), None);
+    }
+
+    const FINGER: Finger = Finger(7);
+
+    #[test]
+    fn a_long_press_fires_once_after_the_delay_at_its_origin() {
+        let start = Instant::now();
+        let mut press = LongPress::default();
+        assert_eq!(press.redraw(), None);
+        assert_eq!(press.tick(start), None);
+
+        press.press(FINGER, Point::new(12.0, 8.0));
+        assert_eq!(press.redraw(), Some(window::RedrawRequest::NextFrame));
+        assert_eq!(press.tick(start), None);
+        assert_eq!(
+            press.redraw(),
+            Some(window::RedrawRequest::At(start + LONG_PRESS))
+        );
+        assert_eq!(press.tick(start + Duration::from_millis(499)), None);
+        assert_eq!(press.tick(start + LONG_PRESS), Some(Point::new(12.0, 8.0)));
+        assert_eq!(press.tick(start + LONG_PRESS * 2), None);
+        assert_eq!(press.redraw(), None);
+        assert!(press.lift(FINGER), "the lift after firing is swallowed");
+        assert!(!press.lift(FINGER));
+    }
+
+    #[test]
+    fn lifting_early_is_a_tap() {
+        let start = Instant::now();
+        let mut press = LongPress::default();
+        press.press(FINGER, Point::ORIGIN);
+        let _ = press.tick(start);
+        assert!(!press.lift(FINGER));
+        assert_eq!(press.tick(start + LONG_PRESS), None);
+    }
+
+    #[test]
+    fn drifting_beyond_the_slop_cancels_but_a_wobble_does_not() {
+        let start = Instant::now();
+        let mut press = LongPress::default();
+        press.press(FINGER, Point::new(50.0, 50.0));
+        let _ = press.tick(start);
+        press.moved(FINGER, Point::new(56.0, 54.0));
+        press.moved(Finger(8), Point::new(200.0, 200.0));
+        assert!(press.tick(start + LONG_PRESS).is_some());
+
+        press.press(FINGER, Point::new(50.0, 50.0));
+        let _ = press.tick(start);
+        press.moved(FINGER, Point::new(50.0, 50.0 + LONG_PRESS_SLOP + 1.0));
+        assert_eq!(press.tick(start + LONG_PRESS), None);
+        assert_eq!(press.redraw(), None);
+    }
+
+    #[test]
+    fn another_finger_lifting_leaves_the_press_alone() {
+        let start = Instant::now();
+        let mut press = LongPress::default();
+        press.press(FINGER, Point::ORIGIN);
+        let _ = press.tick(start);
+        assert!(!press.lift(Finger(8)));
+        assert!(press.tick(start + LONG_PRESS).is_some());
     }
 
     #[test]

@@ -448,7 +448,7 @@ crate::stories! {
     }
     ContextMenuDefault => context_menu::default {
         id: "context-menu/default", component: "context-menu", title: "Default",
-        description: "A right-click menu with shortcut hints, a submenu and checkbox items.",
+        description: "A menu opened by a right-click or a long press, with shortcut hints, a submenu and checkbox items.",
         file: "context_menu/default.rs", height: 300,
     }
     ContextMenuKeyboard => context_menu::keyboard {
