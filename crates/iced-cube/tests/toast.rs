@@ -4,8 +4,10 @@ use std::thread;
 
 use futures::executor::block_on;
 use futures::{SinkExt, StreamExt};
-use iced::Element;
+use iced::keyboard::{Key, Modifiers};
 use iced::widget::text;
+use iced::{Element, Point, mouse};
+use iced_cube::keys;
 use iced_cube::overlay::toast::{self, Event, Output, State, Variant, toast, toasts};
 use iced_test::simulator;
 
@@ -172,4 +174,74 @@ fn producer_thread_sends_through_the_ready_channel() {
         .map(|(_, toast)| toast.title.clone())
         .collect();
     assert_eq!(first, ["Job 0", "Job 1", "Job 2"]);
+}
+
+fn move_to(ui: &mut iced_test::Simulator<'_, Message>, position: Point) {
+    ui.point_at(position);
+    let _ = ui.simulate([iced::Event::Mouse(mouse::Event::CursorMoved { position })]);
+}
+
+#[test]
+fn hovering_the_toasts_pauses_them_and_leaving_resumes() -> Result<(), iced_test::Error> {
+    let mut state = State::new();
+    let _ = state.push(toast("Hover me"));
+
+    let mut ui = simulator(view(&state));
+    let over = ui.find("Hover me")?.bounds().center();
+    move_to(&mut ui, over);
+    move_to(&mut ui, Point::new(4.0, 4.0));
+    let events: Vec<Event> = ui
+        .into_messages()
+        .map(|Message::Toast(event)| event)
+        .collect();
+    assert!(
+        matches!(events.as_slice(), [Event::Pause, Event::Resume]),
+        "{events:?}"
+    );
+
+    for event in events {
+        let _ = state.update(event);
+    }
+    assert!(!state.is_paused());
+    Ok(())
+}
+
+#[test]
+fn an_undo_toast_shows_even_when_three_toasts_are_already_up() {
+    let mut state = State::new();
+    for title in ["One", "Two", "Three"] {
+        let _ = state.push(toast(title));
+    }
+    let _ = state.push(toast("Deleted").action("Undo"));
+
+    let mut ui = simulator(view(&state));
+    assert!(ui.find("Undo").is_ok());
+    assert!(ui.find("Deleted").is_ok());
+    assert!(ui.find("Three").is_err(), "the newest plain toast waits");
+}
+
+#[test]
+fn the_keymap_presses_undo_on_the_newest_action_toast() {
+    let mut state: State<App> = State::default();
+    let _ = state.push_with(toast("Deleted a").action("Undo"), App::Restore(vec!["a"]));
+    let _ = state.push_with(toast("Deleted b").action("Undo"), App::Restore(vec!["b"]));
+    let _ = state.push(toast("Saved"));
+
+    let alt_z = keys::Event {
+        key: Key::Character("z".into()),
+        modifiers: Modifiers::ALT,
+    };
+    let Some(action) = toast::default_keymap().resolve_event(&alt_z) else {
+        panic!("Alt+Z is bound");
+    };
+    let restored: Vec<App> = action
+        .events(&state)
+        .into_iter()
+        .filter_map(|event| match state.update(event) {
+            Some(Output::Payload(message)) => Some(message),
+            _ => None,
+        })
+        .collect();
+    assert!(matches!(restored.as_slice(), [App::Restore(files)] if files == &["b"]));
+    assert_eq!(state.len(), 2);
 }

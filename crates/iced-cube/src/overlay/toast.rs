@@ -50,7 +50,7 @@ use iced::futures::channel::mpsc;
 use iced::futures::{Stream, StreamExt, stream};
 use iced::keyboard::key::Named;
 use iced::time::{Duration, Instant};
-use iced::widget::{self, column, container, opaque, row, stack, text};
+use iced::widget::{self, column, container, mouse_area, opaque, row, stack, text};
 use iced::{
     Alignment, Background, Border, Color, Element, Length, Shadow, Subscription, Theme, Vector,
 };
@@ -67,6 +67,9 @@ pub const CHANNEL_CAPACITY: usize = 32;
 pub const BATCH_SIZE: usize = 16;
 /// How long a toast stays visible unless it sets its own duration.
 pub const DEFAULT_DURATION: Duration = Duration::from_secs(5);
+/// The shortest time a toast with an action stays visible, so there is
+/// time to read it and press the button.
+pub const ACTION_DURATION: Duration = Duration::from_secs(10);
 /// How many toasts are shown at once. The rest wait their turn.
 pub const DEFAULT_LIMIT: usize = 3;
 /// How often [`timer`] checks for expired toasts.
@@ -167,7 +170,8 @@ impl Toast {
     }
 
     /// Adds an action button. Pressing it closes the toast and returns
-    /// [`Output::Action`].
+    /// [`Output::Action`]. A toast with an action stays at least
+    /// [`ACTION_DURATION`] and shows ahead of toasts waiting their turn.
     pub fn action(mut self, label: impl Into<String>) -> Self {
         self.action = Some(label.into());
         self
@@ -183,6 +187,17 @@ impl Toast {
     pub fn persistent(mut self) -> Self {
         self.duration = None;
         self
+    }
+
+    /// How long the toast stays once shown: its duration, but at least
+    /// [`ACTION_DURATION`] when it has an action. `None` keeps it until
+    /// it is closed.
+    pub fn lifetime(&self) -> Option<Duration> {
+        let duration = self.duration?;
+        if self.action.is_some() {
+            return Some(duration.max(ACTION_DURATION));
+        }
+        Some(duration)
     }
 }
 
@@ -200,6 +215,11 @@ pub enum Event {
     Dismiss(Id),
     Action(Id),
     Tick(Instant),
+    /// The pointer is over the toasts. Their countdowns stop until
+    /// [`Event::Resume`].
+    Pause,
+    /// The pointer left the toasts. Their countdowns carry on.
+    Resume,
 }
 
 /// What the app may need to act on after an [`Event`]. `A` is the payload
@@ -225,6 +245,12 @@ struct Entry<A> {
 /// The toast queue. The first [`limit`](State::limit) toasts are visible and
 /// counting down; the rest wait until a visible one closes.
 ///
+/// A toast with an action goes ahead of every toast without one that is
+/// waiting, and when the visible toasts are full it takes the place of the
+/// newest visible toast without an action, which waits again and restarts
+/// its countdown when it comes back. While the pointer is over the toasts
+/// ([`Event::Pause`]) no countdown runs.
+///
 /// `A` is what action buttons hand back, usually the app's message, so an
 /// Undo toast can carry the message that undoes. A queue without payloads
 /// is `State<()>`, made with [`State::new`]; one with payloads is made with
@@ -234,6 +260,8 @@ pub struct State<A = ()> {
     entries: VecDeque<Entry<A>>,
     next_id: u64,
     limit: usize,
+    paused: bool,
+    last_tick: Option<Instant>,
 }
 
 impl<A> Default for State<A> {
@@ -242,6 +270,8 @@ impl<A> Default for State<A> {
             entries: VecDeque::new(),
             next_id: 0,
             limit: DEFAULT_LIMIT,
+            paused: false,
+            last_tick: None,
         }
     }
 }
@@ -277,13 +307,46 @@ impl<A> State<A> {
     fn enqueue(&mut self, toast: Toast, payload: Option<A>) -> Id {
         let id = Id(self.next_id);
         self.next_id += 1;
-        self.entries.push_back(Entry {
+        let entry = Entry {
             id,
             toast,
             payload,
             expires_at: None,
-        });
+        };
+        if entry.toast.action.is_some() {
+            self.insert_ahead(entry);
+        } else {
+            self.entries.push_back(entry);
+        }
         id
+    }
+
+    /// Puts a toast with an action in view, or at the front of the waiting
+    /// toasts when every visible toast has an action too.
+    fn insert_ahead(&mut self, entry: Entry<A>) {
+        let limit = self.limit;
+        if self.entries.len() < limit {
+            self.entries.push_back(entry);
+            return;
+        }
+        let newest_plain = (0..limit)
+            .rev()
+            .find(|&index| self.entries[index].toast.action.is_none());
+        let Some(index) = newest_plain else {
+            let after_actions = self
+                .entries
+                .iter()
+                .rposition(|entry| entry.toast.action.is_some())
+                .map_or(0, |index| index + 1);
+            self.entries.insert(after_actions, entry);
+            return;
+        };
+        let Some(mut displaced) = self.entries.remove(index) else {
+            return;
+        };
+        displaced.expires_at = None;
+        self.entries.insert(limit - 1, entry);
+        self.entries.insert(limit, displaced);
     }
 
     /// Removes a toast, visible or waiting, dropping any payload.
@@ -293,12 +356,32 @@ impl<A> State<A> {
 
     fn remove(&mut self, id: Id) -> Option<Entry<A>> {
         let index = self.entries.iter().position(|entry| entry.id == id)?;
-        self.entries.remove(index)
+        let entry = self.entries.remove(index);
+        self.settle();
+        entry
+    }
+
+    /// With no toasts left under the pointer, nothing stays paused.
+    fn settle(&mut self) {
+        if self.entries.is_empty() {
+            self.paused = false;
+        }
     }
 
     /// Closes expired toasts and starts the countdown of newly visible ones.
-    /// Returns the ids that closed.
+    /// While paused, the time since the last tick is added back to every
+    /// countdown instead. Returns the ids that closed.
     pub fn tick(&mut self, now: Instant) -> Vec<Id> {
+        let last = self.last_tick.replace(now);
+        if self.paused
+            && let Some(last) = last
+        {
+            let paused_for = now.saturating_duration_since(last);
+            for entry in &mut self.entries {
+                entry.expires_at = entry.expires_at.map(|at| at + paused_for);
+            }
+        }
+
         let mut expired = Vec::new();
         self.entries.retain(|entry| {
             let alive = entry.expires_at.is_none_or(|at| at > now);
@@ -307,14 +390,21 @@ impl<A> State<A> {
             }
             alive
         });
+        self.settle();
 
         let limit = self.limit;
         for entry in self.entries.iter_mut().take(limit) {
             if entry.expires_at.is_none() {
-                entry.expires_at = entry.toast.duration.map(|duration| now + duration);
+                entry.expires_at = entry.toast.lifetime().map(|duration| now + duration);
             }
         }
         expired
+    }
+
+    /// Whether the countdowns are stopped because the pointer is over the
+    /// toasts.
+    pub fn is_paused(&self) -> bool {
+        self.paused
     }
 
     pub fn update(&mut self, event: Event) -> Option<Output<A>> {
@@ -341,10 +431,19 @@ impl<A> State<A> {
                 let _ = self.tick(now);
                 None
             }
+            Event::Pause => {
+                self.paused = true;
+                None
+            }
+            Event::Resume => {
+                self.paused = false;
+                None
+            }
         }
     }
 
-    /// The visible toasts, oldest first.
+    /// The visible toasts, top to bottom in queue order: oldest first, with
+    /// toasts that have an action moved ahead of waiting ones.
     pub fn visible(&self) -> impl Iterator<Item = (Id, &Toast)> {
         self.entries
             .iter()
@@ -367,10 +466,10 @@ impl<A> State<A> {
 
     /// Whether a visible toast still has to count down.
     pub fn needs_tick(&self) -> bool {
-        self.visible().any(|(_, toast)| toast.duration.is_some())
+        self.visible().any(|(_, toast)| toast.lifetime().is_some())
     }
 
-    /// Every queued toast id, visible first, oldest first.
+    /// Every queued toast id, visible first, in queue order.
     pub fn ids(&self) -> impl Iterator<Item = Id> {
         self.entries.iter().map(|entry| entry.id)
     }
@@ -381,25 +480,40 @@ impl<A> State<A> {
 pub enum Action {
     DismissLatest,
     DismissAll,
+    ActivateLatest,
 }
 
 impl Action {
-    /// The events this action sends to `state`. Empty when nothing is queued.
+    /// The events this action sends to `state`. Empty when there is
+    /// nothing to act on.
     pub fn events<A>(self, state: &State<A>) -> Vec<Event> {
         match self {
             Action::DismissLatest => state
                 .visible()
-                .last()
-                .map(|(id, _)| Event::Dismiss(id))
+                .map(|(id, _)| id)
+                .max()
+                .map(Event::Dismiss)
                 .into_iter()
                 .collect(),
             Action::DismissAll => state.ids().map(Event::Dismiss).collect(),
+            Action::ActivateLatest => state
+                .visible()
+                .filter(|(_, toast)| toast.action.is_some())
+                .map(|(id, _)| id)
+                .max()
+                .map(Event::Action)
+                .into_iter()
+                .collect(),
         }
     }
 }
 
 impl keys::Action for Action {
-    const ALL: &'static [Self] = &[Action::DismissLatest, Action::DismissAll];
+    const ALL: &'static [Self] = &[
+        Action::DismissLatest,
+        Action::DismissAll,
+        Action::ActivateLatest,
+    ];
 
     fn defaults() -> Keymap<Self> {
         default_keymap()
@@ -409,6 +523,7 @@ impl keys::Action for Action {
         match self {
             Action::DismissLatest => "DismissLatest",
             Action::DismissAll => "DismissAll",
+            Action::ActivateLatest => "ActivateLatest",
         }
     }
 
@@ -416,6 +531,9 @@ impl keys::Action for Action {
         match self {
             Action::DismissLatest => "Closes the newest visible toast.",
             Action::DismissAll => "Closes every toast, including those waiting their turn.",
+            Action::ActivateLatest => {
+                "Presses the action button, such as Undo, of the newest visible toast that has one."
+            }
         }
     }
 }
@@ -426,6 +544,7 @@ impl keys::Action for Action {
 /// | --- | --- |
 /// | `Escape` | [`Action::DismissLatest`] |
 /// | `Shift+Escape` | [`Action::DismissAll`] |
+/// | `Alt+Z` | [`Action::ActivateLatest`] |
 ///
 /// Escape often closes dialogs and menus too, so resolve the toast keymap
 /// after any overlay that should take Escape first.
@@ -433,6 +552,7 @@ pub fn default_keymap() -> Keymap<Action> {
     Keymap::new()
         .bind(Chord::named(Named::Escape), Action::DismissLatest)
         .bind(Chord::named(Named::Escape).shift(), Action::DismissAll)
+        .bind(Chord::character('z').alt(), Action::ActivateLatest)
 }
 
 /// Owns the toast channel. Emits [`Event::Ready`] first, then batches.
@@ -545,8 +665,15 @@ impl<'a, Message: Clone + 'a, A> From<Toasts<'a, Message, A>> for Element<'a, Me
 
         let cards = state.visible().map(|(id, toast)| card(id, toast, &emit));
 
+        let cards = column(cards).spacing(space::SM).width(WIDTH);
+        // Hovering the toasts pauses their countdowns.
+        let cards: Element<'a, Message> = match (emit(Event::Pause), emit(Event::Resume)) {
+            (Some(pause), Some(resume)) => mouse_area(cards).on_enter(pause).on_exit(resume).into(),
+            _ => cards.into(),
+        };
+
         let (align_x, align_y) = position.alignment();
-        let layer = container(column(cards).spacing(space::SM).width(WIDTH))
+        let layer = container(cards)
             .padding(space::LG)
             .width(Length::Fill)
             .height(Length::Fill)
@@ -818,7 +945,13 @@ mod tests {
         let keymap = default_keymap();
         assert_eq!(press(&keymap, "Escape"), Some(Action::DismissLatest));
         assert_eq!(press(&keymap, "Shift+Escape"), Some(Action::DismissAll));
+        assert_eq!(press(&keymap, "Alt+Z"), Some(Action::ActivateLatest));
         assert_eq!(press(&keymap, "Ctrl+Escape"), None);
+        assert_eq!(press(&keymap, "Z"), None);
+        for action in <Action as keys::Action>::ALL {
+            assert!(!keymap.chords(action).is_empty(), "{action:?}");
+            assert!(keys::Action::description(*action).ends_with('.'));
+        }
 
         let custom = keymap
             .unbind(&"Shift+Escape".parse().unwrap())
@@ -841,6 +974,123 @@ mod tests {
         }
         assert_eq!(titles(&state), ["a", "c"]);
         assert!(Action::DismissLatest.events(&State::new()).is_empty());
+    }
+
+    #[test]
+    fn action_toasts_last_at_least_the_action_duration() {
+        assert_eq!(toast("a").action("Undo").lifetime(), Some(ACTION_DURATION));
+        let long = Duration::from_secs(30);
+        assert_eq!(
+            toast("a").action("Undo").duration(long).lifetime(),
+            Some(long)
+        );
+        assert_eq!(toast("a").action("Undo").persistent().lifetime(), None);
+        assert_eq!(toast("a").lifetime(), Some(DEFAULT_DURATION));
+
+        let start = Instant::now();
+        let mut state = State::new();
+        let _ = state.push(toast("Deleted").action("Undo"));
+        let _ = state.tick(start);
+        assert!(state.tick(start + DEFAULT_DURATION).is_empty());
+        assert_eq!(state.tick(start + ACTION_DURATION).len(), 1);
+    }
+
+    #[test]
+    fn an_action_toast_takes_the_place_of_the_newest_plain_one() {
+        let start = Instant::now();
+        let mut state = State::new();
+        for title in ["a", "b", "c", "d"] {
+            let _ = state.push(toast(title));
+        }
+        let _ = state.tick(start);
+        let _ = state.push(toast("Undo me").action("Undo"));
+        assert_eq!(titles(&state), ["a", "b", "Undo me"]);
+        assert_eq!(state.waiting(), 2);
+
+        // "c" went back to waiting, so it counts down afresh once it shows.
+        let _ = state.tick(start + Duration::from_secs(1));
+        let _ = state.tick(start + DEFAULT_DURATION);
+        assert_eq!(titles(&state), ["Undo me", "c", "d"]);
+        assert!(state.tick(start + Duration::from_secs(9)).is_empty());
+        assert_eq!(state.tick(start + DEFAULT_DURATION * 2).len(), 2);
+    }
+
+    #[test]
+    fn action_toasts_wait_ahead_of_plain_ones_when_every_visible_toast_has_an_action() {
+        let mut state = State::new().with_limit(2);
+        let _ = state.push(toast("plain"));
+        let _ = state.push(toast("one").action("Undo"));
+        let _ = state.push(toast("two").action("Undo"));
+        assert_eq!(titles(&state), ["one", "two"]);
+        let _ = state.push(toast("three").action("Undo"));
+        let order: Vec<_> = state
+            .entries
+            .iter()
+            .map(|entry| entry.toast.title.as_str())
+            .collect();
+        assert_eq!(order, ["one", "two", "three", "plain"]);
+    }
+
+    #[test]
+    fn a_plain_toast_with_room_just_joins_the_end() {
+        let mut state = State::new();
+        let _ = state.push(toast("one").action("Undo"));
+        let _ = state.push(toast("plain"));
+        let _ = state.push(toast("two").action("Undo"));
+        assert_eq!(titles(&state), ["one", "plain", "two"]);
+    }
+
+    #[test]
+    fn hovering_pauses_every_countdown() {
+        let start = Instant::now();
+        let mut state = State::new();
+        let id = state.push(toast("a").duration(Duration::from_secs(2)));
+        let _ = state.tick(start);
+
+        let _ = state.update(Event::Pause);
+        assert!(state.is_paused());
+        assert!(state.needs_tick());
+        assert!(state.tick(start + Duration::from_secs(1)).is_empty());
+        assert!(state.tick(start + Duration::from_secs(10)).is_empty());
+
+        let _ = state.update(Event::Resume);
+        assert!(!state.is_paused());
+        // The pause began as the countdown started, so both seconds are left.
+        let resumed = start + Duration::from_secs(10);
+        assert!(state.tick(resumed + Duration::from_millis(1900)).is_empty());
+        assert_eq!(state.tick(resumed + Duration::from_secs(2)), vec![id]);
+    }
+
+    #[test]
+    fn the_pause_ends_when_the_last_toast_closes() {
+        let mut state = State::new();
+        let id = state.push(toast("a"));
+        let _ = state.update(Event::Pause);
+        let _ = state.dismiss(id);
+        assert!(!state.is_paused());
+    }
+
+    #[test]
+    fn activate_latest_presses_the_newest_visible_action() {
+        let mut state: State<Undo> = State::default();
+        assert!(Action::ActivateLatest.events(&state).is_empty());
+        let _ = state.push(toast("plain"));
+        assert!(Action::ActivateLatest.events(&state).is_empty());
+
+        let _ = state.push_with(toast("first").action("Undo"), Undo::Restore("a"));
+        let second = state.push_with(toast("second").action("Undo"), Undo::Restore("b"));
+        let _ = state.push(toast("newer plain"));
+        let events = Action::ActivateLatest.events(&state);
+        assert!(matches!(events.as_slice(), [Event::Action(id)] if *id == second));
+
+        let outputs: Vec<_> = events
+            .into_iter()
+            .filter_map(|event| state.update(event))
+            .collect();
+        assert!(matches!(
+            outputs.as_slice(),
+            [Output::Payload(Undo::Restore("b"))]
+        ));
     }
 
     #[test]

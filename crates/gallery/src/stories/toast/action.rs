@@ -1,6 +1,7 @@
 use iced::widget::{column, text};
 use iced::{Element, Subscription};
-use iced_cube::overlay::toast::{self, Position, toast, toasts};
+use iced_cube::keys::{self, Keymap};
+use iced_cube::overlay::toast::{self, Action, Position, toast, toasts};
 use iced_cube::primitives::button::Variant;
 use iced_cube::{button, lucide};
 
@@ -9,6 +10,7 @@ pub enum Message {
     Archive,
     Unarchive,
     Toast(toast::Event),
+    Key(keys::Event),
 }
 
 #[derive(Debug)]
@@ -16,16 +18,23 @@ pub struct Example {
     inbox: u32,
     // Undo buttons hand back the message that reverses the archive.
     toasts: toast::State<Message>,
+    keymap: Keymap<Action>,
 }
 
 impl Default for Example {
     fn default() -> Self {
         let mut toasts = toast::State::default();
         toasts.push_with(archived().persistent(), Message::Unarchive);
-        Self { inbox: 11, toasts }
+        Self {
+            inbox: 11,
+            toasts,
+            keymap: toast::default_keymap(),
+        }
     }
 }
 
+// A toast with an action stays at least ten seconds, and pauses while the
+// pointer is over it.
 fn archived() -> toast::Toast {
     toast("Conversation archived").action("Undo")
 }
@@ -43,6 +52,15 @@ impl Example {
                     self.update(message);
                 }
             }
+            // Alt+Z presses Undo on the newest toast.
+            Message::Key(key) => {
+                let Some(action) = self.keymap.resolve_event(&key) else {
+                    return;
+                };
+                for event in action.events(&self.toasts) {
+                    self.update(Message::Toast(event));
+                }
+            }
         }
     }
 
@@ -55,6 +73,7 @@ impl Example {
                 .icon(lucide!(Archive))
                 .variant(Variant::Secondary)
                 .on_press_maybe(archive),
+            text("Alt+Z undoes the newest archive.").size(14),
         ]
         .spacing(12);
 
@@ -65,6 +84,9 @@ impl Example {
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
-        toast::timer(&self.toasts).map(Message::Toast)
+        Subscription::batch([
+            toast::timer(&self.toasts).map(Message::Toast),
+            keys::subscription().map(Message::Key),
+        ])
     }
 }

@@ -16,13 +16,13 @@ api:
   - name: ".description(text) / .variant(Variant)"
     description: "Adds a second line. Variants are Default, Success and Destructive."
   - name: ".action(label)"
-    description: "Adds a button. Pressing it closes the toast and returns Output::Action."
+    description: "Adds a button. Pressing it closes the toast and returns Output::Action. A toast with an action stays at least ACTION_DURATION (10 seconds) and shows ahead of toasts waiting their turn."
   - name: ".duration(duration) / .persistent()"
     description: "Changes how long the toast stays, or keeps it until it is closed."
   - name: "toast::State"
     description: "The queue. At most three toasts show at once by default; change it with .with_limit(n). State::new() makes a queue without payloads; State::<Message>::default() makes one whose action buttons can hand back your messages."
   - name: "state.update(Event)"
-    description: "Handles Ready, Received, Dismiss, Action and Tick. Returns Output::Ready(sender), Output::Payload(value) for a toast queued with push_with, or Output::Action(id, toast) for any other action."
+    description: "Handles Ready, Received, Dismiss, Action, Tick, Pause and Resume. Returns Output::Ready(sender), Output::Payload(value) for a toast queued with push_with, or Output::Action(id, toast) for any other action."
   - name: "state.push(toast)"
     description: "Queues a toast from the UI thread without the channel, and returns its Id."
   - name: "state.push_with(toast, payload)"
@@ -30,7 +30,11 @@ api:
   - name: "state.dismiss(id)"
     description: "Removes a toast, visible or waiting, and returns it."
   - name: "state.tick(now)"
-    description: "Closes toasts whose time is up at now and starts the countdown of newly visible ones. Returns the ids that closed."
+    description: "Closes toasts whose time is up at now and starts the countdown of newly visible ones. While paused it adds the time since the last tick back to every countdown. Returns the ids that closed."
+  - name: "state.is_paused()"
+    description: "Whether the pointer is over the toasts, which stops every countdown until it leaves."
+  - name: "toast.lifetime()"
+    description: "How long the toast stays once shown, after the action minimum is applied, or None for a persistent toast."
   - name: "state.visible() / state.waiting() / state.len()"
     description: "The visible toasts with their ids, how many are queued behind them, and the total."
   - name: "toast::subscription()"
@@ -48,7 +52,7 @@ api:
   - name: "toast::default_keymap()"
     description: "The default shortcuts as a Keymap<Action>. Bind, unbind or clear chords to change them."
   - name: "action.events(&state)"
-    description: "The Dismiss events for a resolved Action (DismissLatest or DismissAll). Pass each one to state.update."
+    description: "The events for a resolved Action: Dismiss for DismissLatest or DismissAll, and Action for ActivateLatest, which presses the button of the newest visible toast that has one. Pass each one to state.update."
   - name: "state.ids()"
     description: "Every queued toast id, visible first."
 ---
@@ -122,6 +126,8 @@ fn main() -> iced::Result {
 [Subscriptions](../../subscriptions/) covers sending from async code, waiting for room instead of dropping, and how the timer stays idle.
 
 An Undo button needs to know what to undo. Rather than keeping toast ids and matching them, queue the toast with `state.push_with(toast, message)` on a `toast::State<Message>`. When the button is pressed, `update` returns `Output::Payload(message)`, and you handle it like any other message, as the action example does. If the toast is dismissed or times out, the message is dropped with it. Payloads only go through `push_with` on the UI thread; toasts from the channel have none.
+
+Undo is easy to miss, so a toast with an action gets more room than the rest. It stays at least ten seconds, it goes ahead of any toasts waiting their turn (taking the place of the newest plain toast if all three slots are full), and `Alt+Z` presses its button through the keymap. Every countdown pauses while the pointer is over the toasts, so nothing closes as you reach for it.
 
 Time only enters the queue through `Tick`, so the queue is easy to test: push toasts, call `state.tick(now)` with any instant, and check what is left. A toast starts counting down when it becomes visible, not when it arrives.
 

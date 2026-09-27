@@ -378,7 +378,7 @@ crate::stories! {
     }
     ToastAction => toast::action {
         id: "toast/action", component: "toast", title: "With action",
-        description: "An undo action in the top right corner that hands back the message which reverses the archive.",
+        description: "An undo action in the top right corner that hands back the message which reverses the archive. It stays at least ten seconds, pauses under the pointer, and Alt+Z presses it.",
         file: "toast/action.rs", height: 340, subscription: true,
     }
     ToastKeyboard => toast::keyboard {
