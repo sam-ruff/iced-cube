@@ -24,12 +24,15 @@ pub mod menubar;
 pub mod popover;
 pub mod progress;
 pub mod radio;
+pub mod resizable_panel;
 pub mod scroll_area;
 pub mod select;
 pub mod separator;
 pub mod showcase;
+pub mod sidebar;
 pub mod slider;
 pub mod spinner;
+pub mod split_pane;
 pub mod stack;
 pub mod status_bar;
 pub mod switch;
@@ -362,6 +365,26 @@ crate::stories! {
         description: "The list in a dialog, opened by a button or Ctrl+K. Escape clears the query, then closes the palette; Ctrl+K passes through the dialog to close it too.",
         file: "command/palette.rs", height: 460, subscription: true, edge: true,
     }
+    SidebarDefault => sidebar::default {
+        id: "sidebar/default", component: "sidebar", title: "Default",
+        description: "A workspace switcher, groups with icons and a badge, a parent with nested items, a collapsible group with a disabled item, and a user menu in the footer. On a phone it becomes a drawer.",
+        file: "sidebar/default.rs", height: 460, edge: true,
+    }
+    SidebarRail => sidebar::rail {
+        id: "sidebar/rail", component: "sidebar", title: "Collapsed to a rail",
+        description: "Icons only, with the label in a tooltip. Ctrl+B toggles the rail through the default keymap, routed from keys::subscription with State::shortcut.",
+        file: "sidebar/rail.rs", height: 360, subscription: true, edge: true,
+    }
+    SidebarDrawer => sidebar::drawer {
+        id: "sidebar/drawer", component: "sidebar", title: "Drawer on narrow windows",
+        description: "Below the breakpoint the sidebar slides over the page on a scrim, opened by the trigger in the bar above the content. This example sets the breakpoint so high that it always shows the drawer.",
+        file: "sidebar/drawer.rs", height: 400, edge: true,
+    }
+    SidebarResizable => sidebar::resizable {
+        id: "sidebar/resizable", component: "sidebar", title: "In a resizable panel",
+        description: "The sidebar fills a collapsible panel beside the page. Dragging the panel below its minimum snaps it to the width of the rail.",
+        file: "sidebar/resizable.rs", height: 360, edge: true,
+    }
     AccordionSingle => accordion::single {
         id: "accordion/single", component: "accordion", title: "Single",
         description: "Opening a section closes the others.",
@@ -371,6 +394,41 @@ crate::stories! {
         id: "accordion/multiple", component: "accordion", title: "Multiple",
         description: "Sections open and close independently.",
         file: "accordion/multiple.rs",
+    }
+    ResizablePanelHorizontal => resizable_panel::horizontal {
+        id: "resizable-panel/horizontal", component: "resizable-panel", title: "Horizontal",
+        description: "Three panels in a row with grips on the handles. Each shows its share of the width.",
+        file: "resizable_panel/horizontal.rs", height: 240,
+    }
+    ResizablePanelVertical => resizable_panel::vertical {
+        id: "resizable-panel/vertical", component: "resizable-panel", title: "Vertical",
+        description: "A header and content stacked in a column.",
+        file: "resizable_panel/vertical.rs",
+    }
+    ResizablePanelNested => resizable_panel::nested {
+        id: "resizable-panel/nested", component: "resizable-panel", title: "Nested",
+        description: "A column of two panels inside a row. Below 480 pixels the row stacks into a column.",
+        file: "resizable_panel/nested.rs",
+    }
+    ResizablePanelCollapsible => resizable_panel::collapsible {
+        id: "resizable-panel/collapsible", component: "resizable-panel", title: "Collapsible with limits",
+        description: "A folder list between 140 pixels and half the width that snaps shut below its threshold, with a button that toggles it.",
+        file: "resizable_panel/collapsible.rs", height: 260,
+    }
+    ResizablePanelKeyboard => resizable_panel::keyboard {
+        id: "resizable-panel/keyboard", component: "resizable-panel", title: "Keyboard shortcuts",
+        description: "A focused handle resolves the default keymap, with Page Up and Page Down added. A press focuses the handle, and so does widget::operation::focus with its id.",
+        file: "resizable_panel/keyboard.rs", height: 280, task: true,
+    }
+    SplitPaneEditorPreview => split_pane::editor_preview {
+        id: "split-pane/editor-preview", component: "split-pane", title: "Editor and preview",
+        description: "A text editor beside its live preview. Below 480 pixels the two stack.",
+        file: "split_pane/editor_preview.rs", height: 340,
+    }
+    SplitPaneVertical => split_pane::vertical {
+        id: "split-pane/vertical", component: "split-pane", title: "Vertical",
+        description: "A query above its results, each with a minimum height.",
+        file: "split_pane/vertical.rs", height: 340,
     }
     ToastBackgroundJob => toast::background_job {
         id: "toast/background-job", component: "toast", title: "Background job",

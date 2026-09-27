@@ -109,3 +109,75 @@ fn a_long_file_name_ends_in_an_ellipsis_on_a_phone() {
     );
     assert!(name.height <= 20.0, "one line, got {}", name.height);
 }
+
+/// Sends the preview one pointer move and applies what the story sends
+/// back, such as a sidebar noticing the narrow width.
+fn settle(gallery: &mut Gallery) {
+    let messages: Vec<gallery::Message> = {
+        let mut ui = render(gallery);
+        let _ = ui.simulate([iced::Event::Mouse(iced::mouse::Event::CursorMoved {
+            position: iced::Point::new(200.0, 200.0),
+        })]);
+        ui.into_messages().collect()
+    };
+    for message in messages {
+        let _ = gallery.update(message);
+    }
+}
+
+#[test]
+fn the_sidebar_is_a_closed_drawer_on_a_phone() {
+    let mut gallery = open("sidebar/default");
+    settle(&mut gallery);
+    let mut ui = render(&gallery);
+    assert!(ui.find("Dashboard").is_err(), "navigation hidden");
+    let title = ui.find("Everything in this project, in one place.");
+    let title = title.expect("page content").bounds();
+    assert!(
+        title.x < 64.0,
+        "content uses the width, starts at {}",
+        title.x
+    );
+}
+
+#[test]
+fn nested_panels_stack_on_a_phone() {
+    let gallery = open("resizable-panel/nested");
+    let mut ui = render(&gallery);
+    let files = ui.find("Files").expect("files pane").bounds();
+    let editor = ui.find("Editor").expect("editor pane").bounds();
+    let terminal = ui.find("Terminal").expect("terminal pane").bounds();
+    assert!(files.y < editor.y && editor.y < terminal.y, "one column");
+    let centre = |bounds: iced::Rectangle| bounds.x + bounds.width / 2.0;
+    assert!((centre(files) - centre(editor)).abs() < 1.0);
+}
+
+#[test]
+fn the_editor_and_preview_stack_on_a_phone() {
+    let gallery = open("split-pane/editor-preview");
+    let mut ui = render(&gallery);
+    let heading = ui.find("Fixes").expect("preview heading").bounds();
+    assert!(
+        heading.y > 150.0,
+        "preview below the editor at {}",
+        heading.y
+    );
+    assert!(heading.width < PHONE.width, "preview fits the frame");
+}
+
+#[test]
+fn collapsible_panels_keep_their_minimums_on_a_phone() {
+    let gallery = open("resizable-panel/collapsible");
+    let mut ui = render(&gallery);
+    let archive = ui.find("Archive").expect("folders stay open").bounds();
+    let hide = ui.find("Hide").expect("toggle").bounds();
+    assert!(archive.x < hide.x, "folders beside the messages");
+    assert!(hide.height < 24.0, "button label on one line");
+    // The label, the button's own padding, then the pane's padding, the
+    // card's border and the gallery's padding.
+    let right = hide.x + hide.width + 12.0 + 16.0 + 1.0 + 24.0;
+    assert!(
+        right <= PHONE.width,
+        "button fits its pane, ends at {right}"
+    );
+}

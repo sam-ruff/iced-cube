@@ -81,11 +81,17 @@ pub use forms::{field, label};
 pub use layout::accordion;
 #[cfg(feature = "card")]
 pub use layout::card;
+#[cfg(feature = "resizable-panel")]
+pub use layout::resizable_panel;
+#[cfg(feature = "split-pane")]
+pub use layout::split_pane;
 #[cfg(feature = "stack")]
 pub use layout::{hstack, vstack};
 
 #[cfg(feature = "command")]
 pub use navigation::command;
+#[cfg(feature = "sidebar")]
+pub use navigation::sidebar;
 #[cfg(feature = "tabs")]
 pub use navigation::{tab, tabs};
 
