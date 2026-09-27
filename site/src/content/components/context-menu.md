@@ -2,7 +2,7 @@
 title: Context menu
 description: A menu that opens at the pointer when you right-click an area, or at the finger on a long press.
 group: Overlays
-order: 5
+order: 6
 module: overlay::context_menu
 imports: |
   use iced_cube::context_menu::{self, Event, State, context_menu, keyed};

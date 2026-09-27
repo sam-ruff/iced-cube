@@ -111,7 +111,7 @@ A component is not done until all of these exist and pass:
 ---
 title: Button
 description: One sentence on what it is for.
-group: Actions               # Actions | Forms | Layout | Navigation | Overlays | Feedback | Application
+group: Actions               # Actions | Forms | Layout | Navigation | Overlays | Data | Feedback | Application
 order: 1                     # position within the group
 module: primitives::button
 imports: |                   # optional, the use lines a reader needs; defaults to the module path

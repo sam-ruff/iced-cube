@@ -6,7 +6,7 @@ description: Version and stability, supported platforms, minimum Rust and what i
 
 ## Version and stability
 
-iced-cube is at 0.0.1. Expect breaking changes between releases while it is on 0.x: builder methods and variant names may still move as more components arrive. Breaking changes bump the minor version, so a caret requirement such as `iced-cube = "0.1"` will not pick them up by surprise once 0.1 is out.
+iced-cube is still on 0.0.x, and every release may include breaking changes: builder methods and variant names can move as more components arrive. Cargo treats each 0.0.x release as incompatible with the last, so a requirement such as `iced-cube = "0.0.2"` stays on that release until you change it. Read the changelog before you upgrade.
 
 Each release targets one iced version, currently 0.14.
 
@@ -26,16 +26,14 @@ Rust 1.88 or newer, which is what iced 0.14 needs. iced-cube uses the 2024 editi
 
 These are next on the roadmap, roughly in order:
 
-- Popover
-- Dialog
-- Dropdown menu
-- Context menu
-- Combobox
-- Command
-- Sidebar
-- Tree
-- Data table
-- Split pane
+- File tree
+- Property grid
+- Virtual list and virtual tree
+- Log viewer
+- JSON viewer
+- Inspector
+- Document tabs
+- App shell
 
 ## Changelog
 
