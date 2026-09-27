@@ -60,6 +60,7 @@ jobs:
       - name: Check for a pending release
         if: env.skip != 'true'
         run: |
+          set -o pipefail
           npx semantic-release --dry-run | tee dry-run.log
           if grep -q "The next release version is" dry-run.log; then
             echo "release=true" >> "$GITHUB_ENV"

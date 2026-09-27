@@ -113,10 +113,14 @@ jobs:
       actions: write
     steps:
       - name: Dispatch the release workflow
-        run: gh workflow run release.yml --ref main -f sha="$GITHUB_SHA"
+        run: |
+          curl --fail-with-body -sS -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/workflows/release.yml/dispatches" \
+            -d "{\"ref\":\"main\",\"inputs\":{\"sha\":\"$GITHUB_SHA\"}}"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
 
   pages:
     name: Deploy docs site
