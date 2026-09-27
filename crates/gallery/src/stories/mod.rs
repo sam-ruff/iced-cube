@@ -393,12 +393,12 @@ crate::stories! {
     }
     DialogForm => dialog::form {
         id: "dialog/form", component: "dialog", title: "Form and keyboard",
-        description: "Fields inside a small dialog. Tab and Shift+Tab move focus between them through the default keymap, without leaving the dialog.",
+        description: "Fields inside a small dialog. Tab and Shift+Tab move focus between them through the default keymap, without leaving the dialog, and Enter saves through on_confirm.",
         file: "dialog/form.rs", height: 420, edge: true,
     }
     DialogDestructive => dialog::destructive {
         id: "dialog/destructive", component: "dialog", title: "Destructive confirmation",
-        description: "An alert dialog with Cancel and a destructive action. Clicking the scrim does nothing.",
+        description: "An alert dialog with Cancel and a destructive action. Enter confirms, Escape cancels and clicking the scrim does nothing.",
         file: "dialog/destructive.rs", height: 320, edge: true,
     }
     PopoverSettings => popover::settings {

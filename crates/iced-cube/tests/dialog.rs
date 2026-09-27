@@ -344,3 +344,54 @@ fn alert_dialog_ignores_the_scrim_and_cancels_on_escape() {
     let _ = ui.tap_key(Named::Escape);
     assert!(messages(ui).is_empty());
 }
+
+#[test]
+fn enter_confirms_an_alert_dialog() {
+    let mut ui = simulator(confirmation(true));
+    assert_eq!(ui.tap_key(Named::Enter), event::Status::Captured);
+    assert_eq!(messages(ui), vec![Message::Delete]);
+}
+
+#[test]
+fn enter_follows_the_keymap() {
+    let element: Element<'_, Message> =
+        alert_dialog(base(), "Delete project?", "This cannot be undone.")
+            .open(true)
+            .on_cancel(Message::Dismiss)
+            .on_confirm(Message::Delete)
+            .keymap(
+                dialog::default_keymap()
+                    .unbind(&iced_cube::Chord::named(Named::Enter))
+                    .bind(iced_cube::Chord::named(Named::F2), dialog::Action::Confirm),
+            )
+            .into();
+    let mut ui = simulator(element);
+    let _ = ui.tap_key(Named::Enter);
+    let _ = ui.tap_key(Named::F2);
+    assert_eq!(messages(ui), vec![Message::Delete]);
+}
+
+#[test]
+fn a_field_that_submits_on_enter_keeps_the_key() {
+    let submit = || -> Element<'static, Message> {
+        dialog(base())
+            .open(true)
+            .title("Rename")
+            .body(
+                text_input("Name", "")
+                    .on_input(Message::Name)
+                    .on_submit(Message::Save),
+            )
+            .on_confirm(Message::Delete)
+            .into()
+    };
+    let mut ui = simulator(submit());
+    nudge(&mut ui);
+    let _ = ui.tap_key(Named::Enter);
+    assert_eq!(messages(ui), vec![Message::Save]);
+
+    let plain: Element<'_, Message> = dialog(base()).open(true).title("Plain").into();
+    let mut ui = simulator(plain);
+    let _ = ui.tap_key(Named::Enter);
+    assert!(messages(ui).is_empty(), "no on_confirm, no message");
+}

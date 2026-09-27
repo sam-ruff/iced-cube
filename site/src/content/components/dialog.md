@@ -24,6 +24,8 @@ api:
     description: "Adds a button to the footer, which lines them up on the right. Add the main action last."
   - name: ".on_dismiss(message)"
     description: "Emitted by Escape, a click on the scrim and the close button. Without it the close button renders disabled."
+  - name: ".on_confirm(message)"
+    description: "Emitted by Enter, through the keymap's Confirm action, usually the same message as the main footer action. Without it Enter does nothing. A field inside that submits on Enter keeps the key."
   - name: ".dismiss_on_escape(bool) / .dismiss_on_scrim(bool)"
     description: "Turns either way of dismissing off. Both default to true."
   - name: ".close_button(bool)"
@@ -41,11 +43,11 @@ api:
   - name: ".cancel(label) / .confirm(label)"
     description: "The button labels. They default to Cancel and Continue."
   - name: ".on_cancel(message) / .on_confirm(message)"
-    description: "Emitted by the buttons. Escape also cancels unless .dismiss_on_escape(false) is set."
+    description: "Emitted by the buttons. Enter also confirms, and Escape also cancels unless .dismiss_on_escape(false) is set."
   - name: "dialog::default_keymap()"
     description: "The default shortcuts as a Keymap<Action>. Bind, unbind or clear chords to change them."
   - name: "action.effect(dismiss_on_escape)"
-    description: "What a resolved Action does to an open dialog: Effect::Dismiss or Effect::Focus(direction)."
+    description: "What a resolved Action does to an open dialog: Effect::Dismiss, Effect::Confirm or Effect::Focus(direction)."
   - name: "dialog::CLOSE_BUTTON_ID"
     description: "The widget id of the close button, for clicking it in tests."
   - name: "surface_style(tokens) / scrim_style(tokens)"
@@ -54,7 +56,7 @@ api:
 
 Wrap the root of your view in `dialog`, so the scrim covers the whole window. While the dialog is open, the content underneath still draws but gets no clicks, hover or key presses. It keeps its widget state, such as scroll positions, when the dialog opens and closes.
 
-Use a dialog for a short task that needs attention before people go back to what they were doing. For a destructive confirmation, use `alert_dialog`: it has no close button and ignores clicks on the scrim, so the only ways out are Cancel, Escape or the destructive action. Turn Escape off with `.dismiss_on_escape(false)` when even that is too easy.
+Use a dialog for a short task that needs attention before people go back to what they were doing. For a destructive confirmation, use `alert_dialog`: it has no close button and ignores clicks on the scrim, so the only ways out are Cancel, Escape or the destructive action. Enter confirms it, so the whole answer can come from the keyboard. Turn Escape off with `.dismiss_on_escape(false)` when even that is too easy.
 
 The dialog handles its own keys, so it needs no subscription. When it opens, it focuses its first text field and unfocuses anything underneath. Tab and Shift+Tab then move between the text fields inside it and wrap at either end, so focus never leaves the dialog. It captures every key press its content leaves, so app-wide shortcuts from `keys::subscription` cannot change tabs, sliders or menus behind the scrim. Let a chosen shortcut through with `.pass_through(...)`.
 
@@ -62,6 +64,6 @@ Menus, comboboxes and command lists inside a dialog get keys and clicks first. E
 
 Some limits come from iced 0.14 itself:
 
-- Only text fields and text editors can take keyboard focus. Tab moves between those, but it skips buttons, and Enter or Space cannot press a button. Give a form an `on_submit` on its last field if people should be able to save from the keyboard.
+- Only text fields and text editors can take keyboard focus. Tab moves between those, but it skips buttons, and Space cannot press a button. Set `.on_confirm(...)` so Enter runs the main action, or give a field an `on_submit` of its own.
 - A focused text field takes the first Escape to lose focus, so it takes a second Escape to dismiss the dialog.
 - There is no screen reader support, so the dialog's title and description are not announced.

@@ -39,8 +39,9 @@
 //! ```
 //!
 //! The dialog handles its own keys through a [`Keymap`], so an app needs no
-//! subscription for it: Escape dismisses, and Tab and Shift+Tab move focus
-//! between the text fields inside the dialog without leaving it.
+//! subscription for it: Escape dismisses, Enter sends the
+//! [`on_confirm`](Dialog::on_confirm) message, and Tab and Shift+Tab move
+//! focus between the text fields inside the dialog without leaving it.
 //!
 //! While it is open the dialog captures every key press, after the content
 //! inside it has had its turn, so app-wide shortcuts from
@@ -96,6 +97,7 @@ impl Size {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Action {
     Close,
+    Confirm,
     FocusNext,
     FocusPrevious,
 }
@@ -112,6 +114,8 @@ pub enum Direction {
 pub enum Effect {
     /// Emit the `on_dismiss` message.
     Dismiss,
+    /// Emit the `on_confirm` message.
+    Confirm,
     /// Move focus to another text field inside the dialog.
     Focus(Direction),
 }
@@ -122,6 +126,7 @@ impl Action {
     pub fn effect(self, dismiss_on_escape: bool) -> Option<Effect> {
         match self {
             Action::Close => dismiss_on_escape.then_some(Effect::Dismiss),
+            Action::Confirm => Some(Effect::Confirm),
             Action::FocusNext => Some(Effect::Focus(Direction::Next)),
             Action::FocusPrevious => Some(Effect::Focus(Direction::Previous)),
         }
@@ -129,7 +134,12 @@ impl Action {
 }
 
 impl keys::Action for Action {
-    const ALL: &'static [Self] = &[Action::Close, Action::FocusNext, Action::FocusPrevious];
+    const ALL: &'static [Self] = &[
+        Action::Close,
+        Action::Confirm,
+        Action::FocusNext,
+        Action::FocusPrevious,
+    ];
 
     fn defaults() -> Keymap<Self> {
         default_keymap()
@@ -138,6 +148,7 @@ impl keys::Action for Action {
     fn name(self) -> &'static str {
         match self {
             Action::Close => "Close",
+            Action::Confirm => "Confirm",
             Action::FocusNext => "FocusNext",
             Action::FocusPrevious => "FocusPrevious",
         }
@@ -146,6 +157,9 @@ impl keys::Action for Action {
     fn description(self) -> &'static str {
         match self {
             Action::Close => "Dismisses the dialog, unless Escape dismissal is turned off.",
+            Action::Confirm => {
+                "Sends the dialog's confirm message, such as the alert dialog's destructive action."
+            }
             Action::FocusNext => {
                 "Focuses the next text field in the dialog, wrapping from the last to the first."
             }
@@ -161,16 +175,20 @@ impl keys::Action for Action {
 /// | Keys | Action |
 /// | --- | --- |
 /// | `Escape` | [`Action::Close`] |
+/// | `Enter` | [`Action::Confirm`] |
 /// | `Tab` | [`Action::FocusNext`] |
 /// | `Shift+Tab` | [`Action::FocusPrevious`] |
 ///
 /// The dialog resolves these itself while it is open, after the content
 /// inside it, so a menu or combobox in the dialog closes on Escape before
-/// the dialog does. A focused text field takes the first Escape to lose
-/// focus, so it takes a second Escape to dismiss the dialog.
+/// the dialog does, and a field that submits on Enter keeps it. A focused
+/// text field takes the first Escape to lose focus, so it takes a second
+/// Escape to dismiss the dialog. Enter does nothing in a dialog without
+/// [`Dialog::on_confirm`].
 pub fn default_keymap() -> Keymap<Action> {
     Keymap::new()
         .bind(Chord::named(Named::Escape), Action::Close)
+        .bind(Chord::named(Named::Enter), Action::Confirm)
         .bind(Chord::named(Named::Tab), Action::FocusNext)
         .bind(Chord::named(Named::Tab).shift(), Action::FocusPrevious)
 }
@@ -184,6 +202,7 @@ pub struct Dialog<'a, Message> {
     body: Option<Element<'a, Message>>,
     actions: Vec<Element<'a, Message>>,
     on_dismiss: Option<Message>,
+    on_confirm: Option<Message>,
     dismiss_on_escape: bool,
     dismiss_on_scrim: bool,
     close_button: bool,
@@ -221,6 +240,7 @@ pub fn dialog<'a, Message>(base: impl Into<Element<'a, Message>>) -> Dialog<'a, 
         body: None,
         actions: Vec::new(),
         on_dismiss: None,
+        on_confirm: None,
         dismiss_on_escape: true,
         dismiss_on_scrim: true,
         close_button: true,
@@ -272,6 +292,14 @@ impl<'a, Message> Dialog<'a, Message> {
     /// Whether Escape dismisses the dialog. Defaults to `true`.
     pub fn dismiss_on_escape(mut self, dismiss: bool) -> Self {
         self.dismiss_on_escape = dismiss;
+        self
+    }
+
+    /// The message [`Action::Confirm`] (Enter) emits, usually the same as
+    /// the main footer action. Without it Enter does nothing. A field
+    /// inside the dialog that submits on Enter keeps the key.
+    pub fn on_confirm(mut self, message: Message) -> Self {
+        self.on_confirm = Some(message);
         self
     }
 
@@ -336,6 +364,7 @@ impl<'a, Message: Clone + 'a> From<Dialog<'a, Message>> for Element<'a, Message>
             body,
             actions,
             on_dismiss,
+            on_confirm,
             dismiss_on_escape,
             dismiss_on_scrim,
             close_button,
@@ -382,6 +411,7 @@ impl<'a, Message: Clone + 'a> From<Dialog<'a, Message>> for Element<'a, Message>
             keymap,
             pass_through,
             on_escape: on_dismiss.filter(|_| dismiss_on_escape),
+            on_confirm,
         })
     }
 }
@@ -627,6 +657,7 @@ struct Scope<'a, Message> {
     keymap: Keymap<Action>,
     pass_through: Vec<Chord>,
     on_escape: Option<Message>,
+    on_confirm: Option<Message>,
 }
 
 /// The key and modifiers of a key press or release.
@@ -793,6 +824,12 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for Scope<'_, Message> {
         match effect {
             Effect::Dismiss => {
                 let Some(message) = self.on_escape.clone() else {
+                    return;
+                };
+                shell.publish(message);
+            }
+            Effect::Confirm => {
+                let Some(message) = self.on_confirm.clone() else {
                     return;
                 };
                 shell.publish(message);
@@ -1031,7 +1068,7 @@ impl<'a, Message> AlertDialog<'a, Message> {
         self
     }
 
-    /// Emitted by the destructive button.
+    /// Emitted by the destructive button and by Enter.
     pub fn on_confirm(mut self, message: Message) -> Self {
         self.on_confirm = Some(message);
         self
@@ -1069,7 +1106,7 @@ impl<'a, Message: Clone + 'a> From<AlertDialog<'a, Message>> for Dialog<'a, Mess
             .action(
                 button::button(alert.confirm)
                     .variant(button::Variant::Destructive)
-                    .on_press_maybe(alert.on_confirm),
+                    .on_press_maybe(alert.on_confirm.clone()),
             )
             .dismiss_on_escape(alert.dismiss_on_escape)
             .dismiss_on_scrim(false)
@@ -1078,6 +1115,9 @@ impl<'a, Message: Clone + 'a> From<AlertDialog<'a, Message>> for Dialog<'a, Mess
             .keymap(alert.keymap);
         if let Some(message) = alert.on_cancel {
             dialog = dialog.on_dismiss(message);
+        }
+        if let Some(message) = alert.on_confirm {
+            dialog = dialog.on_confirm(message);
         }
         dialog
     }
@@ -1169,6 +1209,7 @@ mod tests {
         assert!(!d.close_button);
         assert!(d.dismiss_on_escape);
         assert_eq!(d.on_dismiss, Some(1));
+        assert_eq!(d.on_confirm, Some(2), "Enter confirms");
         assert_eq!(d.actions.len(), 2);
     }
 
@@ -1178,6 +1219,7 @@ mod tests {
             alert_dialog::<u8>(text("Base"), "Title", "Description").dismiss_on_escape(false),
         );
         assert!(d.on_dismiss.is_none());
+        assert!(d.on_confirm.is_none());
         assert!(!d.dismiss_on_escape);
     }
 
@@ -1190,6 +1232,8 @@ mod tests {
     fn default_keymap_and_overrides() {
         let keymap = default_keymap();
         assert_eq!(press(&keymap, "Escape"), Some(Action::Close));
+        assert_eq!(press(&keymap, "Enter"), Some(Action::Confirm));
+        assert_eq!(press(&keymap, "Shift+Enter"), None);
         assert_eq!(press(&keymap, "Tab"), Some(Action::FocusNext));
         assert_eq!(press(&keymap, "Shift+Tab"), Some(Action::FocusPrevious));
         assert_eq!(press(&keymap, "Ctrl+Tab"), None);
@@ -1212,6 +1256,7 @@ mod tests {
         assert_eq!(Action::Close.effect(true), Some(Effect::Dismiss));
         assert_eq!(Action::Close.effect(false), None);
         for allowed in [true, false] {
+            assert_eq!(Action::Confirm.effect(allowed), Some(Effect::Confirm));
             assert_eq!(
                 Action::FocusNext.effect(allowed),
                 Some(Effect::Focus(Direction::Next))
