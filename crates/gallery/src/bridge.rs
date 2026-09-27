@@ -41,6 +41,39 @@ pub fn report_height(height: f32) {
 #[cfg(not(target_arch = "wasm32"))]
 pub fn report_height(_height: f32) {}
 
+/// Tells the hosting page which theme the story picked for itself, as
+/// `{ "type": "app-theme", "value": "light" | "dark" | "system" }`, so the
+/// page chrome can follow it. `None` means the story follows the host again.
+#[cfg(target_arch = "wasm32")]
+pub fn report_theme(choice: Option<ThemeChoice>) {
+    web::post("app-theme", theme_value(choice));
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn report_theme(_choice: Option<ThemeChoice>) {}
+
+/// The value [`report_theme`] posts.
+pub fn theme_value(choice: Option<ThemeChoice>) -> &'static str {
+    match choice {
+        None => "system",
+        Some(ThemeChoice::Light) => "light",
+        Some(ThemeChoice::Dark) => "dark",
+    }
+}
+
+/// Writes text to the clipboard. iced has no clipboard in the browser, so
+/// there it goes through the page's clipboard API instead.
+#[cfg(target_arch = "wasm32")]
+pub fn copy<T>(text: String) -> iced::Task<T> {
+    web::copy(&text);
+    iced::Task::none()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn copy<T>(text: String) -> iced::Task<T> {
+    iced::clipboard::write(text)
+}
+
 #[cfg(target_arch = "wasm32")]
 mod web {
     use iced::futures::channel::mpsc;
@@ -93,6 +126,25 @@ mod web {
         let _ = js_sys::Reflect::set(&message, &"height".into(), &f64::from(height).into());
         let _ = parent.post_message(&message, "*");
     }
+
+    pub fn post(kind: &str, value: &str) {
+        let Some(parent) = web_sys::window().and_then(|window| window.parent().ok().flatten())
+        else {
+            return;
+        };
+        let message = js_sys::Object::new();
+        let _ = js_sys::Reflect::set(&message, &"type".into(), &kind.into());
+        let _ = js_sys::Reflect::set(&message, &"value".into(), &value.into());
+        let _ = parent.post_message(&message, "*");
+    }
+
+    pub fn copy(text: &str) {
+        let Some(window) = web_sys::window() else {
+            return;
+        };
+        // The promise settles on its own; a refusal leaves the clipboard as it was.
+        let _ = window.navigator().clipboard().write_text(text);
+    }
 }
 
 #[cfg(test)]
@@ -109,6 +161,13 @@ mod tests {
             parse("theme", "light"),
             Some(Event::Theme(ThemeChoice::Light))
         );
+    }
+
+    #[test]
+    fn app_theme_values_match_what_the_demo_page_reads() {
+        assert_eq!(theme_value(None), "system");
+        assert_eq!(theme_value(Some(ThemeChoice::Light)), "light");
+        assert_eq!(theme_value(Some(ThemeChoice::Dark)), "dark");
     }
 
     #[test]

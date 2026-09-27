@@ -102,7 +102,7 @@ impl Gallery {
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::Story(message) => self.story.update(message),
+            Message::Story(message) => return self.story.update(message).map(Message::Story),
             Message::Select(id) => {
                 self.selected = id;
                 self.story = open(id);

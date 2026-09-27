@@ -31,6 +31,8 @@ pub struct Meta {
 /// Optional settings follow `file`, in this order:
 /// - `height: 200` sets the preview height, which defaults to [`DEFAULT_HEIGHT`].
 /// - `subscription: true` for a story with `subscription(&self) -> Subscription<Message>`.
+/// - `task: true` for a story whose `update` returns `Task<Message>`, such as
+///   one that writes to the clipboard.
 /// - `theme: true` for a story with `theme(&self) -> Option<Theme>`, which
 ///   replaces the gallery theme while the story is open.
 /// - `edge: true` drops the gallery padding so the story fills the preview,
@@ -43,6 +45,7 @@ macro_rules! stories {
             description: $description:literal, file: $file:literal
             $(, height: $height:literal)?
             $(, subscription: $subscription:tt)?
+            $(, task: $task:tt)?
             $(, theme: $theme:tt)?
             $(, edge: $edge:literal)? $(,)?
         }
@@ -81,11 +84,13 @@ macro_rules! stories {
                 }
             }
 
-            pub fn update(&mut self, message: AnyMessage) {
+            pub fn update(&mut self, message: AnyMessage) -> iced::Task<AnyMessage> {
                 match (self, message) {
-                    $((Self::$variant(story), AnyMessage::$variant(message)) => story.update(message),)*
+                    $((Self::$variant(story), AnyMessage::$variant(message)) => {
+                        $crate::story_update!(story, message, $variant $(, $task)?)
+                    })*
                     #[allow(unreachable_patterns)]
-                    _ => {}
+                    _ => iced::Task::none(),
                 }
             }
 
@@ -149,6 +154,19 @@ macro_rules! story_subscription {
     ($story:ident, $variant:ident $(, false)?) => {
         iced::Subscription::none()
     };
+}
+
+/// Expands to a story's update, wrapping a plain one in `Task::none()`.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! story_update {
+    ($story:ident, $message:ident, $variant:ident, true) => {
+        $story.update($message).map(AnyMessage::$variant)
+    };
+    ($story:ident, $message:ident, $variant:ident $(, false)?) => {{
+        $story.update($message);
+        iced::Task::none()
+    }};
 }
 
 /// Expands to a story's theme, or none when it has not opted in.
