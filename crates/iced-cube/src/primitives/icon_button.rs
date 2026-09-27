@@ -1,7 +1,7 @@
 //! Square, icon-only buttons with a label and an optional pressed state.
 //!
 //! Icon buttons share their [`Size`] and colours with
-//! [`button`](crate::primitives::button), and every button variant except
+//! [`button`](fn@crate::primitives::button), and every button variant except
 //! `Link`. A pressed icon button stays highlighted, which suits toolbar
 //! toggles such as bold or italic.
 

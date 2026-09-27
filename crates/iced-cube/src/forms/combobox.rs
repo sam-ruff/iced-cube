@@ -435,7 +435,7 @@ impl<'a, T, Message> Combobox<'a, T, Message> {
     }
 
     /// The field's height, padding and text size, shared with
-    /// [`input`](crate::primitives::input). Defaults to [`Size::Md`].
+    /// [`input`](fn@crate::primitives::input). Defaults to [`Size::Md`].
     pub fn size(mut self, size: Size) -> Self {
         self.size = size;
         self
@@ -448,7 +448,7 @@ impl<'a, T, Message> Combobox<'a, T, Message> {
     }
 
     /// Draws the field with the destructive border, as
-    /// [`input`](crate::primitives::input) does, for example when a required
+    /// [`input`](fn@crate::primitives::input) does, for example when a required
     /// value is missing.
     pub fn invalid(mut self, invalid: bool) -> Self {
         self.invalid = invalid;

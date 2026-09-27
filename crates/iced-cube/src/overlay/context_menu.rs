@@ -2,7 +2,7 @@
 //! the finger on a long press.
 //!
 //! It uses the dropdown menu's entries, rows and navigation: build the
-//! entries with [`dropdown_menu::item`](crate::overlay::dropdown_menu::item)
+//! entries with [`dropdown_menu::item`]
 //! and friends. [`State`] adds where the menu opened. On a touch screen, a
 //! finger held still on the area for [`LONG_PRESS`] opens it. From the
 //! keyboard, Shift+F10 or the Menu key opens it just below the area, aligned

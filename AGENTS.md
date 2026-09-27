@@ -22,6 +22,8 @@ cargo fmt --all
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace                         # unit, system and snapshot tests
 scripts/check-features.sh                      # iced-cube with each component feature on its own
+RUSTDOCFLAGS="-D warnings" cargo doc -p iced-cube --no-deps   # CI fails on any rustdoc warning
+cargo package --locked -p iced-cube            # what crates.io will receive
 cargo run -p gallery                           # native gallery
 cargo run -p gallery -- button/variants --dark # open one story
 scripts/build-wasm.sh                          # wasm previews into site/public/wasm
