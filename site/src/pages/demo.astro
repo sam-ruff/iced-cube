@@ -37,10 +37,17 @@ const preview = href("/preview/");
     <header class="bar">
       <a class="home" href={href("/")} aria-label="iced-cube home"><Logo /></a>
       <p class="title"><strong>Demo</strong><span class="sep" aria-hidden="true">-</span><span class="lead">download the desktop versions</span></p>
+      <p class="note" data-download-note hidden>Arrives with the next release</p>
       <nav class="downloads" aria-label="Desktop downloads">
         {
           downloads.map(({ os, file, logo }) => (
-            <a class="download" href={`${releases}/${file}`} aria-label={`Download the demo for ${os}`}>
+            <a
+              class="download"
+              href={`${releases}/${file}`}
+              data-asset={file}
+              data-os={os}
+              aria-label={`Download the demo for ${os}`}
+            >
               {logo === "linux" ? (
                 <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false">
                   <path d={siLinux.path} fill="currentColor" />
@@ -60,13 +67,24 @@ const preview = href("/preview/");
       </button>
     </header>
     <main>
-      <iframe id="demo" title="iced-cube demo app" data-src={preview}></iframe>
+      <iframe id="demo" title="iced-cube demo app" data-src={preview} allow="clipboard-write"></iframe>
     </main>
 
     <script>
+      import { LATEST_RELEASE, appTheme, assetAvailability } from "../lib/demo";
+
       const frame = document.querySelector<HTMLIFrameElement>("#demo");
       const root = document.documentElement;
       const theme = () => (root.dataset["theme"] === "dark" ? "dark" : "light");
+
+      const setTheme = (next: "light" | "dark") => {
+        root.dataset["theme"] = next;
+        try {
+          localStorage.setItem("theme", next);
+        } catch {
+          // Private windows may refuse storage; the choice then lasts for this page.
+        }
+      };
 
       if (frame) {
         const params = new URLSearchParams({ story: "showcase/demo", theme: theme(), wheel: "1", keys: "own" });
@@ -74,16 +92,45 @@ const preview = href("/preview/");
         frame.addEventListener("load", () => frame.focus());
       }
 
+      // The page toggle hands the theme to the app, which then follows it.
       document.querySelector("[data-demo-theme]")?.addEventListener("click", () => {
         const next = theme() === "dark" ? "light" : "dark";
-        root.dataset["theme"] = next;
-        try {
-          localStorage.setItem("theme", next);
-        } catch {
-          // Private windows may refuse storage; the choice then lasts for this page.
-        }
+        setTheme(next);
         frame?.contentWindow?.postMessage({ type: "theme", value: next }, "*");
       });
+
+      // A theme picked inside the app carries over to the page, and "Match
+      // system" asks the page for its theme again.
+      window.addEventListener("message", (event) => {
+        if (!frame || event.source !== frame.contentWindow) return;
+        const picked = appTheme(event.data);
+        if (picked === null) return;
+        if (picked === "system") {
+          frame.contentWindow?.postMessage({ type: "theme", value: theme() }, "*");
+          return;
+        }
+        setTheme(picked);
+      });
+
+      // Until a release carries the desktop builds, their links would 404.
+      const links = [...document.querySelectorAll<HTMLAnchorElement>("a[data-asset]")];
+      const note = document.querySelector<HTMLElement>("[data-download-note]");
+      fetch(LATEST_RELEASE, { headers: { Accept: "application/vnd.github+json" } })
+        .then(async (response) => {
+          const body: unknown = await response.json().catch(() => null);
+          for (const link of links) {
+            const file = link.dataset["asset"] ?? "";
+            if (assetAvailability(response.status, body, file) !== "missing") continue;
+            link.removeAttribute("href");
+            link.setAttribute("aria-disabled", "true");
+            link.setAttribute("aria-label", `The ${link.dataset["os"]} download arrives with the next release`);
+            link.title = "Arrives with the next release";
+            if (note) note.hidden = false;
+          }
+        })
+        .catch(() => {
+          // Offline or blocked: leave the links as they are.
+        });
     </script>
   </body>
 </html>
@@ -135,7 +182,26 @@ const preview = href("/preview/");
   .downloads {
     display: flex;
     gap: 8px;
+  }
+
+  .note {
+    margin: 0 0 0 auto;
+    font-size: 12px;
+    color: var(--fg-muted);
+    white-space: nowrap;
+  }
+
+  .note[hidden] + .downloads {
     margin-left: auto;
+  }
+
+  .download[aria-disabled="true"] {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .download[aria-disabled="true"]:hover {
+    background: var(--surface);
   }
 
   .download,
@@ -189,6 +255,13 @@ const preview = href("/preview/");
     .lead,
     .sep {
       display: none;
+    }
+
+    .note {
+      white-space: normal;
+      max-width: 88px;
+      line-height: 1.2;
+      text-align: right;
     }
 
     .download span {
