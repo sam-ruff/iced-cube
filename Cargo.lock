@@ -1112,7 +1112,7 @@ dependencies = [
 
 [[package]]
 name = "iced-cube"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "futures",
  "iced",
