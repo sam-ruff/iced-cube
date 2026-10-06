@@ -105,9 +105,23 @@ fn labels_stay_on_one_line_in_a_narrow_container() {
         }
         let left = ui.find("Left aligned").expect("first item").bounds();
         let right = ui.find("Right aligned").expect("second item").bounds();
-        assert!(
-            right.x > left.x + left.width,
-            "{variant:?} items share a row"
-        );
+        match variant {
+            Variant::Default => assert!(right.y > left.y, "separate toggles wrap"),
+            Variant::Outline => assert!(right.x > left.x + left.width, "segments share a row"),
+        }
     }
+}
+
+#[test]
+fn an_outlined_group_is_as_tall_as_a_button() {
+    let state = State::single([item(0, "A")]);
+    let element: Element<'_, u8> = column![
+        toggle_group(&state).variant(Variant::Outline),
+        iced_cube::button("B"),
+    ]
+    .into();
+    let mut ui = simulator(element);
+    let a = ui.find("A").expect("item").bounds();
+    let b = ui.find("B").expect("button").bounds();
+    assert_eq!(b.y - a.y, 36.0);
 }

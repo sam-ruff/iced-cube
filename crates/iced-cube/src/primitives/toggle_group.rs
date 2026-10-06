@@ -11,7 +11,7 @@
 use iced::border::Radius;
 use iced::keyboard::key::Named;
 use iced::widget::{self, button::Status, container, row};
-use iced::{Background, Border, Element, Length, Theme};
+use iced::{Background, Border, Element, Theme};
 
 use crate::icon::Glyph;
 use crate::keys::{self, Chord, Keymap};
@@ -122,15 +122,20 @@ impl<Id: Copy + PartialEq> State<Id> {
         }
     }
 
-    /// Starts with these items on, skipping unknown and disabled ones. In
-    /// single mode only the first that applies is kept.
+    /// Switches these items on, skipping unknown and disabled ones. In
+    /// single mode the first that applies replaces the selection.
     pub fn with_selected(mut self, ids: impl IntoIterator<Item = Id>) -> Self {
+        let mut replaced = false;
         for id in ids {
             let Some(index) = self.enabled_index(id) else {
                 continue;
             };
-            if self.mode == Mode::Single && self.selected.contains(&true) {
-                break;
+            if self.mode == Mode::Single {
+                if replaced {
+                    break;
+                }
+                self.selected.fill(false);
+                replaced = true;
             }
             self.selected[index] = true;
         }
@@ -391,6 +396,15 @@ where
             on_event,
         } = group;
         let len = state.items.len();
+        // An outlined group draws its border outside the items, so they
+        // shrink by the border to keep the group as tall as a button.
+        let metrics = match variant {
+            Variant::Default => size.metrics(),
+            Variant::Outline => toggle::Metrics {
+                height: size.metrics().height - 2.0 * BORDER,
+                ..size.metrics()
+            },
+        };
 
         let items = state.items.iter().enumerate().map(|(index, entry)| {
             let pressed = state.selected[index];
@@ -403,24 +417,29 @@ where
                 entry.label.as_str(),
                 entry.icon,
                 pressed,
-                size,
+                metrics,
                 message,
                 move |tokens, status| item_style(tokens, variant, position, pressed, status),
             )
         });
 
-        let spacing = match variant {
-            Variant::Default => space::XS,
-            Variant::Outline => 0.0,
-        };
         let enabled = on_event.is_some();
-        natural(
-            container(row(items).spacing(spacing))
-                .width(Length::Shrink)
-                .style(move |theme: &Theme| group_style(&Tokens::of(theme), variant, enabled)),
-        )
+        // Separate toggles wrap onto new lines on a narrow screen; attached
+        // segments stay in one row, so keep outlined groups to a few short
+        // items.
+        match variant {
+            Variant::Default => row(items.map(natural)).spacing(space::XS).wrap().into(),
+            Variant::Outline => natural(
+                container(row(items))
+                    .padding(BORDER)
+                    .style(move |theme: &Theme| group_style(&Tokens::of(theme), variant, enabled)),
+            ),
+        }
     }
 }
+
+/// Width of an outlined group's border.
+const BORDER: f32 = 1.0;
 
 /// The style of one item: a toggle, with square inner corners and no gap
 /// when the group is outlined.
@@ -435,9 +454,9 @@ pub fn item_style(
     if variant == Variant::Default {
         return base;
     }
-    // One pixel inside the group's border, so a pressed segment's fill
-    // follows the rounded corner without covering it.
-    let outer = radius::MD - 1.0;
+    // The items sit inside the group's border, so their outer corners are
+    // rounded by the border less than the group's.
+    let outer = radius::MD - BORDER;
     let radius = match position {
         Position::Only => Radius::from(outer),
         Position::First => Radius::default().left(outer),
@@ -466,7 +485,7 @@ pub fn group_style(tokens: &Tokens, variant: Variant, enabled: bool) -> containe
                 } else {
                     fade(tokens.border, 0.5)
                 },
-                width: 1.0,
+                width: BORDER,
                 radius: radius::MD.into(),
             },
             ..container::Style::default()
@@ -519,6 +538,8 @@ mod tests {
 
         let kept = State::single(items()).with_selected([3]).required(true);
         assert_eq!(kept.selected(), vec![3]);
+        let replaced = State::single(items()).required(true).with_selected([3]);
+        assert_eq!(replaced.selected(), vec![3]);
     }
 
     #[test]

@@ -25,7 +25,9 @@ impl Example {
     pub fn view(&self) -> Element<'_, Message> {
         let line = |size: Size, max: usize, label: &'static str| {
             row![
-                avatar_group(REVIEWERS.map(avatar)).size(size).max(max),
+                avatar_group(REVIEWERS.map(avatar))
+                    .size(size)
+                    .max_items(max),
                 text(label).size(14),
             ]
             .spacing(12)

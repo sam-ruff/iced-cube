@@ -64,6 +64,7 @@ impl Example {
                 .on_event(Message::Page),
         ]
         .spacing(12)
+        .align_x(Alignment::Center)
         .width(Length::Fill)
         .max_width(300)
         .into()

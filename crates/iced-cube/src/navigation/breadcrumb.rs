@@ -170,11 +170,18 @@ impl<'a, Message: Clone + 'a> From<Breadcrumb<'a, Message>> for Element<'a, Mess
                 }
                 Slot::Ellipsis => ellipsis(on_expand.clone()),
             };
-            if !first {
-                trail = trail.push(divider(separator));
+            // A divider travels with the crumb after it, so a wrapped trail
+            // never ends a line on a separator.
+            if first {
+                trail = trail.push(element);
+            } else {
+                trail = trail.push(
+                    row![divider(separator), element]
+                        .spacing(6)
+                        .align_y(Alignment::Center),
+                );
             }
             first = false;
-            trail = trail.push(element);
         }
         trail.wrap().into()
     }
@@ -188,21 +195,23 @@ fn item<'a, Message: Clone + 'a>(crumb: Crumb<'a, Message>, current: bool) -> El
     } = crumb;
     let message = on_press.filter(|_| !current);
 
-    let mut content = row![].spacing(6).align_y(Alignment::Center);
-    if let Some(glyph) = icon {
-        let link = message.is_some();
-        content = content.push(themed(glyph, ICON_SIZE, 1.0, move |theme| {
-            foreground(&Tokens::of(theme), current, link, Status::Active)
-        }));
-    }
-    content = content.push(
-        text(label)
-            .size(text_size::SM)
-            .wrapping(text::Wrapping::None),
-    );
+    let link = message.is_some();
+    let content = |status: Status| {
+        let mut content = row![].spacing(6).align_y(Alignment::Center);
+        if let Some(glyph) = icon {
+            content = content.push(themed(glyph, ICON_SIZE, 1.0, move |theme| {
+                foreground(&Tokens::of(theme), current, link, status)
+            }));
+        }
+        content.push(
+            text(label.clone())
+                .size(text_size::SM)
+                .wrapping(text::Wrapping::None),
+        )
+    };
 
     let Some(message) = message else {
-        return container(content)
+        return container(content(Status::Active))
             .padding(Padding::from([2.0, 0.0]))
             .style(move |theme: &Theme| container::Style {
                 text_color: Some(foreground(
@@ -215,11 +224,16 @@ fn item<'a, Message: Clone + 'a>(crumb: Crumb<'a, Message>, current: bool) -> El
             })
             .into();
     };
-    widget::button(content)
-        .padding(Padding::from([2.0, 0.0]))
-        .on_press(message)
-        .style(|theme, status| style(&Tokens::of(theme), status))
-        .into()
+    // The icon is drawn twice so it follows the label's hover colour: iced
+    // tints an svg by its own hover state, not its button's.
+    widget::button(widget::hover(
+        content(Status::Active),
+        content(Status::Hovered),
+    ))
+    .padding(Padding::from([2.0, 0.0]))
+    .on_press(message)
+    .style(|theme, status| style(&Tokens::of(theme), status))
+    .into()
 }
 
 fn divider<'a, Message: 'a>(separator: Separator) -> Element<'a, Message> {

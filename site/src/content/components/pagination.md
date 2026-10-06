@@ -44,6 +44,6 @@ api:
 
 The app owns a `pagination::State` and routes events into it, then shows the slice of its list that `state.range(items, per_page)` returns. The control only moves the page, so the list can be anything from table rows to search results.
 
-The numbered layout always shows the first and last pages and the ones next to the current page, with a gap for the rest. Once there are enough pages for a gap, it always shows the same number of slots, so the buttons do not shift under the pointer as the page changes. When the space is too narrow, as on a phone, it drops the neighbouring pages and then falls back to the compact layout.
+The numbered layout always shows the first and last pages and the ones next to the current page, with a gap for the rest. Once there are enough pages for a gap, it always shows the same number of slots, so the buttons stay put under the pointer as the page changes. Page numbers of three or more digits widen their buttons a little. When the space is too narrow, as on a phone, it drops the neighbouring pages and then falls back to the compact layout.
 
 Use the compact layout under short lists, in panels and in dialogs, where the page count matters more than jumping to a particular page.

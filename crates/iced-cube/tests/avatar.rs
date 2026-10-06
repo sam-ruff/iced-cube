@@ -54,7 +54,7 @@ fn a_group_overlaps_its_avatars_and_counts_the_rest() {
         "Edsger Dijkstra",
         "Barbara Liskov",
     ];
-    let element: Element<'_, ()> = avatar_group(names.map(avatar)).max(4).into();
+    let element: Element<'_, ()> = avatar_group(names.map(avatar)).max_items(4).into();
     let mut ui = simulator(element);
     let ada = ui.find("AL").expect("first avatar").bounds();
     let grace = ui.find("GH").expect("second avatar").bounds();

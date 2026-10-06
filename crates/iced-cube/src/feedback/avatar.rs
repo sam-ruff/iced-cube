@@ -274,7 +274,9 @@ fn dot<'a, Message: 'a>(presence: Presence, diameter: f32) -> Element<'a, Messag
 }
 
 /// Width of the ring around an avatar in a group, in the background colour,
-/// so overlapping avatars stay apart.
+/// so overlapping avatars stay apart. The ring and the presence dot's ring
+/// are drawn in the page background, so they suit avatars on the page
+/// rather than on a raised card.
 pub const RING: f32 = 2.0;
 
 /// The container style of an avatar: muted behind initials and icons, with
@@ -349,7 +351,7 @@ impl AvatarGroup {
     /// Shows at most `max` avatars. When there are more, the last place
     /// shows a count of the rest, such as "+3", so the group never takes
     /// more than `max` places.
-    pub fn max(mut self, max: usize) -> Self {
+    pub fn max_items(mut self, max: usize) -> Self {
         self.max = Some(max);
         self
     }
@@ -566,7 +568,7 @@ mod tests {
     fn group_builder() {
         let group = avatar_group(["A", "B", "C", "D"].map(avatar))
             .size(Size::Sm)
-            .max(3);
+            .max_items(3);
         assert_eq!(group.size, Size::Sm);
         assert_eq!(group.visible(), (2, 2));
         assert_eq!(avatar_group([avatar("A")]).visible(), (1, 0));

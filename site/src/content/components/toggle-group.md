@@ -17,7 +17,7 @@ api:
   - name: ".required(true)"
     description: "Single mode only: the last item on stays on, and the first enabled item starts on when nothing else is."
   - name: ".with_selected(ids)"
-    description: "Starts with these items on, skipping unknown and disabled ones. Single mode keeps the first."
+    description: "Switches these items on, skipping unknown and disabled ones. In single mode the first that applies replaces the selection."
   - name: "item(id, label)"
     description: "Creates an item. Add .icon(glyph) or .disabled(true)."
   - name: "state.update(Event)"
@@ -43,6 +43,8 @@ api:
 The app owns a `toggle_group::State` and routes events into it, as with [tabs](../tabs/). In single mode pressing an item turns the others off; pressing the one that is on turns it off too, unless the group is `.required(true)`, which suits a choice that always has an answer, such as text alignment or a date range.
 
 Multiple mode suits formatting options and filters, where each item is independent. `selected()` returns the items that are on in the order they are shown, whatever order they were pressed in.
+
+Separate toggles wrap onto new lines on a narrow screen. An outlined group stays in one row, so keep it to two to four short items.
 
 Use a single-choice group for a few short options shown side by side, and a [select](../select/) when there are more than four or five. When the options switch between whole views rather than settings, tabs are the clearer choice.
 

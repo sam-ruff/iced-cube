@@ -141,6 +141,12 @@ impl<'a, Message> Toggle<'a, Message> {
         self
     }
 
+    /// Sets the message for a click, or disables the toggle with `None`.
+    pub fn on_toggle_maybe(mut self, on_toggle: Option<impl Fn(bool) -> Message + 'a>) -> Self {
+        self.on_toggle = on_toggle.map(|f| Box::new(f) as Box<dyn Fn(bool) -> Message + 'a>);
+        self
+    }
+
     pub fn is_pressed(&self) -> bool {
         self.pressed
     }
@@ -165,7 +171,7 @@ impl<'a, Message: Clone + 'a> From<Toggle<'a, Message>> for Element<'a, Message>
             label,
             icon,
             pressed,
-            size,
+            size.metrics(),
             message,
             move |tokens, status| style(tokens, variant, pressed, status),
         ))
@@ -178,11 +184,10 @@ pub(crate) fn button<'a, Message: Clone + 'a>(
     label: impl text::IntoFragment<'a>,
     icon: Option<Glyph>,
     pressed: bool,
-    size: Size,
+    metrics: Metrics,
     message: Option<Message>,
     style: impl Fn(&Tokens, Status) -> widget::button::Style + 'a,
 ) -> Element<'a, Message> {
-    let metrics = size.metrics();
     let enabled = message.is_some();
     let resting = if enabled {
         Status::Active
@@ -365,6 +370,16 @@ mod tests {
         assert!(t.is_pressed());
         assert!(t.is_enabled());
         assert_eq!(t.variant, Variant::Outline);
+        assert!(
+            !toggle("Grid")
+                .on_toggle_maybe(None::<fn(bool) -> bool>)
+                .is_enabled()
+        );
+        assert!(
+            toggle("Grid")
+                .on_toggle_maybe(Some(|on: bool| on))
+                .is_enabled()
+        );
         assert_eq!(t.size, Size::Lg);
     }
 
