@@ -67,6 +67,46 @@ fn settings_footer_fits_the_card() {
 }
 
 #[test]
+fn accordion_questions_and_answers_fit_a_phone_preview() {
+    iced_cube::theme::set_font(FONT);
+    for width in [328.0, 358.0] {
+        for choice in [ThemeChoice::Light, ThemeChoice::Dark] {
+            let gallery = Gallery::new(Mode::Single, Some("accordion/single"), choice);
+            let settings = iced::Settings {
+                default_font: FONT,
+                fonts: FONT_FILES.iter().map(|font| (*font).into()).collect(),
+                ..iced::Settings::default()
+            };
+            let mut ui = Simulator::with_size(settings, Size::new(width, 280.0), gallery.view());
+            let labels = [
+                "How long does shipping take?",
+                "Can I return an item?",
+                "How do I contact support?",
+            ];
+            for label in labels {
+                let bounds = ui.find(label).expect("question is rendered").bounds();
+                assert!(bounds.height < 24.0, "{label} wraps: {bounds:?}");
+                assert!(bounds.x >= 0.0 && bounds.x + bounds.width <= width);
+            }
+            let answer = ui
+                .find("Orders leave the warehouse within two working days.")
+                .expect("open answer is rendered")
+                .bounds();
+            let next = ui.find(labels[1]).expect("next question").bounds();
+            assert!(answer.height > 20.0, "body text wraps at narrow widths");
+            assert!(
+                answer.y + answer.height < next.y,
+                "answer clears the next header"
+            );
+            assert!(answer.x >= 0.0 && answer.x + answer.width <= width);
+            ui.click(labels[1])
+                .expect("next question remains clickable");
+            assert_eq!(ui.into_messages().count(), 1);
+        }
+    }
+}
+
+#[test]
 fn payments_become_cards_that_fit_the_phone() {
     let gallery = open("data-table/default");
     let mut ui = render(&gallery);

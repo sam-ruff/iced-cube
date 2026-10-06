@@ -22,7 +22,7 @@ api:
     description: "Overrides the width. Cards shrink to fit by default."
 ---
 
-A card is a container with a border, rounded corners and consistent padding. In light themes it sits on the page background with a faint shadow; in dark themes the surface is a shade lighter than the page so it still reads as raised.
+A card is a container with a soft border, rounded corners and consistent padding. A broad, faint shadow separates it from the page; in dark themes the surface is also a shade lighter so it still reads as raised.
 
 The footer takes any element, so you decide how actions are laid out. Buttons inside a card work exactly as they do anywhere else. A link button has no padding at its sides, so a "View all" link in the footer lines up with the body above it.
 

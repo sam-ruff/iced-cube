@@ -1,7 +1,7 @@
 //! The overview: stat cards, a status alert, running jobs, regional load
 //! and runbooks.
 
-use iced::widget::{column, row, space, text};
+use iced::widget::{column, container, row, space, text};
 use iced::{Alignment, Element, Length};
 use iced_cube::feedback::alert::Variant as AlertVariant;
 use iced_cube::feedback::badge::Variant as BadgeVariant;
@@ -25,7 +25,7 @@ const MIN_STAT: f32 = 160.0;
 const SCROLLBAR: f32 = 16.0;
 
 impl Example {
-    pub(super) fn overview(&self, width: f32) -> Element<'_, Message> {
+    pub(super) fn overview(&self, width: f32, gutter: f32) -> Element<'_, Message> {
         // Leaves room for the scroll area's scrollbar beside the content.
         let width = width - SCROLLBAR;
         let count = |status: Status| self.jobs.iter().filter(|job| job.status == status).count();
@@ -144,13 +144,17 @@ impl Example {
             .width(Length::Fill);
 
         scroll_area(
-            vstack([stats.into(), status.into(), pair, runbooks.into()])
-                .gap(Gap::Lg)
-                .padding(iced::Padding {
-                    bottom: 24.0,
-                    ..iced::Padding::ZERO
-                })
-                .width(Length::Fixed(width)),
+            container(
+                vstack([stats.into(), status.into(), pair, runbooks.into()])
+                    .gap(Gap::Lg)
+                    .width(Length::Fixed(width)),
+            )
+            .padding(iced::Padding {
+                top: 16.0,
+                right: gutter,
+                bottom: 24.0,
+                left: gutter,
+            }),
         )
         .width(Length::Fill)
         .height(Length::Fill)

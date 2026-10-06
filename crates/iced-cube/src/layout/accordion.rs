@@ -9,7 +9,7 @@ use iced::{Alignment, Element, Length, Theme};
 
 use crate::icon::{opacity, themed};
 use crate::keys::{self, Chord, Keymap};
-use crate::theme::{Tokens, fade, space, text_size};
+use crate::theme::{Tokens, fade, mix, space, text_size};
 
 /// How many sections may be open at once.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -250,6 +250,7 @@ impl<Id: std::fmt::Debug, Message> std::fmt::Debug for Accordion<'_, Id, Message
 
 impl<'a, Id, Message> Accordion<'a, Id, Message> {
     /// Adds a section with a header and the content shown while open.
+    /// Content inherits muted text unless it supplies its own colour.
     pub fn item(
         mut self,
         id: Id,
@@ -305,7 +306,10 @@ fn section<'a, Message: Clone + 'a>(
 
     let header = widget::button(
         row![
-            text(title).size(text_size::SM).width(Length::Fill),
+            text(title)
+                .font(crate::theme::semibold())
+                .size(text_size::SM)
+                .width(Length::Fill),
             themed(chevron, 16.0, opacity(enabled), |theme| {
                 Tokens::of(theme).muted_foreground
             }),
@@ -322,15 +326,22 @@ fn section<'a, Message: Clone + 'a>(
     if open {
         body = body.push(
             container(content)
-                .padding(iced::Padding::ZERO.bottom(space::LG))
-                .width(Length::Fill),
+                .padding(iced::Padding::ZERO.bottom(space::LG).right(space::XL))
+                .width(Length::Fill)
+                .style(|theme: &Theme| container::Style {
+                    text_color: Some(Tokens::of(theme).muted_foreground),
+                    ..container::Style::default()
+                }),
         );
     }
-    body.push(rule::horizontal(1).style(|theme: &Theme| rule::Style {
-        color: Tokens::of(theme).border,
-        radius: 0.0.into(),
-        fill_mode: rule::FillMode::Full,
-        snap: true,
+    body.push(rule::horizontal(1).style(|theme: &Theme| {
+        let tokens = Tokens::of(theme);
+        rule::Style {
+            color: mix(tokens.background, tokens.border, 0.7),
+            radius: 0.0.into(),
+            fill_mode: rule::FillMode::Full,
+            snap: true,
+        }
     }))
     .into()
 }

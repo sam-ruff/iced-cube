@@ -63,7 +63,7 @@ pub mod text_size {
 }
 
 /// How far the popover surface moves towards the foreground in dark
-/// themes. A card lifts by 0.04, so floating surfaces sit just above it.
+/// themes. Floating surfaces sit just above cards.
 const POPOVER_LIFT: f32 = 0.06;
 
 /// Semantic colours resolved from a theme.

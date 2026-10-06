@@ -539,8 +539,10 @@ impl Example {
         let content = size.width - 2.0 * gutter - if sidebar { SIDEBAR + 1.0 } else { 0.0 };
 
         let selected = self.page.selected().unwrap_or(Page::Overview);
+        // Card pages keep their gutters inside the scroll area for their shadows.
+        let card_page = matches!(selected, Page::Overview | Page::Settings);
         let page = match selected {
-            Page::Overview => self.overview(content),
+            Page::Overview => self.overview(content, gutter),
             Page::Jobs => self.jobs_page(narrow),
             Page::Activity => self.activity(narrow),
             Page::Settings => self.settings_page(narrow, gutter),
@@ -580,15 +582,20 @@ impl Example {
                         .width(Length::Fill)
                         .on_event(Message::Tabs),
                 )
-                .padding([12.0, gutter]),
+                .padding(iced::Padding {
+                    top: 12.0,
+                    right: gutter,
+                    bottom: if card_page { 0.0 } else { 12.0 },
+                    left: gutter,
+                }),
             )
             .push(
                 container(page)
                     .padding(iced::Padding {
-                        top: 4.0,
-                        right: gutter,
+                        top: if card_page { 0.0 } else { 4.0 },
+                        right: if card_page { 0.0 } else { gutter },
                         bottom: 0.0,
-                        left: gutter,
+                        left: if card_page { 0.0 } else { gutter },
                     })
                     .width(Length::Fill)
                     .height(Length::Fill),
@@ -610,9 +617,10 @@ impl Example {
         iced_cube::scroll_area(
             container(self.settings.view(narrow).map(Message::Settings))
                 .padding(iced::Padding {
+                    top: 16.0,
                     bottom: gutter,
-                    right: if narrow { 0.0 } else { 12.0 },
-                    ..iced::Padding::ZERO
+                    right: gutter + if narrow { 0.0 } else { 12.0 },
+                    left: gutter,
                 })
                 .width(Length::Fill),
         )
