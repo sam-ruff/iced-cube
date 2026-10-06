@@ -33,7 +33,13 @@ pub mod icon;
 mod inert;
 pub mod keys;
 pub mod layout;
-#[cfg(any(feature = "badge", feature = "button", feature = "tabs"))]
+#[cfg(any(
+    feature = "avatar",
+    feature = "badge",
+    feature = "button",
+    feature = "tabs",
+    feature = "toggle"
+))]
 mod natural;
 pub mod navigation;
 pub mod overlay;
@@ -51,6 +57,8 @@ pub use feedback::badge;
 pub use feedback::progress;
 #[cfg(feature = "spinner")]
 pub use feedback::spinner;
+#[cfg(feature = "avatar")]
+pub use feedback::{avatar, avatar_group};
 
 #[cfg(feature = "combobox")]
 pub use forms::combobox;
@@ -70,6 +78,10 @@ pub use layout::{hstack, vstack};
 
 #[cfg(feature = "command")]
 pub use navigation::command;
+#[cfg(feature = "pagination")]
+pub use navigation::pagination;
+#[cfg(feature = "breadcrumb")]
+pub use navigation::{breadcrumb, crumb};
 #[cfg(feature = "tabs")]
 pub use navigation::{tab, tabs};
 
@@ -100,6 +112,10 @@ pub use primitives::scroll_area;
 pub use primitives::slider;
 #[cfg(feature = "switch")]
 pub use primitives::switch;
+#[cfg(feature = "toggle")]
+pub use primitives::toggle;
+#[cfg(feature = "toggle-group")]
+pub use primitives::toggle_group;
 #[cfg(feature = "radio")]
 pub use primitives::{radio, radio_group};
 #[cfg(feature = "separator")]

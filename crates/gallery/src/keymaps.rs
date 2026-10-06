@@ -5,9 +5,9 @@ use std::collections::BTreeMap;
 use iced_cube::forms::{combobox, select};
 use iced_cube::keys::{Action, Keymap};
 use iced_cube::layout::accordion;
-use iced_cube::navigation::{command, tabs};
+use iced_cube::navigation::{breadcrumb, command, pagination, tabs};
 use iced_cube::overlay::{context_menu, dialog, dropdown_menu, popover, toast};
-use iced_cube::primitives::{checkbox, slider, switch};
+use iced_cube::primitives::{checkbox, slider, switch, toggle, toggle_group};
 use serde::Serialize;
 
 /// One action and the chords that trigger it by default.
@@ -35,18 +35,22 @@ pub fn bindings<A: Action>() -> Vec<Binding> {
 pub fn all() -> BTreeMap<&'static str, Vec<Binding>> {
     BTreeMap::from([
         ("accordion", bindings::<accordion::Action>()),
+        ("breadcrumb", bindings::<breadcrumb::Action>()),
         ("checkbox", bindings::<checkbox::Action>()),
         ("combobox", bindings::<combobox::Action>()),
         ("command", bindings::<command::Action>()),
         ("context-menu", bindings::<context_menu::Action>()),
         ("dialog", bindings::<dialog::Action>()),
         ("dropdown-menu", bindings::<dropdown_menu::Action>()),
+        ("pagination", bindings::<pagination::Action>()),
         ("popover", bindings::<popover::Action>()),
         ("select", bindings::<select::Action>()),
         ("slider", bindings::<slider::Action>()),
         ("switch", bindings::<switch::Action>()),
         ("tabs", bindings::<tabs::Action>()),
         ("toast", bindings::<toast::Action>()),
+        ("toggle", bindings::<toggle::Action>()),
+        ("toggle-group", bindings::<toggle_group::Action>()),
     ])
 }
 

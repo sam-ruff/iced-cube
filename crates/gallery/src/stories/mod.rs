@@ -6,7 +6,9 @@
 
 pub mod accordion;
 pub mod alert;
+pub mod avatar;
 pub mod badge;
+pub mod breadcrumb;
 pub mod button;
 pub mod card;
 pub mod checkbox;
@@ -18,6 +20,7 @@ pub mod dropdown_menu;
 pub mod icon_button;
 pub mod input;
 pub mod label;
+pub mod pagination;
 pub mod popover;
 pub mod progress;
 pub mod radio;
@@ -33,6 +36,8 @@ pub mod tabs;
 pub mod textarea;
 pub mod theme;
 pub mod toast;
+pub mod toggle;
+pub mod toggle_group;
 pub mod tooltip;
 
 crate::stories! {
@@ -171,6 +176,36 @@ crate::stories! {
         description: "Switches in a settings list, one depending on another.",
         file: "switch/settings.rs",
     }
+    ToggleDefault => toggle::default {
+        id: "toggle/default", component: "toggle", title: "Default",
+        description: "Toggles with icons that stay pressed while an option is on.",
+        file: "toggle/default.rs", height: 160,
+    }
+    ToggleVariants => toggle::variants {
+        id: "toggle/variants", component: "toggle", title: "Variants",
+        description: "Default and outline toggles, each next to a disabled toggle that is on.",
+        file: "toggle/variants.rs", height: 200,
+    }
+    ToggleKeyboard => toggle::keyboard {
+        id: "toggle/keyboard", component: "toggle", title: "Keyboard shortcuts",
+        description: "Each toggle's keymap swaps the default Space for its own chord.",
+        file: "toggle/keyboard.rs", height: 160, subscription: true,
+    }
+    ToggleGroupSingle => toggle_group::single {
+        id: "toggle-group/single", component: "toggle-group", title: "Single choice",
+        description: "An outlined group where one alignment is always on.",
+        file: "toggle_group/single.rs", height: 160,
+    }
+    ToggleGroupMultiple => toggle_group::multiple {
+        id: "toggle-group/multiple", component: "toggle-group", title: "Multiple choice",
+        description: "Formatting toggles that switch on and off independently, with a disabled item.",
+        file: "toggle_group/multiple.rs", height: 160,
+    }
+    ToggleGroupKeyboard => toggle_group::keyboard {
+        id: "toggle-group/keyboard", component: "toggle-group", title: "Keyboard shortcuts",
+        description: "The arrow keys move a single-choice group's selection through the default keymap.",
+        file: "toggle_group/keyboard.rs", height: 160, subscription: true,
+    }
     SelectDefault => select::default {
         id: "select/default", component: "select", title: "Default",
         description: "A select with a placeholder until a value is chosen.",
@@ -235,6 +270,26 @@ crate::stories! {
         id: "badge/in-a-list", component: "badge", title: "In a list",
         description: "Status badges aligned against list rows.",
         file: "badge/in_a_list.rs",
+    }
+    AvatarFallbacks => avatar::fallbacks {
+        id: "avatar/fallbacks", component: "avatar", title: "Image, initials and icon",
+        description: "An image when there is one, otherwise the name's initials, an icon, or a person icon when there is no name.",
+        file: "avatar/fallbacks.rs", height: 160,
+    }
+    AvatarSizes => avatar::sizes {
+        id: "avatar/sizes", component: "avatar", title: "Sizes and shapes",
+        description: "Small to extra large, as circles for people and rounded squares for teams.",
+        file: "avatar/sizes.rs", height: 200,
+    }
+    AvatarPresence => avatar::presence {
+        id: "avatar/presence", component: "avatar", title: "Presence",
+        description: "A dot on the corner for online, away, busy and offline.",
+        file: "avatar/presence.rs",
+    }
+    AvatarGroup => avatar::group {
+        id: "avatar/group", component: "avatar", title: "Group",
+        description: "Overlapping avatars, with a count for the ones that do not fit.",
+        file: "avatar/group.rs", height: 160,
     }
     CardBasic => card::basic {
         id: "card/basic", component: "card", title: "Header, body and footer",
@@ -335,6 +390,36 @@ crate::stories! {
         id: "tabs/keyboard", component: "tabs", title: "Keyboard shortcuts",
         description: "Key presses resolve through the default keymap, skipping disabled tabs. In the browser, use the arrow keys, Home and End: browsers keep Ctrl+Tab for themselves.",
         file: "tabs/keyboard.rs", height: 200, subscription: true,
+    }
+    BreadcrumbDefault => breadcrumb::default {
+        id: "breadcrumb/default", component: "breadcrumb", title: "Default",
+        description: "A folder path with a home icon. Clicking a level opens it and trims the trail.",
+        file: "breadcrumb/default.rs", height: 160,
+    }
+    BreadcrumbCollapsed => breadcrumb::collapsed {
+        id: "breadcrumb/collapsed", component: "breadcrumb", title: "Collapsed",
+        description: "A long trail with slash separators keeps its first and last levels. The ellipsis shows the rest.",
+        file: "breadcrumb/collapsed.rs", height: 160,
+    }
+    BreadcrumbKeyboard => breadcrumb::keyboard {
+        id: "breadcrumb/keyboard", component: "breadcrumb", title: "Keyboard shortcuts",
+        description: "Alt+Up goes to the parent level and Alt+Shift+Up to the root, through the default keymap.",
+        file: "breadcrumb/keyboard.rs", height: 160, subscription: true,
+    }
+    PaginationNumbers => pagination::numbers {
+        id: "pagination/numbers", component: "pagination", title: "Page numbers",
+        description: "The first, last and nearby pages, with gaps for the rest. On a narrow screen it drops pages to fit.",
+        file: "pagination/numbers.rs", height: 160,
+    }
+    PaginationCompact => pagination::compact {
+        id: "pagination/compact", component: "pagination", title: "Compact",
+        description: "A position label between first, previous, next and last buttons, paging a short list.",
+        file: "pagination/compact.rs", height: 260,
+    }
+    PaginationKeyboard => pagination::keyboard {
+        id: "pagination/keyboard", component: "pagination", title: "Keyboard shortcuts",
+        description: "Page Up, Page Down, Ctrl+Home and Ctrl+End through the default keymap.",
+        file: "pagination/keyboard.rs", height: 200, subscription: true,
     }
     CommandInline => command::inline {
         id: "command/inline", component: "command", title: "Inline",

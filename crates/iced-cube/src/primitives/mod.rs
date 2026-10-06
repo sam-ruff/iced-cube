@@ -1,5 +1,5 @@
 //! Basic controls: buttons, icon buttons, checkboxes, inputs, radios,
-//! scroll areas, separators, sliders and switches.
+//! scroll areas, separators, sliders, switches, toggles and toggle groups.
 
 #[cfg(feature = "button")]
 pub mod button;
@@ -19,6 +19,10 @@ pub mod separator;
 pub mod slider;
 #[cfg(feature = "switch")]
 pub mod switch;
+#[cfg(feature = "toggle")]
+pub mod toggle;
+#[cfg(feature = "toggle-group")]
+pub mod toggle_group;
 
 #[cfg(feature = "button")]
 pub use button::{Button, button};
@@ -38,3 +42,7 @@ pub use separator::{Separator, separator, vertical_separator};
 pub use slider::{Slider, slider};
 #[cfg(feature = "switch")]
 pub use switch::{Switch, switch};
+#[cfg(feature = "toggle")]
+pub use toggle::{Toggle, toggle};
+#[cfg(feature = "toggle-group")]
+pub use toggle_group::{ToggleGroup, toggle_group};
