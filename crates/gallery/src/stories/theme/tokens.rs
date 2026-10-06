@@ -1,4 +1,4 @@
-use iced::widget::{Space, column, container, row, text};
+use iced::widget::{Space, column, container, responsive, row, text};
 use iced::{Background, Color, Element, Length, Theme};
 use iced_cube::theme::{Tokens, radius};
 
@@ -33,19 +33,34 @@ impl Example {
     }
 
     pub fn view(&self) -> Element<'_, Message> {
-        let rows = SWATCHES.chunks(4).map(|chunk| {
-            row(chunk.iter().map(|&(name, colour)| swatch(name, colour)))
+        responsive(|size| {
+            let columns = if size.width >= 596.0 {
+                4
+            } else if size.width >= 252.0 {
+                2
+            } else {
+                1
+            };
+            let width =
+                ((size.width - 12.0 * (columns - 1) as f32) / columns as f32).clamp(0.0, 140.0);
+            let rows = SWATCHES.chunks(columns).map(|chunk| {
+                row(chunk
+                    .iter()
+                    .map(|&(name, colour)| swatch(name, colour, width)))
                 .spacing(12)
                 .into()
-        });
-
-        column(rows).spacing(14).into()
+            });
+            column(rows).spacing(14).into()
+        })
+        .width(Length::Shrink)
+        .height(Length::Shrink)
+        .into()
     }
 }
 
-fn swatch(name: &'static str, colour: Pick) -> Element<'static, Message> {
+fn swatch(name: &'static str, colour: Pick, width: f32) -> Element<'static, Message> {
     let chip = container(Space::new())
-        .width(Length::Fixed(140.0))
+        .width(Length::Fixed(width))
         .height(Length::Fixed(36.0))
         .style(move |theme: &Theme| {
             let tokens = Tokens::of(theme);

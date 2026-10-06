@@ -303,7 +303,13 @@ impl<Id: Copy + PartialEq> State<Id> {
         {
             item.disabled = disabled;
         }
-        if disabled && self.levels.get(parents.len()).copied().flatten() == Some(index) {
+        let highlighted = self
+            .levels
+            .iter()
+            .take(path.len())
+            .copied()
+            .eq(path.iter().copied().map(Some));
+        if disabled && highlighted {
             self.levels.truncate(parents.len() + 1);
             if let Some(level) = self.levels.get_mut(parents.len()) {
                 *level = None;
@@ -1237,6 +1243,24 @@ mod tests {
         let _ = state.update(Event::First);
         let _ = state.update(Event::Next);
         assert_eq!(state.highlighted(), Some(PASTE));
+    }
+
+    #[test]
+    fn disabling_an_item_in_another_submenu_keeps_the_active_highlight() {
+        let mut state = State::new([
+            submenu(1, "Share", [item(2, "Email")]),
+            submenu(3, "Export", [item(4, "PDF")]),
+        ]);
+        let _ = state.update(Event::Open);
+        let _ = state.update(Event::Highlight(2));
+
+        state.set_disabled(4, true);
+
+        assert_eq!(state.highlighted(), Some(2));
+        assert_eq!(
+            state.update(Event::ActivateHighlighted),
+            Some(Output::Activated(2))
+        );
     }
 
     #[test]

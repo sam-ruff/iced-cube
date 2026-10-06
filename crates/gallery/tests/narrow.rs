@@ -110,6 +110,48 @@ fn a_long_file_name_ends_in_an_ellipsis_on_a_phone() {
     assert!(name.height <= 20.0, "one line, got {}", name.height);
 }
 
+#[test]
+fn every_theme_token_remains_readable_in_two_columns_on_a_phone() {
+    for width in [328.0, 358.0] {
+        let gallery = open("theme/tokens");
+        let settings = iced::Settings {
+            default_font: FONT,
+            fonts: FONT_FILES.iter().map(|font| (*font).into()).collect(),
+            ..iced::Settings::default()
+        };
+        let mut ui = Simulator::with_size(settings, Size::new(width, 260.0), gallery.view());
+        for name in [
+            "background",
+            "foreground",
+            "muted",
+            "muted_foreground",
+            "border",
+            "ring",
+            "primary",
+            "secondary",
+            "accent",
+            "destructive",
+            "success",
+            "warning",
+        ] {
+            let bounds = ui.find(name).expect("token label").bounds();
+            assert!(
+                bounds.width > 0.0 && bounds.height <= 18.0,
+                "{name}: {bounds:?}"
+            );
+            assert!(
+                bounds.x >= 0.0 && bounds.x + bounds.width <= width,
+                "{name}: {bounds:?}"
+            );
+        }
+        let background = ui.find("background").expect("first token").bounds();
+        let foreground = ui.find("foreground").expect("second token").bounds();
+        let muted = ui.find("muted").expect("third token").bounds();
+        assert_eq!(background.y, foreground.y);
+        assert!(muted.y > background.y);
+    }
+}
+
 /// Sends the preview one pointer move and applies what the story sends
 /// back, such as a sidebar noticing the narrow width.
 fn settle(gallery: &mut Gallery) {

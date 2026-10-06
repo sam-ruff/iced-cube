@@ -8,7 +8,7 @@ const FETCH_TIMEOUT_MS = 120_000;
 /** How long iced may take to draw once the wasm has arrived. */
 const BOOT_TIMEOUT_MS = 20_000;
 const mock = import.meta.env.PUBLIC_PREVIEW_MODE === "mock";
-const previewUrl = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/preview/`;
+const previewUrl = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/preview/index.html`;
 const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
 
 type Frame = HTMLElement;
@@ -147,8 +147,19 @@ window.addEventListener("message", (event: MessageEvent<PreviewMessage>) => {
   }
 });
 
+function updateStandaloneTheme(theme: Theme): void {
+  for (const link of document.querySelectorAll<HTMLAnchorElement>("[data-standalone-preview]")) {
+    const url = new URL(link.href);
+    url.searchParams.set("theme", theme);
+    link.href = url.href;
+  }
+}
+
+updateStandaloneTheme(currentTheme());
+
 window.addEventListener("themechange", (event) => {
   const theme = (event as CustomEvent<Theme>).detail;
+  updateStandaloneTheme(theme);
   for (const { iframe } of mounted.values()) {
     iframe.contentWindow?.postMessage({ type: "theme", value: theme }, "*");
   }

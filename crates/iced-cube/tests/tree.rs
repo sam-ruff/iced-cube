@@ -324,6 +324,27 @@ fn checkboxes_check_nodes_in_checkbox_mode() {
 }
 
 #[test]
+fn refreshed_children_render_and_can_be_checked_after_a_partial_selection() {
+    let mut state = files().with_mode(Mode::Checkbox);
+    let mut ui = simulator::simulator(view(&state));
+    ui.click("main.rs").expect("old row");
+    let _ = apply(events(ui), &mut state);
+
+    let output = state.update(Event::Received(vec![loaded(1, [node(7, "new.rs").file()])]));
+    assert!(matches!(output, Some(Output::Checked(ids)) if ids.is_empty()));
+    assert_eq!(
+        state.check_state(1),
+        iced_cube::primitives::checkbox::CheckState::Unchecked
+    );
+
+    let mut ui = simulator::simulator(view(&state));
+    assert!(ui.find("main.rs").is_err());
+    ui.click("new.rs").expect("new row");
+    let outputs = apply(events(ui), &mut state);
+    assert!(matches!(outputs.last(), Some(Output::Checked(ids)) if ids == &[1, 7]));
+}
+
+#[test]
 fn a_right_click_opens_the_context_menu_on_that_node() {
     let files = files();
     let menu = context_menu::State::<u8, u32>::new([item(1, "Rename")]);

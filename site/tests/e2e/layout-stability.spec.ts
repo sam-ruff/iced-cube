@@ -18,7 +18,7 @@ function firstDark(png: Buffer): [number, number] {
 test("radio group stays put when the selection changes", async ({ page, isMobile }) => {
   test.skip(isMobile, "one viewport is enough for a layout check");
   await page.setViewportSize({ width: 720, height: 280 });
-  await page.goto("preview/?story=radio%2Fdefault&theme=light");
+  await page.goto("preview/index.html?story=radio%2Fdefault&theme=light");
   const canvas = page.locator("canvas");
   await expect(canvas).toBeVisible({ timeout: 30_000 });
   await page.waitForTimeout(500);

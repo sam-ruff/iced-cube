@@ -34,6 +34,33 @@ test("live preview boots the wasm app and reports ready", async ({ page }) => {
   await expect(frame.locator("iframe")).toHaveAttribute("title", /Live preview/);
 });
 
+test("the standalone preview link serves the app shell", async ({ page, request }) => {
+  await page.goto("docs/components/button/");
+  const link = page.getByRole("link", { name: "Open Variants preview in a new tab" }).first();
+  const url = await link.getAttribute("href");
+  expect(url).toContain("/preview/index.html?story=");
+  const response = await request.get(url ?? "");
+  expect(response.ok()).toBe(true);
+  expect(await response.text()).toContain("<title>iced-cube preview</title>");
+});
+
+test("standalone previews follow the selected theme", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("theme", "dark"));
+  await page.goto("docs/components/button/");
+  const link = page.getByRole("link", { name: "Open Variants preview in a new tab" }).first();
+  await expect(link).toHaveAttribute("href", /theme=dark/);
+
+  const popupOpened = page.waitForEvent("popup");
+  await link.click();
+  const popup = await popupOpened;
+  await expect(popup.locator("html")).toHaveAttribute("data-theme", "dark");
+  await expect(popup.locator("canvas")).toBeVisible({ timeout: 30_000 });
+  await popup.close();
+
+  await page.locator("[data-theme-toggle]").click();
+  await expect(link).toHaveAttribute("href", /theme=light/);
+});
+
 test("live previews never exceed the concurrency cap", async ({ page }) => {
   await page.goto("docs/components/button/");
   for (let y = 0; y < 6; y += 1) {

@@ -146,6 +146,25 @@ fn the_open_menu_resolves_its_own_keys() {
 }
 
 #[test]
+fn updating_another_submenu_keeps_enter_on_the_highlighted_action() {
+    let mut state = State::new([
+        submenu(1, "Share", [item(2, "Email")]),
+        submenu(3, "Export", [item(4, "PDF")]),
+    ]);
+    let _ = state.update(Event::First);
+    let _ = press(&mut state, Key::Named(Named::ArrowRight));
+    assert_eq!(state.highlighted(), Some(2));
+
+    state.set_disabled(4, true);
+
+    assert_eq!(
+        press(&mut state, Key::Named(Named::Enter)),
+        Some(Output::Activated(2))
+    );
+    assert!(!state.is_open());
+}
+
+#[test]
 fn a_closed_menu_claims_no_keys() {
     let state = state();
     for key in [Named::ArrowDown, Named::ArrowUp, Named::Enter, Named::Space] {

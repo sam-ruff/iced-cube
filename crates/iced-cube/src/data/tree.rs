@@ -861,6 +861,8 @@ impl<Id: Copy + Eq + Hash> State<Id> {
                 } else {
                     let _ = self.partial.remove(&parent);
                 }
+            } else {
+                let _ = self.partial.remove(&parent);
             }
             current = self.parent(parent);
         }
@@ -873,6 +875,7 @@ impl<Id: Copy + Eq + Hash> State<Id> {
         if !self.slots.contains_key(&parent) {
             return false;
         }
+        let checked_before = self.checked.clone();
         for child in self.children(parent).to_vec() {
             self.remove(child);
         }
@@ -887,16 +890,18 @@ impl<Id: Copy + Eq + Hash> State<Id> {
         if children.is_empty() {
             let _ = self.expanded.remove(&parent);
         }
-        if self.mode != Mode::Checkbox || !self.checked.contains(&parent) {
+        if self.mode != Mode::Checkbox {
             return false;
         }
-        for child in children {
-            if self.is_enabled(child) {
-                self.set_subtree(child, true);
+        if self.checked.contains(&parent) {
+            for child in children {
+                if self.is_enabled(child) {
+                    self.set_subtree(child, true);
+                }
             }
         }
         self.refresh(Some(parent));
-        true
+        self.checked != checked_before
     }
 
     /// Forgets a node and everything under it.
@@ -1892,6 +1897,47 @@ mod tests {
         )]));
         assert_eq!(checked(output), [7, 70]);
         assert_eq!(state.check_state(7), CheckState::Checked);
+    }
+
+    #[test]
+    fn replacing_partially_checked_children_refreshes_ancestors_and_reports_checks() {
+        let mut state = State::new([node(1, "Root").children([
+            node(2, "Folder").children([node(3, "Old"), node(4, "Other")]),
+            node(5, "Sibling"),
+        ])])
+        .with_mode(Mode::Checkbox);
+        let _ = state.update(Event::Check(3, true));
+        assert_eq!(state.check_state(1), CheckState::Indeterminate);
+        assert_eq!(state.check_state(2), CheckState::Indeterminate);
+
+        let output = state.update(Event::Received(vec![loaded(2, [node(6, "New")])]));
+
+        assert_eq!(state.check_state(1), CheckState::Unchecked);
+        assert_eq!(state.check_state(2), CheckState::Unchecked);
+        assert_eq!(checked(output), Vec::<u32>::new());
+    }
+
+    #[test]
+    fn replacing_partially_checked_children_with_an_empty_list_clears_the_partial_mark() {
+        let mut state =
+            State::new([node(1, "Folder").children([node(2, "Old"), node(3, "Other")])])
+                .with_mode(Mode::Checkbox);
+        let _ = state.update(Event::Check(2, true));
+
+        let output = state.update(Event::Received(vec![loaded(1, [])]));
+
+        assert_eq!(state.check_state(1), CheckState::Unchecked);
+        assert_eq!(checked(output), Vec::<u32>::new());
+    }
+
+    #[test]
+    fn reloading_an_unchanged_checked_leaf_emits_no_checkbox_change() {
+        let mut state = State::new([node(1, "Folder").lazy()]).with_mode(Mode::Checkbox);
+        let _ = state.update(Event::Check(1, true));
+        let output = state.update(Event::Received(vec![loaded(1, [])]));
+
+        assert_eq!(state.check_state(1), CheckState::Checked);
+        assert!(output.is_none());
     }
 
     #[test]
