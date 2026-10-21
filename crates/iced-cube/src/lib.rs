@@ -102,6 +102,8 @@ pub use layout::{hstack, vstack};
 
 #[cfg(feature = "command")]
 pub use navigation::command;
+#[cfg(feature = "document-tabs")]
+pub use navigation::document_tabs;
 #[cfg(feature = "pagination")]
 pub use navigation::pagination;
 #[cfg(feature = "sidebar")]

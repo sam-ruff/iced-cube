@@ -218,6 +218,25 @@ fn the_json_search_bar_fits_a_phone() {
 }
 
 #[test]
+fn document_tabs_scroll_to_the_active_tab_on_a_phone() {
+    let gallery = open("document-tabs/editor");
+    let mut ui = render(&gallery);
+    for label in ["main.rs", "parser.rs", "notes.md"] {
+        let bounds = ui.find(label).expect("tab label").bounds();
+        assert!(bounds.height < 24.0, "{label} on one line");
+    }
+    let found = ui.find("parser.rs").expect("active tab");
+    let active = found.visible_bounds().expect("the active tab is visible");
+    assert_eq!(active.width, found.bounds().width, "shown in full");
+    assert!(active.x >= 0.0, "starts at {}", active.x);
+    assert!(
+        active.x + active.width <= PHONE.width,
+        "ends at {}",
+        active.x + active.width
+    );
+}
+
+#[test]
 fn every_theme_token_remains_readable_in_two_columns_on_a_phone() {
     for width in [328.0, 358.0] {
         let gallery = open("theme/tokens");

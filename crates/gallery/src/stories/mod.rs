@@ -18,6 +18,7 @@ pub mod command_palette;
 pub mod context_menu;
 pub mod data_table;
 pub mod dialog;
+pub mod document_tabs;
 pub mod dropdown_menu;
 pub mod icon_button;
 pub mod input;
@@ -471,6 +472,26 @@ crate::stories! {
         id: "sidebar/resizable", component: "sidebar", title: "In a resizable panel",
         description: "The sidebar fills a collapsible panel beside the page. Dragging the panel below its minimum snaps it to the width of the rail.",
         file: "sidebar/resizable.rs", height: 360, edge: true,
+    }
+    DocumentTabsEditor => document_tabs::editor {
+        id: "document-tabs/editor", component: "document-tabs", title: "Editor",
+        description: "Open files with icons, a pinned README, unsaved changes shown as dots and a new tab button. Drag a tab to move it, middle-click to close it, or right-click for more, including an app item that copies the path.",
+        file: "document_tabs/editor.rs", height: 320,
+    }
+    DocumentTabsOverflow => document_tabs::overflow {
+        id: "document-tabs/overflow", component: "document-tabs", title: "Many tabs",
+        description: "Tabs that do not fit scroll sideways, keeping the active one in view, and a button at the end lists them all.",
+        file: "document_tabs/overflow.rs", height: 200,
+    }
+    DocumentTabsConfirmClose => document_tabs::confirm_close {
+        id: "document-tabs/confirm-close", component: "document-tabs", title: "Confirm before closing",
+        description: "Closing only asks. The app checks for unsaved changes, confirms with an alert dialog, then closes the tabs itself.",
+        file: "document_tabs/confirm_close.rs", height: 360, edge: true,
+    }
+    DocumentTabsKeyboard => document_tabs::keyboard {
+        id: "document-tabs/keyboard", component: "document-tabs", title: "Keyboard shortcuts",
+        description: "The default keymap with Alt chords added, since browsers keep Ctrl+Tab, Ctrl+W and Ctrl+PageDown for themselves. Releasing every modifier ends a walk through recent tabs.",
+        file: "document_tabs/keyboard.rs", height: 280, subscription: true,
     }
     AccordionSingle => accordion::single {
         id: "accordion/single", component: "accordion", title: "Single",

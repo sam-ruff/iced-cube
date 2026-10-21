@@ -4,11 +4,12 @@
 pub mod data_table;
 #[cfg(any(
     feature = "data-table",
+    feature = "document-tabs",
     feature = "json-viewer",
     feature = "property-grid",
     feature = "tree"
 ))]
-mod ellipsis;
+pub(crate) mod ellipsis;
 #[cfg(any(
     feature = "data-table",
     feature = "json-viewer",
