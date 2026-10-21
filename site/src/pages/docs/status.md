@@ -27,12 +27,8 @@ Rust 1.88 or newer, which is what iced 0.14 needs. iced-cube uses the 2024 editi
 These are next on the roadmap, roughly in order:
 
 - File tree
-- Property grid
-- Virtual list and virtual tree
-- Log viewer
-- JSON viewer
+- Virtual tree
 - Inspector
-- Document tabs
 - App shell
 
 ## Changelog
