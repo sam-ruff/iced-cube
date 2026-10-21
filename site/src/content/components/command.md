@@ -7,7 +7,7 @@ module: navigation::command
 imports: |
   use iced_cube::navigation::command::{self, Output, State, command, group, item};
 keywords: [command menu, launcher, fuzzy search, quick open]
-related: [combobox, dialog, tabs]
+related: [command-palette, combobox, dialog, tabs]
 hero: command/inline
 stories: [command/inline, command/keyboard, command/async-search, command/palette]
 api:
@@ -53,7 +53,7 @@ api:
 
 A command list puts every action behind one search field. Typing ranks the items: an exact match comes first, then prefixes, then matches at the start of a word, then anywhere, then letters in order. Keywords let an item be found by other names, such as "preferences" for Settings. Disabled items stay visible but are skipped by the keyboard.
 
-The list is embedded where you place it. For a command palette, put it in a [dialog](../dialog/) and open it from a button or a shortcut such as Ctrl+K, as the palette example does. Let that shortcut through the dialog with `.pass_through(...)` so it closes the palette too, and close the dialog when `update` returns `Output::Activated` or `Output::Closed`. Give a palette `.max_height(...)` rather than a fixed height, so it shrinks around a handful of matches instead of leaving an empty panel.
+The list is embedded where you place it. For an app-wide launcher, use the [command palette](../command-palette/), which builds this list into a dialog with the Ctrl+K and Ctrl+Shift+P chords, recent commands and nested pages. To compose one yourself, put the list in a [dialog](../dialog/) and open it from a button or a shortcut such as Ctrl+K, as the palette example does. Let that shortcut through the dialog with `.pass_through(...)` so it closes the palette too, and close the dialog when `update` returns `Output::Activated` or `Output::Closed`. Give a palette `.max_height(...)` rather than a fixed height, so it shrinks around a handful of matches instead of leaving an empty panel.
 
 Results can also come from background work, such as a file index or a server. When `update` returns `Output::Search(query)`, start a producer with that query and a clone of the sender. It sends `command::results(query, group, items)` as matches arrive; anything tagged with an older query is dropped, so slow searches never overwrite newer ones. The async example waits with `futures-timer` rather than a thread, so it runs in the browser too.
 

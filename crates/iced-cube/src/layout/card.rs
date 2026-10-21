@@ -3,7 +3,7 @@
 use iced::widget::{column, container, text};
 use iced::{Background, Border, Color, Element, Length, Shadow, Vector};
 
-use crate::theme::{Tokens, fade, mix, radius, space, text_size};
+use crate::theme::{Tokens, fade, mix, space, text_size};
 
 /// Headings break inside a word only when the word alone is wider than the
 /// card, so they never run past the border.
@@ -133,17 +133,17 @@ pub struct Colours {
 /// above the page background.
 pub fn colours(tokens: &Tokens) -> Colours {
     if tokens.is_dark {
-        let background = mix(tokens.background, tokens.foreground, 0.04);
+        let background = mix(tokens.background, tokens.foreground, 0.055);
         return Colours {
             background,
-            border: mix(background, tokens.foreground, 0.1),
-            shadow: Color::TRANSPARENT,
+            border: mix(background, tokens.border, 0.65),
+            shadow: fade(tokens.background, 0.5),
         };
     }
     Colours {
         background: tokens.background,
-        border: mix(tokens.background, tokens.border, 0.8),
-        shadow: fade(tokens.foreground, 0.06),
+        border: mix(tokens.background, tokens.border, 0.65),
+        shadow: fade(tokens.foreground, 0.08),
     }
 }
 
@@ -156,12 +156,12 @@ pub fn style(tokens: &Tokens) -> container::Style {
         border: Border {
             color: colours.border,
             width: 1.0,
-            radius: radius::LG.into(),
+            radius: 12.0.into(),
         },
         shadow: Shadow {
             color: colours.shadow,
-            offset: Vector::new(0.0, 1.0),
-            blur_radius: 3.0,
+            offset: Vector::new(0.0, 4.0),
+            blur_radius: 16.0,
         },
         snap: true,
     }
@@ -170,7 +170,7 @@ pub fn style(tokens: &Tokens) -> container::Style {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::theme::{dark, light};
+    use crate::theme::{Config, dark, light};
 
     fn luminance(color: Color) -> f32 {
         0.2126 * color.r + 0.7152 * color.g + 0.0722 * color.b
@@ -196,6 +196,24 @@ mod tests {
         let tokens = Tokens::of(&dark());
         let colours = colours(&tokens);
         assert!(luminance(colours.background) > luminance(tokens.background));
+    }
+
+    #[test]
+    fn dark_cards_stay_between_the_page_and_floating_surfaces() {
+        for theme in [
+            dark(),
+            Config::dark()
+                .background(iced::color!(0x18202b))
+                .foreground(iced::color!(0xe3e9f3))
+                .build(),
+        ] {
+            let tokens = Tokens::of(&theme);
+            let card = colours(&tokens);
+            assert!(luminance(card.background) > luminance(tokens.background));
+            assert!(luminance(card.background) < luminance(tokens.popover));
+            assert!(luminance(card.shadow) < luminance(card.background));
+            assert!(card.shadow.a > 0.0);
+        }
     }
 
     #[test]

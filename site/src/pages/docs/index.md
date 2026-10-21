@@ -4,7 +4,7 @@ title: Introduction
 description: Themeable application components for iced, with Lucide icons built in.
 ---
 
-iced-cube is a set of components for [iced](https://iced.rs), the Rust GUI library. It covers buttons, form controls (inputs, textareas, checkboxes, radios, switches, selects, sliders and labelled fields), layout pieces (cards, stacks, separators, scroll areas and accordions), tabs, tooltips, toasts, and feedback such as alerts, badges, progress bars and spinners. They all draw from one set of design tokens, so they look like they belong together in light and dark mode.
+iced-cube is a set of components for [iced](https://iced.rs), the Rust GUI library. It covers buttons, form controls (inputs, textareas, checkboxes, radios, switches, selects, sliders and labelled fields), layout pieces (cards, stacks, separators, scroll areas and accordions), tabs, tooltips, toasts, feedback such as alerts, badges, progress bars and spinners, and application chrome: a menubar, a toolbar, a status bar and a command palette. They all draw from one set of design tokens, so they look like they belong together in light and dark mode.
 
 More components are on the way. The [Status](status/) page lists what is planned.
 

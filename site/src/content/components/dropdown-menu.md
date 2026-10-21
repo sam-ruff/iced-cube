@@ -2,7 +2,7 @@
 title: Dropdown menu
 description: A menu of actions that opens from a button, with check marks, radio choices and submenus.
 group: Overlays
-order: 4
+order: 5
 module: overlay::dropdown_menu
 imports: |
   use iced_cube::dropdown_menu::{

@@ -20,7 +20,8 @@ pub mod dropdown_menu;
     feature = "combobox",
     feature = "command",
     feature = "dropdown-menu",
-    feature = "select"
+    feature = "select",
+    feature = "sidebar"
 ))]
 pub mod menu;
 #[cfg(feature = "popover")]

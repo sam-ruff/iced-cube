@@ -30,7 +30,8 @@ impl Example {
                 .width(160)
                 .into()
         }))
-        .spacing(12);
+        .spacing(12)
+        .padding(24);
 
         scroll_area(items)
             .direction(Direction::Horizontal)

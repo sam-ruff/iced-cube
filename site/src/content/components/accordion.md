@@ -37,6 +37,8 @@ api:
 
 Use an accordion to shorten long pages such as FAQs or settings, where people only need one or two sections at a time. The chevron points down while a section is closed and up while it is open.
 
+Semibold headings separate each section from its muted body text. Content inherits the muted colour by default; text and controls with their own styles keep those colours.
+
 Clicking the header of an open section closes it in both modes.
 
 The state does not know which sections exist, so keyboard actions take the section ids in display order. `Next` and `Previous` move the most recently opened section along that list, and `ExpandAll` only applies in Multiple mode.

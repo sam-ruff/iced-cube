@@ -1,6 +1,6 @@
 [package]
 name = "iced-cube"
-version = "0.0.2"
+version = "0.0.3"
 description = "Themeable application components for the iced GUI library, with Lucide icons"
 readme = "README.md"
 keywords = ["iced", "gui", "components", "ui", "widgets"]
@@ -22,7 +22,16 @@ wayland = ["iced/wayland"]
 thread-pool = ["iced/thread-pool"]
 tokio = ["iced/tokio"]
 
-full = ["primitives", "forms", "layout", "navigation", "overlay", "feedback"]
+full = [
+    "primitives",
+    "forms",
+    "layout",
+    "navigation",
+    "overlay",
+    "feedback",
+    "application",
+    "data",
+]
 
 primitives = [
     "button",
@@ -38,10 +47,12 @@ primitives = [
     "toggle-group",
 ]
 forms = ["combobox", "field", "select", "textarea"]
-layout = ["card", "stack", "accordion"]
-navigation = ["breadcrumb", "command", "pagination", "tabs"]
+layout = ["card", "stack", "accordion", "resizable-panel", "split-pane"]
+navigation = ["breadcrumb", "command", "pagination", "tabs", "sidebar"]
 overlay = ["tooltip", "toast", "dialog", "popover", "dropdown-menu", "context-menu"]
 feedback = ["alert", "avatar", "badge", "progress", "spinner"]
+application = ["menubar", "toolbar", "status-bar", "command-palette"]
+data = ["tree", "data-table"]
 
 button = ["iced/advanced"]
 icon-button = ["button", "tooltip"]
@@ -61,10 +72,13 @@ textarea = ["input"]
 card = []
 stack = []
 accordion = []
+resizable-panel = ["iced/advanced"]
+split-pane = ["resizable-panel"]
 breadcrumb = []
 command = ["iced/advanced"]
 pagination = ["button"]
 tabs = ["iced/advanced"]
+sidebar = ["iced/advanced", "tooltip", "icon-button"]
 tooltip = []
 toast = ["button", "icon-button"]
 dialog = ["button", "icon-button", "iced/advanced"]
@@ -76,6 +90,22 @@ avatar = ["iced/advanced", "iced/image-without-codecs"]
 badge = ["iced/advanced"]
 progress = []
 spinner = ["iced/advanced"]
+menubar = ["dropdown-menu"]
+toolbar = ["icon-button", "dropdown-menu", "separator"]
+status-bar = ["button", "badge", "progress", "spinner", "tooltip"]
+command-palette = ["command", "dialog", "button"]
+tree = ["iced/advanced", "badge", "checkbox", "context-menu", "scroll-area"]
+data-table = [
+    "iced/advanced",
+    "badge",
+    "button",
+    "checkbox",
+    "context-menu",
+    "icon-button",
+    "input",
+    "scroll-area",
+    "select",
+]
 
 [dependencies]
 iced = { version = "0.14.0", default-features = false, features = ["svg"] }

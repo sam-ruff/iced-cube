@@ -2,7 +2,7 @@
 title: Popover
 description: A floating panel of any content, anchored to the button that opens it.
 group: Overlays
-order: 3
+order: 4
 module: overlay::popover
 imports: |
   use iced_cube::popover;

@@ -117,7 +117,7 @@ iced = "0.14"
 iced-cube = { version = "0.0", default-features = false, features = ["button", "input", "dialog"] }
 ```
 
-A component turns on anything it is built from, so `dialog` brings in `button` and `icon-button` for you. You can also ask for a whole group: `primitives`, `forms`, `layout`, `navigation`, `overlay` or `feedback`. `full` is every component, and it is what the defaults include. The theme, icons and keyboard shortcut modules are always there.
+A component turns on anything it is built from, so `dialog` brings in `button` and `icon-button` for you. You can also ask for a whole group: `primitives`, `forms`, `layout`, `navigation`, `overlay`, `data`, `feedback` or `application`. `full` is every component, and it is what the defaults include. The theme, icons and keyboard shortcut modules are always there.
 
 Turning the defaults off also drops `x11`, `wayland` and `thread-pool`, described below. That makes no difference in an app that depends on iced with its own defaults, which is the usual case.
 

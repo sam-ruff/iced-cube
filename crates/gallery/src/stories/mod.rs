@@ -14,23 +14,30 @@ pub mod card;
 pub mod checkbox;
 pub mod combobox;
 pub mod command;
+pub mod command_palette;
 pub mod context_menu;
+pub mod data_table;
 pub mod dialog;
 pub mod dropdown_menu;
 pub mod icon_button;
 pub mod input;
 pub mod label;
+pub mod menubar;
 pub mod pagination;
 pub mod popover;
 pub mod progress;
 pub mod radio;
+pub mod resizable_panel;
 pub mod scroll_area;
 pub mod select;
 pub mod separator;
 pub mod showcase;
+pub mod sidebar;
 pub mod slider;
 pub mod spinner;
+pub mod split_pane;
 pub mod stack;
+pub mod status_bar;
 pub mod switch;
 pub mod tabs;
 pub mod textarea;
@@ -38,7 +45,9 @@ pub mod theme;
 pub mod toast;
 pub mod toggle;
 pub mod toggle_group;
+pub mod toolbar;
 pub mod tooltip;
+pub mod tree;
 
 crate::stories! {
     ButtonVariants => button::variants {
@@ -441,6 +450,26 @@ crate::stories! {
         description: "The list in a dialog, opened by a button or Ctrl+K. Escape clears the query, then closes the palette; Ctrl+K passes through the dialog to close it too.",
         file: "command/palette.rs", height: 460, subscription: true, edge: true,
     }
+    SidebarDefault => sidebar::default {
+        id: "sidebar/default", component: "sidebar", title: "Default",
+        description: "A workspace switcher, groups with icons and a badge, a parent with nested items, a collapsible group with a disabled item, and a user menu in the footer. On a phone it becomes a drawer.",
+        file: "sidebar/default.rs", height: 460, edge: true,
+    }
+    SidebarRail => sidebar::rail {
+        id: "sidebar/rail", component: "sidebar", title: "Collapsed to a rail",
+        description: "Icons only, with the label in a tooltip. Ctrl+B toggles the rail through the default keymap, routed from keys::subscription with State::shortcut.",
+        file: "sidebar/rail.rs", height: 360, subscription: true, edge: true,
+    }
+    SidebarDrawer => sidebar::drawer {
+        id: "sidebar/drawer", component: "sidebar", title: "Drawer on narrow windows",
+        description: "Below the breakpoint the sidebar slides over the page on a scrim, opened by the trigger in the bar above the content. This example sets the breakpoint so high that it always shows the drawer.",
+        file: "sidebar/drawer.rs", height: 400, edge: true,
+    }
+    SidebarResizable => sidebar::resizable {
+        id: "sidebar/resizable", component: "sidebar", title: "In a resizable panel",
+        description: "The sidebar fills a collapsible panel beside the page. Dragging the panel below its minimum snaps it to the width of the rail.",
+        file: "sidebar/resizable.rs", height: 360, edge: true,
+    }
     AccordionSingle => accordion::single {
         id: "accordion/single", component: "accordion", title: "Single",
         description: "Opening a section closes the others.",
@@ -450,6 +479,41 @@ crate::stories! {
         id: "accordion/multiple", component: "accordion", title: "Multiple",
         description: "Sections open and close independently.",
         file: "accordion/multiple.rs",
+    }
+    ResizablePanelHorizontal => resizable_panel::horizontal {
+        id: "resizable-panel/horizontal", component: "resizable-panel", title: "Horizontal",
+        description: "Three panels in a row with grips on the handles. Each shows its share of the width.",
+        file: "resizable_panel/horizontal.rs", height: 240,
+    }
+    ResizablePanelVertical => resizable_panel::vertical {
+        id: "resizable-panel/vertical", component: "resizable-panel", title: "Vertical",
+        description: "A header and content stacked in a column.",
+        file: "resizable_panel/vertical.rs",
+    }
+    ResizablePanelNested => resizable_panel::nested {
+        id: "resizable-panel/nested", component: "resizable-panel", title: "Nested",
+        description: "A column of two panels inside a row. Below 480 pixels the row stacks into a column.",
+        file: "resizable_panel/nested.rs",
+    }
+    ResizablePanelCollapsible => resizable_panel::collapsible {
+        id: "resizable-panel/collapsible", component: "resizable-panel", title: "Collapsible with limits",
+        description: "A folder list between 140 pixels and half the width that snaps shut below its threshold, with a button that toggles it.",
+        file: "resizable_panel/collapsible.rs", height: 260,
+    }
+    ResizablePanelKeyboard => resizable_panel::keyboard {
+        id: "resizable-panel/keyboard", component: "resizable-panel", title: "Keyboard shortcuts",
+        description: "A focused handle resolves the default keymap, with Page Up and Page Down added. A press focuses the handle, and so does widget::operation::focus with its id.",
+        file: "resizable_panel/keyboard.rs", height: 280, task: true,
+    }
+    SplitPaneEditorPreview => split_pane::editor_preview {
+        id: "split-pane/editor-preview", component: "split-pane", title: "Editor and preview",
+        description: "A text editor beside its live preview. Below 480 pixels the two stack.",
+        file: "split_pane/editor_preview.rs", height: 340,
+    }
+    SplitPaneVertical => split_pane::vertical {
+        id: "split-pane/vertical", component: "split-pane", title: "Vertical",
+        description: "A query above its results, each with a minimum height.",
+        file: "split_pane/vertical.rs", height: 340,
     }
     ToastBackgroundJob => toast::background_job {
         id: "toast/background-job", component: "toast", title: "Background job",
@@ -540,6 +604,86 @@ crate::stories! {
         id: "context-menu/keyboard", component: "context-menu", title: "One menu for every row",
         description: "A file list shares one menu. Up and Down pick a file, and Shift+F10 or the Menu key opens its menu below it.",
         file: "context_menu/keyboard.rs", height: 400, subscription: true,
+    }
+    MenubarEditor => menubar::editor {
+        id: "menubar/editor", component: "menubar", title: "Editor menus",
+        description: "File, Edit, View and Help with shortcut hints, a submenu, checkbox and radio items. Once a menu is open, moving onto another title switches to it. F10 or Alt focuses the bar and the arrows move through it.",
+        file: "menubar/editor.rs", height: 400, subscription: true, edge: true,
+    }
+    ToolbarFormatting => toolbar::formatting {
+        id: "toolbar/formatting", component: "toolbar", title: "Formatting toolbar",
+        description: "Toggles, a single-choice alignment group, undo and redo. Drag the slider: whatever does not fit moves into the More menu. Ctrl+F10 focuses the toolbar for the arrow keys.",
+        file: "toolbar/formatting.rs", height: 360, subscription: true,
+    }
+    StatusBarBackground => status_bar::background {
+        id: "status-bar/background", component: "status-bar", title: "Background updates",
+        description: "A simulated worker sends git sync, build progress and cursor updates through the channel. It waits with futures-timer, so it also runs in the browser.",
+        file: "status_bar/background.rs", height: 200, subscription: true, edge: true,
+    }
+    CommandPalettePages => command_palette::pages {
+        id: "command-palette/pages", component: "command-palette", title: "Pages and recent commands",
+        description: "Ctrl+K or Ctrl+Shift+P opens it anywhere. Recent commands come first, and Change theme opens a page of its own; Backspace on an empty query goes back.",
+        file: "command_palette/pages.rs", height: 460, subscription: true, edge: true,
+    }
+    CommandPaletteAsyncSearch => command_palette::async_search {
+        id: "command-palette/async-search", component: "command-palette", title: "Async results",
+        description: "Typing asks the app to search, and a background task streams file matches through the command list's channel.",
+        file: "command_palette/async_search.rs", height: 460, subscription: true, edge: true,
+    }
+    TreeFileExplorer => tree::file_explorer {
+        id: "tree/file-explorer", component: "tree", title: "File explorer",
+        description: "Folders that open and close, file sizes and a count badge, indentation guides, a disabled folder, a name too long to fit and a context menu on every node.",
+        file: "tree/file_explorer.rs", height: 380,
+    }
+    TreeCheckbox => tree::checkbox {
+        id: "tree/checkbox", component: "tree", title: "Checkboxes",
+        description: "Checking a group checks its members, and a group with some members checked shows a dash. The disabled permission keeps its state.",
+        file: "tree/checkbox.rs", height: 440,
+    }
+    TreeLazyLoading => tree::lazy_loading {
+        id: "tree/lazy-loading", component: "tree", title: "Lazy loading",
+        description: "Folders fetch their children when first opened. A simulated server sends them through the tree's channel after a short wait, using futures-timer so it also runs in the browser.",
+        file: "tree/lazy_loading.rs", height: 360, subscription: true,
+    }
+    TreeKeyboard => tree::keyboard {
+        id: "tree/keyboard", component: "tree", title: "Keyboard shortcuts",
+        description: "A multiple selection driven by the default keymap with J and K added. The tree resolves keys only while it has focus.",
+        file: "tree/keyboard.rs", height: 400,
+    }
+    DataTableDefault => data_table::default {
+        id: "data-table/default", component: "data-table", title: "Payments",
+        description: "Sortable headers, a search box, a status filter, a Columns menu, status badges and right-aligned amounts.",
+        file: "data_table/default.rs", height: 460,
+    }
+    DataTablePagination => data_table::pagination {
+        id: "data-table/pagination", component: "data-table", title: "Pagination",
+        description: "243 invoices in pages of 10, 25, 50 or 100. The rows scroll under a header that stays put, and only the rows in view are built.",
+        file: "data_table/pagination.rs", height: 480,
+    }
+    DataTableSelection => data_table::selection {
+        id: "data-table/selection", component: "data-table", title: "Selection and bulk actions",
+        description: "A checkbox on every row, and a header checkbox that selects or clears the rows on the page. Buttons above act on the selection.",
+        file: "data_table/selection.rs", height: 440,
+    }
+    DataTableRowActions => data_table::row_actions {
+        id: "data-table/row-actions", component: "data-table", title: "Row actions",
+        description: "One context menu shared by every row, opened by a right-click, a long press, the row's menu button or Shift+F10. The progress column is a custom cell.",
+        file: "data_table/row_actions.rs", height: 360,
+    }
+    DataTableLoading => data_table::loading {
+        id: "data-table/loading", component: "data-table", title: "Loading",
+        description: "Placeholder rows while the data loads. The switch toggles them.",
+        file: "data_table/loading.rs", height: 440,
+    }
+    DataTableEmpty => data_table::empty {
+        id: "data-table/empty", component: "data-table", title: "Empty",
+        description: "A message in place of rows when nothing matches, with a button that clears the search.",
+        file: "data_table/empty.rs", height: 340,
+    }
+    DataTableKeyboard => data_table::keyboard {
+        id: "data-table/keyboard", component: "data-table", title: "Keyboard shortcuts",
+        description: "The default keymap with J and K added. The table resolves keys only while it has focus, and the highlight moves on to the next page after the last row.",
+        file: "data_table/keyboard.rs", height: 440,
     }
     ThemeCustom => theme::custom {
         id: "theme/custom", component: "theme", title: "Custom palette",

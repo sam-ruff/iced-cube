@@ -1,3 +1,16 @@
+## [0.0.3](https://github.com/sam-ruff/iced-cube/compare/v0.0.2...v0.0.3) (2026-10-06)
+
+### Features
+
+* add resizable panel, split pane and sidebar ([8a7e61c](https://github.com/sam-ruff/iced-cube/commit/8a7e61c47ec1e0e71b07cdbbce2902f11f202dac))
+* **application:** add a menubar, toolbar, status bar and command palette ([f611d48](https://github.com/sam-ruff/iced-cube/commit/f611d487260536f844d2c79521fc2cd96d035eab))
+* **data:** add tree and data table components ([289e4f8](https://github.com/sam-ruff/iced-cube/commit/289e4f81fef43d7e4eb95c2d050b769833193eeb))
+
+### Bug Fixes
+
+* correct component state and preview behaviour ([09cf3c1](https://github.com/sam-ruff/iced-cube/commit/09cf3c1b6d0d472967c5836f9bdae7abda744e37))
+* **layout:** refine card elevation and accordion hierarchy ([8dd7fa9](https://github.com/sam-ruff/iced-cube/commit/8dd7fa995dba89d638e060fb6ec8ccf6cb75e819))
+
 ## [0.0.2](https://github.com/sam-ruff/iced-cube/compare/v0.0.1...v0.0.2) (2026-09-27)
 
 ### ⚠ BREAKING CHANGES

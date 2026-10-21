@@ -13,7 +13,7 @@ const { id, height = 280 } = Astro.props;
 const story = findStory(id);
 const key = id.replaceAll("/", "-");
 const snapshots = href("/snapshots/");
-const standalone = `${href("/preview/")}?story=${encodeURIComponent(id)}`;
+const standalone = `${href("/preview/index.html")}?story=${encodeURIComponent(id)}`;
 const name = `${story.title} example`;
 // Scroll areas need the wheel inside the preview; every other preview lets the page scroll.
 const wheel = story.component === "scroll-area";
@@ -38,7 +38,7 @@ const wheel = story.component === "scroll-area";
       <button type="button" class="tool" data-reset aria-label={`Restart ${story.title} preview`} title="Restart preview">
         <Icon name="RotateCcw" size={15} />
       </button>
-      <a class="tool" href={standalone} target="_blank" rel="noopener" aria-label={`Open ${story.title} preview in a new tab`} title="Open in new tab">
+      <a class="tool" href={standalone} data-standalone-preview target="_blank" rel="noopener" aria-label={`Open ${story.title} preview in a new tab`} title="Open in new tab">
         <Icon name="ExternalLink" size={15} />
       </a>
     </div>

@@ -65,3 +65,201 @@ fn settings_footer_fits_the_card() {
         save.x + save.width
     );
 }
+
+#[test]
+fn accordion_questions_and_answers_fit_a_phone_preview() {
+    iced_cube::theme::set_font(FONT);
+    for width in [328.0, 358.0] {
+        for choice in [ThemeChoice::Light, ThemeChoice::Dark] {
+            let gallery = Gallery::new(Mode::Single, Some("accordion/single"), choice);
+            let settings = iced::Settings {
+                default_font: FONT,
+                fonts: FONT_FILES.iter().map(|font| (*font).into()).collect(),
+                ..iced::Settings::default()
+            };
+            let mut ui = Simulator::with_size(settings, Size::new(width, 280.0), gallery.view());
+            let labels = [
+                "How long does shipping take?",
+                "Can I return an item?",
+                "How do I contact support?",
+            ];
+            for label in labels {
+                let bounds = ui.find(label).expect("question is rendered").bounds();
+                assert!(bounds.height < 24.0, "{label} wraps: {bounds:?}");
+                assert!(bounds.x >= 0.0 && bounds.x + bounds.width <= width);
+            }
+            let answer = ui
+                .find("Orders leave the warehouse within two working days.")
+                .expect("open answer is rendered")
+                .bounds();
+            let next = ui.find(labels[1]).expect("next question").bounds();
+            assert!(answer.height > 20.0, "body text wraps at narrow widths");
+            assert!(
+                answer.y + answer.height < next.y,
+                "answer clears the next header"
+            );
+            assert!(answer.x >= 0.0 && answer.x + answer.width <= width);
+            ui.click(labels[1])
+                .expect("next question remains clickable");
+            assert_eq!(ui.into_messages().count(), 1);
+        }
+    }
+}
+
+#[test]
+fn payments_become_cards_that_fit_the_phone() {
+    let gallery = open("data-table/default");
+    let mut ui = render(&gallery);
+    for text in [
+        "Columns",
+        "Paid",
+        "Processing",
+        "ken99@example.com",
+        "$316.00",
+        "monserrat44@example.com",
+    ] {
+        let bounds = ui.find(text).expect(text).bounds();
+        assert!(
+            bounds.x >= 0.0 && bounds.x + bounds.width <= PHONE.width,
+            "{text} runs off the edge: {bounds:?}"
+        );
+        assert!(bounds.height < 24.0, "{text} wraps: {bounds:?}");
+    }
+    let email = ui.find("ken99@example.com").expect("card line").bounds();
+    let label = ui.find("Email").expect("line label").bounds();
+    assert_eq!(
+        email.center_y().round(),
+        label.center_y().round(),
+        "a labelled line"
+    );
+}
+
+#[test]
+fn a_long_file_name_ends_in_an_ellipsis_on_a_phone() {
+    let gallery = open("tree/file-explorer");
+    let mut ui = render(&gallery);
+    let name = ui
+        .find("a_file_whose_name_is_far_too_long_for_the_row.rs")
+        .expect("the full name is reported")
+        .bounds();
+    assert!(
+        name.x + name.width <= PHONE.width,
+        "ends at {}",
+        name.x + name.width
+    );
+    assert!(name.height <= 20.0, "one line, got {}", name.height);
+}
+
+#[test]
+fn every_theme_token_remains_readable_in_two_columns_on_a_phone() {
+    for width in [328.0, 358.0] {
+        let gallery = open("theme/tokens");
+        let settings = iced::Settings {
+            default_font: FONT,
+            fonts: FONT_FILES.iter().map(|font| (*font).into()).collect(),
+            ..iced::Settings::default()
+        };
+        let mut ui = Simulator::with_size(settings, Size::new(width, 260.0), gallery.view());
+        for name in [
+            "background",
+            "foreground",
+            "muted",
+            "muted_foreground",
+            "border",
+            "ring",
+            "primary",
+            "secondary",
+            "accent",
+            "destructive",
+            "success",
+            "warning",
+        ] {
+            let bounds = ui.find(name).expect("token label").bounds();
+            assert!(
+                bounds.width > 0.0 && bounds.height <= 18.0,
+                "{name}: {bounds:?}"
+            );
+            assert!(
+                bounds.x >= 0.0 && bounds.x + bounds.width <= width,
+                "{name}: {bounds:?}"
+            );
+        }
+        let background = ui.find("background").expect("first token").bounds();
+        let foreground = ui.find("foreground").expect("second token").bounds();
+        let muted = ui.find("muted").expect("third token").bounds();
+        assert_eq!(background.y, foreground.y);
+        assert!(muted.y > background.y);
+    }
+}
+
+/// Sends the preview one pointer move and applies what the story sends
+/// back, such as a sidebar noticing the narrow width.
+fn settle(gallery: &mut Gallery) {
+    let messages: Vec<gallery::Message> = {
+        let mut ui = render(gallery);
+        let _ = ui.simulate([iced::Event::Mouse(iced::mouse::Event::CursorMoved {
+            position: iced::Point::new(200.0, 200.0),
+        })]);
+        ui.into_messages().collect()
+    };
+    for message in messages {
+        let _ = gallery.update(message);
+    }
+}
+
+#[test]
+fn the_sidebar_is_a_closed_drawer_on_a_phone() {
+    let mut gallery = open("sidebar/default");
+    settle(&mut gallery);
+    let mut ui = render(&gallery);
+    assert!(ui.find("Dashboard").is_err(), "navigation hidden");
+    let title = ui.find("Everything in this project, in one place.");
+    let title = title.expect("page content").bounds();
+    assert!(
+        title.x < 64.0,
+        "content uses the width, starts at {}",
+        title.x
+    );
+}
+
+#[test]
+fn nested_panels_stack_on_a_phone() {
+    let gallery = open("resizable-panel/nested");
+    let mut ui = render(&gallery);
+    let files = ui.find("Files").expect("files pane").bounds();
+    let editor = ui.find("Editor").expect("editor pane").bounds();
+    let terminal = ui.find("Terminal").expect("terminal pane").bounds();
+    assert!(files.y < editor.y && editor.y < terminal.y, "one column");
+    let centre = |bounds: iced::Rectangle| bounds.x + bounds.width / 2.0;
+    assert!((centre(files) - centre(editor)).abs() < 1.0);
+}
+
+#[test]
+fn the_editor_and_preview_stack_on_a_phone() {
+    let gallery = open("split-pane/editor-preview");
+    let mut ui = render(&gallery);
+    let heading = ui.find("Fixes").expect("preview heading").bounds();
+    assert!(
+        heading.y > 150.0,
+        "preview below the editor at {}",
+        heading.y
+    );
+    assert!(heading.width < PHONE.width, "preview fits the frame");
+}
+
+#[test]
+fn collapsible_panels_keep_their_minimums_on_a_phone() {
+    let gallery = open("resizable-panel/collapsible");
+    let mut ui = render(&gallery);
+    let archive = ui.find("Archive").expect("folders stay open").bounds();
+    let hide = ui.find("Hide").expect("toggle").bounds();
+    assert!(archive.x < hide.x, "folders beside the messages");
+    assert!(hide.height < 24.0, "button label on one line");
+    // The label, the button's own padding, then the pane's padding, the
+    // card's border and the gallery's padding.
+    let right = hide.x + hide.width + 12.0 + 16.0 + 1.0 + 24.0;
+    assert!(
+        right <= PHONE.width,
+        "button fits its pane, ends at {right}"
+    );
+}
