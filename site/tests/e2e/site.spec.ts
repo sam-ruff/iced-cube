@@ -98,7 +98,8 @@ test("search finds a component by another name", async ({ page }) => {
   await page.locator("[data-search-open]").click();
   const input = page.locator("[data-search-input]");
   await input.fill("toggle");
-  await expect(page.getByRole("option").first()).toContainText("Switch");
+  await expect(page.getByRole("option").first()).toContainText("Toggle");
+  await expect(page.getByRole("option").filter({ hasText: "Switch" })).toHaveCount(1);
   await input.fill("picker");
   await expect(page.getByRole("option").first()).toContainText("Select");
   await input.press("Enter");

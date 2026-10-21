@@ -7,9 +7,9 @@ use iced_cube::data::{data_table, tree};
 use iced_cube::forms::{combobox, select};
 use iced_cube::keys::{Action, Keymap};
 use iced_cube::layout::{accordion, resizable_panel};
-use iced_cube::navigation::{command, sidebar, tabs};
+use iced_cube::navigation::{breadcrumb, command, pagination, sidebar, tabs};
 use iced_cube::overlay::{context_menu, dialog, dropdown_menu, popover, toast};
-use iced_cube::primitives::{checkbox, slider, switch};
+use iced_cube::primitives::{checkbox, slider, switch, toggle, toggle_group};
 use serde::Serialize;
 
 /// One action and the chords that trigger it by default.
@@ -37,6 +37,7 @@ pub fn bindings<A: Action>() -> Vec<Binding> {
 pub fn all() -> BTreeMap<&'static str, Vec<Binding>> {
     BTreeMap::from([
         ("accordion", bindings::<accordion::Action>()),
+        ("breadcrumb", bindings::<breadcrumb::Action>()),
         ("checkbox", bindings::<checkbox::Action>()),
         ("combobox", bindings::<combobox::Action>()),
         ("command", bindings::<command::Action>()),
@@ -46,6 +47,7 @@ pub fn all() -> BTreeMap<&'static str, Vec<Binding>> {
         ("dialog", bindings::<dialog::Action>()),
         ("dropdown-menu", bindings::<dropdown_menu::Action>()),
         ("menubar", bindings::<menubar::Action>()),
+        ("pagination", bindings::<pagination::Action>()),
         ("popover", bindings::<popover::Action>()),
         ("resizable-panel", bindings::<resizable_panel::Action>()),
         ("select", bindings::<select::Action>()),
@@ -55,6 +57,8 @@ pub fn all() -> BTreeMap<&'static str, Vec<Binding>> {
         ("switch", bindings::<switch::Action>()),
         ("tabs", bindings::<tabs::Action>()),
         ("toast", bindings::<toast::Action>()),
+        ("toggle", bindings::<toggle::Action>()),
+        ("toggle-group", bindings::<toggle_group::Action>()),
         ("toolbar", bindings::<toolbar::Action>()),
         ("tree", bindings::<tree::Action>()),
     ])
