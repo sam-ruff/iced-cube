@@ -259,6 +259,27 @@ fn document_tabs_scroll_to_the_active_tab_on_a_phone() {
 }
 
 #[test]
+fn the_log_toolbar_stacks_and_its_lines_fit_a_phone() {
+    let gallery = open("log-viewer/live");
+    let mut ui = render(&gallery);
+    fits_on_one_line(
+        &mut ui,
+        &[
+            "Trace 2",
+            "Debug 3",
+            "Info 7",
+            "Warn 1",
+            "Error 1",
+            "09:41:03.900",
+        ],
+    );
+    let search = ui.find("Search messages").expect("search").bounds();
+    assert!(search.x + search.width <= PHONE.width, "search: {search:?}");
+    let trace = ui.find("Trace 2").expect("filter").bounds();
+    assert!(trace.y > search.y, "the filters sit below the search");
+}
+
+#[test]
 fn every_theme_token_remains_readable_in_two_columns_on_a_phone() {
     for width in [328.0, 358.0] {
         let gallery = open("theme/tokens");

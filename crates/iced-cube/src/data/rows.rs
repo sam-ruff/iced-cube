@@ -13,6 +13,8 @@
 //! it. Rows dropped from the front can be reported through an origin, so
 //! the rows in view stay put.
 
+#[cfg(feature = "log-viewer")]
+use std::collections::HashMap;
 use std::ops::Range;
 
 use iced::advanced::layout::{self, Layout};
@@ -84,6 +86,19 @@ fn measured_window(tops: &[f32], offset: f32, viewport: f32) -> Range<usize> {
     first.saturating_sub(OVERSCAN)..last.saturating_add(OVERSCAN).min(count)
 }
 
+/// Where each row starts, given the rows' heights, followed by the total.
+#[cfg(feature = "log-viewer")]
+fn tops(heights: impl Iterator<Item = f32>) -> Vec<f32> {
+    let mut tops = Vec::with_capacity(heights.size_hint().0 + 1);
+    let mut top = 0.0;
+    tops.push(top);
+    for height in heights {
+        top += height;
+        tops.push(top);
+    }
+    tops
+}
+
 /// Whether an offset sits at the end of the content.
 pub(crate) fn at_end(offset: f32, content: f32, viewport: f32) -> bool {
     offset >= (content - viewport).max(0.0) - END_SLOP
@@ -112,12 +127,19 @@ pub(crate) fn thumb(offset: f32, content: f32, viewport: f32, track: f32) -> Opt
 type Build<'a, Message> = Box<dyn Fn(Range<usize>) -> Element<'a, Message> + 'a>;
 type OnFollow<'a, Message> = Box<dyn Fn(bool) -> Message + 'a>;
 type OnPage<'a, Message> = Box<dyn Fn(usize) -> Message + 'a>;
+#[cfg(feature = "log-viewer")]
+type Key<'a> = Box<dyn Fn(usize) -> u64 + 'a>;
 
 /// A list of `count` rows, each `row_height` tall. `build` returns the
 /// rows in a range, stacked in one column.
 pub(crate) struct Rows<'a, Message> {
     count: usize,
     row_height: f32,
+    /// Names the row at an index when rows are measured, so a measurement
+    /// stays with its row. `row_height` is then the estimate for rows not
+    /// built yet.
+    #[cfg(feature = "log-viewer")]
+    key: Option<Key<'a>>,
     reveal: Option<(usize, u64)>,
     follow: bool,
     origin: u64,
@@ -137,6 +159,8 @@ pub(crate) fn rows<'a, Message>(
     Rows {
         count,
         row_height,
+        #[cfg(feature = "log-viewer")]
+        key: None,
         reveal: None,
         follow: false,
         origin: 0,
@@ -195,6 +219,14 @@ impl<'a, Message> Rows<'a, Message> {
         self
     }
 
+    /// Lets rows take the height they lay out at, with `row_height` as the
+    /// estimate for rows not built yet. `key` names the row at an index.
+    #[cfg(feature = "log-viewer")]
+    pub(crate) fn measured(mut self, key: impl Fn(usize) -> u64 + 'a) -> Self {
+        self.key = Some(Box::new(key));
+        self
+    }
+
     /// The whole height, header included.
     pub(crate) fn height(mut self, height: impl Into<Length>) -> Self {
         self.height = height.into();
@@ -208,6 +240,12 @@ impl<'a, Message> Rows<'a, Message> {
         self
     }
 
+    #[cfg(feature = "log-viewer")]
+    fn is_measured(&self) -> bool {
+        self.key.is_some()
+    }
+
+    #[cfg(not(feature = "log-viewer"))]
     fn is_measured(&self) -> bool {
         false
     }
@@ -281,6 +319,108 @@ impl<'a, Message> Rows<'a, Message> {
     }
 }
 
+#[cfg(feature = "log-viewer")]
+impl<Message> Rows<'_, Message> {
+    /// Recomputes where each measured row starts from the remembered
+    /// heights, and forgets rows that are gone.
+    fn measure_tops(&self, state: &mut State) {
+        let Some(key) = &self.key else {
+            return;
+        };
+        let estimate = self.row_height;
+        state.tops = tops(
+            (0..self.count)
+                .map(|index| state.heights.get(&key(index)).copied().unwrap_or(estimate)),
+        );
+        if state.heights.len() > self.count.saturating_mul(2) + 64 {
+            let keep: std::collections::HashSet<u64> = (0..self.count).map(key).collect();
+            state.heights.retain(|row, _| keep.contains(row));
+        }
+    }
+
+    /// Remembers the heights the built rows laid out at. Returns whether
+    /// any changed.
+    fn remember(&self, state: &mut State, range: &Range<usize>, node: &layout::Node) -> bool {
+        let Some(key) = &self.key else {
+            return false;
+        };
+        let mut changed = false;
+        for (index, child) in range.clone().zip(node.children()) {
+            let height = child.size().height;
+            let previous = state.heights.insert(key(index), height);
+            changed |= previous.is_none_or(|previous| (previous - height).abs() > 0.5);
+        }
+        changed
+    }
+
+    /// Prepares measured rows for a layout `width` wide. They always leave
+    /// room for the scrollbar, so their width, and with it their heights,
+    /// never flips as the scrollbar comes and goes.
+    fn prepare(&self, state: &mut State, width: f32) {
+        if !self.is_measured() {
+            return;
+        }
+        let inner = (width - GUTTER).max(0.0);
+        if (inner - state.measured_width).abs() > 0.5 {
+            state.heights.clear();
+            state.measured_width = inner;
+        }
+        self.measure_tops(state);
+    }
+
+    /// Measured rows may come out taller or shorter than estimated. Keeps
+    /// the row just revealed, or else the first row in view, where it was,
+    /// with a revealed row wholly in view, and builds again while the rows
+    /// in view are not the ones built.
+    fn settle(
+        &mut self,
+        tree: &mut Tree,
+        renderer: &Renderer,
+        inner: f32,
+        viewport: f32,
+        revealed: Option<usize>,
+        built: (Range<usize>, layout::Node),
+    ) -> (Range<usize>, layout::Node) {
+        /// Passes before giving up on rows that keep changing height.
+        const PASSES: usize = 3;
+        let (mut range, mut node) = built;
+        for _ in 0..PASSES {
+            let state = tree.state.downcast_mut::<State>();
+            if !self.remember(state, &range, &node) {
+                return (range, node);
+            }
+            let before = self.geometry(state);
+            let anchor = revealed.unwrap_or_else(|| before.row_at(state.offset));
+            let within = state.offset - before.top(anchor);
+            self.measure_tops(state);
+            let after = self.geometry(state);
+            let content = after.content();
+            let mut offset = if self.follow {
+                content - viewport
+            } else {
+                after.top(anchor) + within
+            };
+            if let Some(index) = revealed.filter(|_| !self.follow) {
+                offset = reveal_span(offset, after.top(index), after.top(index + 1), viewport);
+            }
+            let offset = clamp_offset(offset, content, viewport);
+            let needed = after.window(offset, viewport);
+            state.offset = offset;
+            if needed.start >= range.start && needed.end <= range.end {
+                return (range, node);
+            }
+            self.build(tree, &needed);
+            node = self.layout_rows(tree, renderer, inner);
+            range = needed;
+        }
+        let state = tree.state.downcast_mut::<State>();
+        if self.remember(state, &range, &node) {
+            self.measure_tops(state);
+        }
+        (range, node)
+    }
+}
+
 /// Where rows sit: equally tall, or measured.
 #[derive(Debug, Clone, Copy)]
 enum Geometry<'a> {
@@ -310,6 +450,18 @@ impl Geometry<'_> {
             Geometry::Measured(tops) => measured_window(tops, offset, viewport),
         }
     }
+
+    /// The row the offset falls in.
+    #[cfg(feature = "log-viewer")]
+    fn row_at(self, offset: f32) -> usize {
+        match self {
+            Geometry::Fixed { row, .. } if row > 0.0 => (offset / row).floor() as usize,
+            Geometry::Fixed { .. } => 0,
+            Geometry::Measured(tops) => {
+                tops.partition_point(|&top| top <= offset).saturating_sub(1)
+            }
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -331,6 +483,11 @@ struct State {
     reported_page: usize,
     /// Where each measured row starts, followed by the content height.
     tops: Vec<f32>,
+    /// Measured heights by row key, at the width they were measured.
+    #[cfg(feature = "log-viewer")]
+    heights: HashMap<u64, f32>,
+    #[cfg(feature = "log-viewer")]
+    measured_width: f32,
 }
 
 /// Where the rows show: the bounds below the header.
@@ -419,6 +576,8 @@ impl<Message> Widget<Message, Theme, Renderer> for Rows<'_, Message> {
             dropped as f32 * self.row_height
         };
         state.origin = self.origin;
+        #[cfg(feature = "log-viewer")]
+        self.prepare(state, width);
         let content = self.geometry(state).content();
 
         let size = limits.resolve(
@@ -439,10 +598,14 @@ impl<Message> Widget<Message, Theme, Renderer> for Rows<'_, Message> {
         };
         state.page = page(viewport, self.row_height);
 
-        self.place(state, viewport, dropped_height);
+        let revealed = self.place(state, viewport, dropped_height);
         let range = self.geometry(state).window(state.offset, viewport);
         self.build(tree, &range);
         let node = self.layout_rows(tree, renderer, inner);
+        #[cfg(feature = "log-viewer")]
+        let (range, node) = self.settle(tree, renderer, inner, viewport, revealed, (range, node));
+        #[cfg(not(feature = "log-viewer"))]
+        let _ = revealed;
 
         let state = tree.state.downcast_mut::<State>();
         let geometry = self.geometry(state);
@@ -869,6 +1032,14 @@ mod tests {
         assert_eq!(window(0.0, 100.0, 0.0, 10), 0..0);
     }
 
+    #[cfg(feature = "log-viewer")]
+    #[test]
+    fn tops_accumulate_the_heights() {
+        let tops = tops([20.0, 60.0, 20.0].into_iter());
+        assert_eq!(tops, [0.0, 20.0, 80.0, 100.0]);
+        assert_eq!(super::tops(std::iter::empty()), [0.0]);
+    }
+
     #[test]
     fn measured_rows_find_their_window_from_their_tops() {
         let tops = [0.0, 20.0, 80.0, 100.0, 120.0, 220.0, 240.0];
@@ -894,6 +1065,24 @@ mod tests {
         };
         assert_eq!(fixed.content(), 50.0);
         assert_eq!(fixed.top(9), 50.0);
+    }
+
+    #[cfg(feature = "log-viewer")]
+    #[test]
+    fn the_row_at_an_offset_is_the_one_containing_it() {
+        let tops = [0.0, 20.0, 80.0, 100.0];
+        let geometry = Geometry::Measured(&tops);
+        assert_eq!(geometry.row_at(0.0), 0);
+        assert_eq!(geometry.row_at(50.0), 1);
+        assert_eq!(geometry.row_at(80.0), 2);
+        assert_eq!(
+            Geometry::Fixed {
+                row: 10.0,
+                count: 5
+            }
+            .row_at(25.0),
+            2
+        );
     }
 
     #[test]

@@ -24,6 +24,7 @@ pub mod icon_button;
 pub mod input;
 pub mod json_viewer;
 pub mod label;
+pub mod log_viewer;
 pub mod menubar;
 pub mod pagination;
 pub mod popover;
@@ -773,6 +774,21 @@ crate::stories! {
         id: "virtual-list/keyboard", component: "virtual-list", title: "Keyboard shortcuts",
         description: "The default keymap with J and K added. The list resolves keys only while it has focus.",
         file: "virtual_list/keyboard.rs", height: 360,
+    }
+    LogViewerLive => log_viewer::live {
+        id: "log-viewer/live", component: "log-viewer", title: "Live log",
+        description: "A simulated server writes lines through the log's channel, using futures-timer so it also runs in the browser. Scroll up to stop following, then jump back to the newest line.",
+        file: "log_viewer/live.rs", height: 420, subscription: true, task: true,
+    }
+    LogViewerFiltering => log_viewer::filtering {
+        id: "log-viewer/filtering", component: "log-viewer", title: "Levels and search",
+        description: "Trace and debug lines are hidden and long lines wrap. The search marks every match, and Enter or the arrows move between them.",
+        file: "log_viewer/filtering.rs", height: 420, task: true,
+    }
+    LogViewerKeyboard => log_viewer::keyboard {
+        id: "log-viewer/keyboard", component: "log-viewer", title: "Keyboard shortcuts",
+        description: "The default keymap with J and K added. The log resolves keys while any part of it has focus, and copying hands the text to the app.",
+        file: "log_viewer/keyboard.rs", height: 440, task: true,
     }
     ThemeCustom => theme::custom {
         id: "theme/custom", component: "theme", title: "Custom palette",

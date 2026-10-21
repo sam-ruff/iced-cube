@@ -1,4 +1,5 @@
-//! Data display: trees, tables, long lists, JSON documents and property grids.
+//! Data display: trees, tables, long lists, logs, JSON documents and property
+//! grids.
 
 #[cfg(feature = "data-table")]
 pub mod data_table;
@@ -6,6 +7,7 @@ pub mod data_table;
     feature = "data-table",
     feature = "document-tabs",
     feature = "json-viewer",
+    feature = "log-viewer",
     feature = "property-grid",
     feature = "tree"
 ))]
@@ -20,6 +22,10 @@ pub(crate) mod ellipsis;
 mod interaction;
 #[cfg(feature = "json-viewer")]
 pub mod json_viewer;
+#[cfg(feature = "log-viewer")]
+pub mod log_viewer;
+#[cfg(feature = "log-viewer")]
+mod marked;
 #[cfg(feature = "property-grid")]
 pub mod property_grid;
 #[cfg(any(
@@ -39,6 +45,8 @@ pub mod virtual_list;
 pub use data_table::{DataTable, data_table};
 #[cfg(feature = "json-viewer")]
 pub use json_viewer::{JsonViewer, json_viewer};
+#[cfg(feature = "log-viewer")]
+pub use log_viewer::{LogViewer, log_viewer};
 #[cfg(feature = "property-grid")]
 pub use property_grid::{PropertyGrid, property_grid};
 #[cfg(feature = "tree")]
