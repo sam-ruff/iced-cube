@@ -1,3 +1,9 @@
+## [0.0.4](https://github.com/sam-ruff/iced-cube/compare/v0.0.3...v0.0.4) (2026-10-21)
+
+### Features
+
+* add avatar, breadcrumb, pagination, toggle and toggle group ([f7c00e0](https://github.com/sam-ruff/iced-cube/commit/f7c00e0b4ec2be8f4e59c02b45cd176c15d80b23))
+
 ## [0.0.3](https://github.com/sam-ruff/iced-cube/compare/v0.0.2...v0.0.3) (2026-10-06)
 
 ### Features
