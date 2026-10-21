@@ -62,6 +62,8 @@ pub use application::toolbar;
 
 #[cfg(feature = "data-table")]
 pub use data::data_table;
+#[cfg(feature = "json-viewer")]
+pub use data::json_viewer;
 #[cfg(feature = "property-grid")]
 pub use data::property_grid;
 #[cfg(feature = "tree")]

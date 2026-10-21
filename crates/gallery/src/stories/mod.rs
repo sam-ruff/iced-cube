@@ -21,6 +21,7 @@ pub mod dialog;
 pub mod dropdown_menu;
 pub mod icon_button;
 pub mod input;
+pub mod json_viewer;
 pub mod label;
 pub mod menubar;
 pub mod pagination;
@@ -705,6 +706,36 @@ crate::stories! {
         id: "property-grid/keyboard", component: "property-grid", title: "Keyboard shortcuts",
         description: "The default keymap with J and K added. The grid resolves keys only while it has focus.",
         file: "property_grid/keyboard.rs", height: 480,
+    }
+    JsonViewerApiResponse => json_viewer::api_response {
+        id: "json-viewer/api-response", component: "json-viewer", title: "API response",
+        description: "A response opened two levels deep, with values coloured by type, a link too long to fit and a context menu on every row.",
+        file: "json_viewer/api_response.rs", height: 400, task: true,
+    }
+    JsonViewerSearch => json_viewer::search {
+        id: "json-viewer/search", component: "json-viewer", title: "Search",
+        description: "Searching keys and values highlights every match and opens its parents. The arrows step through matches, and the filter shows only them.",
+        file: "json_viewer/search.rs", height: 360, task: true,
+    }
+    JsonViewerCopy => json_viewer::copy {
+        id: "json-viewer/copy", component: "json-viewer", title: "Copy values and paths",
+        description: "The highlighted row has buttons to copy its value as JSON or its path, and the context menu does the same. The app writes the text to the clipboard.",
+        file: "json_viewer/copy.rs", height: 440, task: true,
+    }
+    JsonViewerKeyboard => json_viewer::keyboard {
+        id: "json-viewer/keyboard", component: "json-viewer", title: "Keyboard shortcuts",
+        description: "The default keymap with J and K added. The viewer resolves keys only while it has focus.",
+        file: "json_viewer/keyboard.rs", height: 440, task: true,
+    }
+    JsonViewerLargeDocument => json_viewer::large_document {
+        id: "json-viewer/large-document", component: "json-viewer", title: "Large document",
+        description: "1,500 orders, over 15,000 nodes. Only the rows in view are built, so expanding everything stays quick.",
+        file: "json_viewer/large_document.rs", height: 440, task: true,
+    }
+    JsonViewerParseErrors => json_viewer::parse_errors {
+        id: "json-viewer/parse-errors", component: "json-viewer", title: "Parse errors",
+        description: "JSON text is parsed as it is typed. Invalid text shows the problem and where it is in place of the rows.",
+        file: "json_viewer/parse_errors.rs", height: 200, task: true,
     }
     ThemeCustom => theme::custom {
         id: "theme/custom", component: "theme", title: "Custom palette",

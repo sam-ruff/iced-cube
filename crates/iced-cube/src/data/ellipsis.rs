@@ -85,7 +85,7 @@ impl<'a> Ellipsis<'a> {
         self
     }
 
-    #[cfg(feature = "data-table")]
+    #[cfg(any(feature = "data-table", feature = "json-viewer"))]
     pub(crate) fn width(mut self, width: impl Into<Length>) -> Self {
         self.width = width.into();
         self

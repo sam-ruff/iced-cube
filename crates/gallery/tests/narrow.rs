@@ -185,6 +185,39 @@ fn the_shape_inspector_fits_a_phone_on_one_line_per_row() {
 }
 
 #[test]
+fn a_long_json_value_ends_in_an_ellipsis_beside_the_copy_buttons_on_a_phone() {
+    let gallery = open("json-viewer/copy");
+    let mut ui = render(&gallery);
+    let url = ui
+        .find("\"postgres://billing@db:5432/billing\"")
+        .expect("the full value is reported")
+        .bounds();
+    assert!(
+        url.x + url.width <= PHONE.width,
+        "ends at {}",
+        url.x + url.width
+    );
+    assert!(url.height <= 20.0, "one line, got {}", url.height);
+    let key = ui.find("env").expect("highlighted row").bounds();
+    assert!(key.height <= 20.0, "one line, got {}", key.height);
+}
+
+#[test]
+fn the_json_search_bar_fits_a_phone() {
+    let gallery = open("json-viewer/search");
+    let mut ui = render(&gallery);
+    let count = ui.find("1 of 2").expect("match count").bounds();
+    assert!(count.height <= 18.0, "one line, got {}", count.height);
+    assert!(
+        count.x + count.width < PHONE.width - 3.0 * 32.0,
+        "room for the buttons, ends at {}",
+        count.x + count.width
+    );
+    let field = ui.find("america").expect("search text").bounds();
+    assert!(field.width > 40.0 && field.x >= 0.0, "{field:?}");
+}
+
+#[test]
 fn every_theme_token_remains_readable_in_two_columns_on_a_phone() {
     for width in [328.0, 358.0] {
         let gallery = open("theme/tokens");
