@@ -112,6 +112,7 @@ fn labels_stay_on_one_line_in_a_narrow_container() {
     }
 }
 
+#[cfg(feature = "button")]
 #[test]
 fn an_outlined_group_is_as_tall_as_a_button() {
     let state = State::single([item(0, "A")]);
