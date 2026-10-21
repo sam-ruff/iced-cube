@@ -62,6 +62,8 @@ pub use application::toolbar;
 
 #[cfg(feature = "data-table")]
 pub use data::data_table;
+#[cfg(feature = "property-grid")]
+pub use data::property_grid;
 #[cfg(feature = "tree")]
 pub use data::tree;
 

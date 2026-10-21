@@ -52,7 +52,7 @@ navigation = ["breadcrumb", "command", "pagination", "tabs", "sidebar"]
 overlay = ["tooltip", "toast", "dialog", "popover", "dropdown-menu", "context-menu"]
 feedback = ["alert", "avatar", "badge", "progress", "spinner"]
 application = ["menubar", "toolbar", "status-bar", "command-palette"]
-data = ["tree", "data-table"]
+data = ["tree", "data-table", "property-grid"]
 
 button = ["iced/advanced"]
 icon-button = ["button", "tooltip"]
@@ -105,6 +105,16 @@ data-table = [
     "input",
     "scroll-area",
     "select",
+]
+property-grid = [
+    "iced/advanced",
+    "checkbox",
+    "icon-button",
+    "input",
+    "scroll-area",
+    "select",
+    "switch",
+    "tooltip",
 ]
 
 [dependencies]

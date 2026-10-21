@@ -26,6 +26,7 @@ pub mod menubar;
 pub mod pagination;
 pub mod popover;
 pub mod progress;
+pub mod property_grid;
 pub mod radio;
 pub mod resizable_panel;
 pub mod scroll_area;
@@ -684,6 +685,26 @@ crate::stories! {
         id: "data-table/keyboard", component: "data-table", title: "Keyboard shortcuts",
         description: "The default keymap with J and K added. The table resolves keys only while it has focus, and the highlight moves on to the next page after the last row.",
         file: "data_table/keyboard.rs", height: 440,
+    }
+    PropertyGridInspector => property_grid::inspector {
+        id: "property-grid/inspector", component: "property-grid", title: "Shape inspector",
+        description: "The properties of a selected shape under collapsible categories: numbers with units, colours, a choice, switches and checkboxes, a read-only id and an opacity slider the app draws itself. A dot and a bold name mark values that differ from their default, with a button to reset them.",
+        file: "property_grid/inspector.rs", height: 420,
+    }
+    PropertyGridFilterSort => property_grid::filter_sort {
+        id: "property-grid/filter-sort", component: "property-grid", title: "Filter and sort",
+        description: "The box filters properties by name and the buttons switch between categories and one alphabetical list. This one starts sorted by name and filtered to colours.",
+        file: "property_grid/filter_sort.rs", height: 360,
+    }
+    PropertyGridValidation => property_grid::validation {
+        id: "property-grid/validation", component: "property-grid", title: "Validation and reset",
+        description: "An invalid port keeps its draft and shows why under the rows, without changing the value. Escape puts back the old value, and the reset buttons go back to the defaults.",
+        file: "property_grid/validation.rs", height: 360,
+    }
+    PropertyGridKeyboard => property_grid::keyboard {
+        id: "property-grid/keyboard", component: "property-grid", title: "Keyboard shortcuts",
+        description: "The default keymap with J and K added. The grid resolves keys only while it has focus.",
+        file: "property_grid/keyboard.rs", height: 480,
     }
     ThemeCustom => theme::custom {
         id: "theme/custom", component: "theme", title: "Custom palette",

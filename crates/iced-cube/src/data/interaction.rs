@@ -3,6 +3,7 @@
 //! that reports clicks with the modifiers held, and a [`RowMenu`] that
 //! gives every row the same context menu.
 
+#[cfg(any(feature = "data-table", feature = "tree"))]
 use std::rc::Rc;
 
 use iced::advanced::layout::{self, Layout};
@@ -19,7 +20,10 @@ use iced::{
     Theme, Vector, mouse,
 };
 
-use crate::keys::{self, Keymap};
+use crate::keys;
+#[cfg(any(feature = "data-table", feature = "tree"))]
+use crate::keys::Keymap;
+#[cfg(any(feature = "data-table", feature = "tree"))]
 use crate::overlay::context_menu;
 
 type OnKey<'a, Message> = Box<dyn Fn(&keys::Event) -> Option<Message> + 'a>;
@@ -259,12 +263,15 @@ impl<'a, Message: 'a> From<Scope<'a, Message>> for Element<'a, Message> {
     }
 }
 
+#[cfg(any(feature = "data-table", feature = "tree"))]
 type Wrap<'a, Key, Message> = dyn Fn(Key, Element<'a, Message>) -> Element<'a, Message> + 'a;
+#[cfg(any(feature = "data-table", feature = "tree"))]
 type MenuKey<'a, Key, Message> = dyn Fn(&keys::Event, Key) -> Option<Message> + 'a;
 #[cfg(feature = "data-table")]
 type Open<'a, Key, Message> = dyn Fn(Key) -> Message + 'a;
 
 /// One context menu shared by every row, told apart by the row's key.
+#[cfg(any(feature = "data-table", feature = "tree"))]
 pub(crate) struct RowMenu<'a, Key, Message> {
     wrap: Box<Wrap<'a, Key, Message>>,
     key: Box<MenuKey<'a, Key, Message>>,
@@ -272,6 +279,7 @@ pub(crate) struct RowMenu<'a, Key, Message> {
     open: Box<Open<'a, Key, Message>>,
 }
 
+#[cfg(any(feature = "data-table", feature = "tree"))]
 impl<'a, Key, Message> RowMenu<'a, Key, Message> {
     /// Makes a row an area of the menu.
     pub(crate) fn wrap(&self, key: Key, row: Element<'a, Message>) -> Element<'a, Message> {
@@ -290,6 +298,7 @@ impl<'a, Key, Message> RowMenu<'a, Key, Message> {
     }
 }
 
+#[cfg(any(feature = "data-table", feature = "tree"))]
 pub(crate) fn row_menu<'a, Id, Key, Message>(
     state: &'a context_menu::State<Id, Key>,
     keymap: Keymap<context_menu::Action>,

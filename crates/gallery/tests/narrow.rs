@@ -151,6 +151,40 @@ fn a_long_file_name_ends_in_an_ellipsis_on_a_phone() {
 }
 
 #[test]
+fn the_shape_inspector_fits_a_phone_on_one_line_per_row() {
+    for choice in [ThemeChoice::Light, ThemeChoice::Dark] {
+        iced_cube::theme::set_font(FONT);
+        let gallery = Gallery::new(Mode::Single, Some("property-grid/inspector"), choice);
+        let mut ui = render(&gallery);
+        for label in [
+            "Id", "rect-12", "Layout", "Width", "160px", "Height", "96px",
+        ] {
+            let bounds = ui.find(label).expect(label).bounds();
+            assert!(
+                bounds.x >= 0.0 && bounds.x + bounds.width <= PHONE.width,
+                "{label} runs off the edge: {bounds:?}"
+            );
+            assert!(bounds.height <= 20.0, "{label} wraps: {bounds:?}");
+        }
+        let name = ui.find("Width").expect("name").bounds();
+        let value = ui.find("160px").expect("value").bounds();
+        assert_eq!(
+            name.center_y().round(),
+            value.center_y().round(),
+            "name and value share a row"
+        );
+        let description = ui
+            .find("Width of the bounding box, before rotation.")
+            .expect("description")
+            .bounds();
+        assert!(
+            description.x + description.width <= PHONE.width,
+            "the description wraps inside the grid: {description:?}"
+        );
+    }
+}
+
+#[test]
 fn every_theme_token_remains_readable_in_two_columns_on_a_phone() {
     for width in [328.0, 358.0] {
         let gallery = open("theme/tokens");

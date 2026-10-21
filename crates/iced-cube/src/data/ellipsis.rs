@@ -79,7 +79,7 @@ pub(crate) fn ellipsis<'a>(content: impl Into<Cow<'a, str>>) -> Ellipsis<'a> {
 }
 
 impl<'a> Ellipsis<'a> {
-    #[cfg(feature = "data-table")]
+    #[cfg(any(feature = "data-table", feature = "property-grid"))]
     pub(crate) fn font(mut self, font: Font) -> Self {
         self.font = font;
         self
