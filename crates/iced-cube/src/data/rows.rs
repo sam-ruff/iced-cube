@@ -175,7 +175,12 @@ pub(crate) fn rows<'a, Message>(
 
 impl<'a, Message> Rows<'a, Message> {
     /// The row to keep in view. The list scrolls to it whenever it changes.
-    #[cfg(any(feature = "tree", feature = "data-table"))]
+    #[cfg(any(
+        feature = "tree",
+        feature = "data-table",
+        feature = "json-viewer",
+        feature = "property-grid"
+    ))]
     pub(crate) fn highlight(mut self, index: Option<usize>) -> Self {
         self.reveal = index.map(|index| (index, index as u64));
         self
