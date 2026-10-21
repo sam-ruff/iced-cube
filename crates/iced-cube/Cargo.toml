@@ -52,7 +52,7 @@ navigation = ["breadcrumb", "command", "pagination", "tabs", "sidebar", "documen
 overlay = ["tooltip", "toast", "dialog", "popover", "dropdown-menu", "context-menu"]
 feedback = ["alert", "avatar", "badge", "progress", "spinner"]
 application = ["menubar", "toolbar", "status-bar", "command-palette"]
-data = ["tree", "data-table", "json-viewer", "property-grid"]
+data = ["tree", "data-table", "json-viewer", "property-grid", "virtual-list"]
 
 button = ["iced/advanced"]
 icon-button = ["button", "tooltip"]
@@ -126,6 +126,7 @@ property-grid = [
     "switch",
     "tooltip",
 ]
+virtual-list = ["iced/advanced", "scroll-area"]
 
 [dependencies]
 iced = { version = "0.14.0", default-features = false, features = ["svg"] }

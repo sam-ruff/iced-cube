@@ -68,6 +68,8 @@ pub use data::json_viewer;
 pub use data::property_grid;
 #[cfg(feature = "tree")]
 pub use data::tree;
+#[cfg(feature = "virtual-list")]
+pub use data::virtual_list;
 
 #[cfg(feature = "alert")]
 pub use feedback::alert;

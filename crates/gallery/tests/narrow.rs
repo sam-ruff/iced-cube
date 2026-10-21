@@ -150,6 +150,28 @@ fn a_long_file_name_ends_in_an_ellipsis_on_a_phone() {
     assert!(name.height <= 20.0, "one line, got {}", name.height);
 }
 
+/// Asserts each label sits inside the phone preview on one line.
+fn fits_on_one_line(ui: &mut iced_test::Simulator<'_, gallery::Message>, labels: &[&str]) {
+    for &label in labels {
+        let bounds = ui
+            .find(label)
+            .unwrap_or_else(|error| panic!("{label}: {error}"))
+            .bounds();
+        assert!(
+            bounds.x >= 0.0 && bounds.x + bounds.width <= PHONE.width,
+            "{label} runs off the edge: {bounds:?}"
+        );
+        assert!(bounds.height < 24.0, "{label} wraps: {bounds:?}");
+    }
+}
+
+#[test]
+fn a_long_list_fits_a_phone() {
+    let gallery = open("virtual-list/large");
+    let mut ui = render(&gallery);
+    fits_on_one_line(&mut ui, &["#10000", "Avery", "$12.00", "#10003"]);
+}
+
 #[test]
 fn the_shape_inspector_fits_a_phone_on_one_line_per_row() {
     for choice in [ThemeChoice::Light, ThemeChoice::Dark] {

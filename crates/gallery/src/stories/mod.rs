@@ -51,6 +51,7 @@ pub mod toggle_group;
 pub mod toolbar;
 pub mod tooltip;
 pub mod tree;
+pub mod virtual_list;
 
 crate::stories! {
     ButtonVariants => button::variants {
@@ -757,6 +758,21 @@ crate::stories! {
         id: "json-viewer/parse-errors", component: "json-viewer", title: "Parse errors",
         description: "JSON text is parsed as it is typed. Invalid text shows the problem and where it is in place of the rows.",
         file: "json_viewer/parse_errors.rs", height: 200, task: true,
+    }
+    VirtualListLarge => virtual_list::large {
+        id: "virtual-list/large", component: "virtual-list", title: "100,000 rows",
+        description: "A hundred thousand orders in a multiple selection. Only the rows in view are built, so scrolling stays smooth.",
+        file: "virtual_list/large.rs", height: 340,
+    }
+    VirtualListStreaming => virtual_list::streaming {
+        id: "virtual-list/streaming", component: "virtual-list", title: "Streaming feed",
+        description: "Simulated sensors send readings through the list's channel, using futures-timer so they also run in the browser. The list follows the newest reading until you scroll up, and keeps the newest thousand.",
+        file: "virtual_list/streaming.rs", height: 340, subscription: true,
+    }
+    VirtualListKeyboard => virtual_list::keyboard {
+        id: "virtual-list/keyboard", component: "virtual-list", title: "Keyboard shortcuts",
+        description: "The default keymap with J and K added. The list resolves keys only while it has focus.",
+        file: "virtual_list/keyboard.rs", height: 360,
     }
     ThemeCustom => theme::custom {
         id: "theme/custom", component: "theme", title: "Custom palette",
