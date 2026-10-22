@@ -131,7 +131,7 @@ virtual-list = ["iced/advanced", "context-menu", "scroll-area"]
 log-viewer = ["virtual-list", "button", "context-menu", "icon-button", "input", "toggle-group"]
 
 [dependencies]
-iced = { version = "0.14.0", default-features = false, features = ["svg"] }
+iced = { version = "0.14.0", default-features = false, features = ["svg", "advanced"] }
 lucide-static-svg = "1.48.0"
 num-traits = { version = "0.2.19", optional = true }
 serde_json = { version = "1.0.154", optional = true, features = ["preserve_order"] }

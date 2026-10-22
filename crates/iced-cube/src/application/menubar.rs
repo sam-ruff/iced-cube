@@ -10,8 +10,8 @@
 //! The bar resolves its own keys while a menu is open: Left and Right move
 //! between menus (opening and closing submenus first), and the rest go to
 //! the open menu. While the bar is closed, the app routes key presses from
-//! [`keys::subscription`] through [`State::key_event`]: F10 or Alt focuses
-//! the bar, Left and Right move along it, Down opens the focused menu,
+//! [`keys::subscription`] through [`State::key_event`]: F10, or Alt pressed
+//! and released on its own, focuses the bar, Left and Right move along it, Down opens the focused menu,
 //! Escape leaves it, and Alt with a menu's mnemonic letter opens that menu.
 //!
 //! ```no_run
@@ -407,7 +407,7 @@ impl<Id: Copy + PartialEq> State<Id> {
 }
 
 /// Resolves a key press through a keymap. A bare modifier key, such as
-/// Alt, arrives with its own modifier held, so that modifier is ignored.
+/// Alt, may arrive with its own modifier held, so that modifier is ignored.
 fn resolve<A: Clone>(keymap: &Keymap<A>, key: &keys::Event) -> Option<A> {
     let modifiers = match key.key {
         Key::Named(Named::Alt) => key.modifiers.difference(Modifiers::ALT),
@@ -519,6 +519,8 @@ impl keys::Action for Action {
 /// menu's own keymap. While the bar is closed, only Focus claims a key
 /// unless the bar has focus, so the arrows stay free for the rest of the
 /// app. Alt with a menu's mnemonic letter opens that menu at any time.
+/// [`keys::subscription`] delivers a bare `Alt` only when it is released
+/// with nothing pressed in between, so Alt chords never focus the bar.
 pub fn default_keymap() -> Keymap<Action> {
     Keymap::new()
         .bind(Chord::named(Named::F10), Action::Focus)

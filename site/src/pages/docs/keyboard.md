@@ -33,7 +33,7 @@ A few defaults overlap. Each has a simple fix:
 
 ## Subscribing to key presses
 
-`keys::subscription()` delivers every key press that no widget captured, so typing in a text input never switches tabs, and nothing reaches it while a dialog is open.
+`keys::subscription()` delivers every key press that no widget captured, so typing in a text input never switches tabs, and nothing reaches it while a dialog is open. A modifier key on its own, such as Alt, arrives only when it is released with nothing else pressed in between, so `Alt+ArrowUp` is one chord and never also a bare Alt. Apps that listen to window events themselves get the same behaviour from `keys::Tracker`.
 
 ## A complete example
 
