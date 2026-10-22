@@ -70,7 +70,7 @@ impl Example {
             )
             .size(text_size::SM),
             json_viewer(&self.package)
-                .search(true)
+                .search_bar(true)
                 .keymap(self.keymap.clone())
                 .height(248)
                 .on_event(Message::Viewer),

@@ -70,7 +70,9 @@ use iced::widget::{self, Space, column, container, responsive, row, text};
 use iced::{Alignment, Border, Color, Element, Length, Padding, Pixels, Subscription, Task, Theme};
 
 use crate::data::ellipsis::ellipsis;
-use crate::data::interaction::{Look, RowMenu, pressable, ringed, row_menu, scope, search_keys};
+use crate::data::interaction::{
+    Look, RowMenu, match_count_label, pressable, ringed, row_menu, scope, search_count, search_keys,
+};
 use crate::data::marked::{find, marked};
 use crate::data::rows::rows;
 use crate::data::virtual_list::{self, Step, target};
@@ -105,8 +107,6 @@ const TIMESTAMP_WIDTH: f32 = 84.0;
 const LEVEL_WIDTH: f32 = 44.0;
 const TARGET_WIDTH: f32 = 120.0;
 const FRAME_PADDING: f32 = 4.0;
-/// Room kept for the match counter, so the search field never moves.
-const COUNTER_WIDTH: f32 = 64.0;
 
 /// How severe an entry is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
@@ -246,7 +246,7 @@ pub enum Event {
     /// Removes every entry.
     Clear,
     /// Copies the selected lines, or the highlighted one.
-    Copy,
+    CopySelection,
     /// Copies one line as plain text, as [`Entry::line`] formats it.
     CopyLine(LineId),
     /// Copies only the message of one line.
@@ -557,6 +557,7 @@ impl State {
                 self.query = query;
                 self.current = None;
                 self.rematch();
+                self.jump_nearest();
             }
             Event::NextMatch => self.jump(true),
             Event::PreviousMatch => self.jump(false),
@@ -587,7 +588,7 @@ impl State {
             Event::ToggleWrap => self.wrap = !self.wrap,
             Event::TogglePause => self.toggle_pause(),
             Event::Clear => self.clear(),
-            Event::Copy => return self.copy_text().map(Output::Copy),
+            Event::CopySelection => return self.copy_text().map(Output::Copy),
             Event::CopyLine(id) => return self.entry(id).map(|entry| Output::Copy(entry.line())),
             Event::CopyMessage(id) => {
                 return self
@@ -822,6 +823,26 @@ impl State {
         self.move_to(id);
     }
 
+    /// Moves to the match nearest the highlight: the first at or after it,
+    /// or else the last before it. Without a highlight it takes the newest
+    /// match while following, as the newest lines are in view, and the
+    /// oldest otherwise.
+    fn jump_nearest(&mut self) {
+        let nearest = match self.highlighted() {
+            Some(from) => {
+                let at = self.matches.partition_point(|&id| id < from);
+                self.matches.get(at).or(self.matches.back())
+            }
+            None if self.following => self.matches.back(),
+            None => self.matches.front(),
+        };
+        let Some(&id) = nearest else {
+            return;
+        };
+        self.current = Some(id);
+        self.move_to(id);
+    }
+
     fn press(&mut self, id: LineId, modifiers: Modifiers) {
         if self.position(id).is_none() {
             return;
@@ -886,14 +907,14 @@ pub enum Action {
     Next,
     Previous,
     First,
-    Latest,
+    Last,
     NextPage,
     PreviousPage,
     ExtendNext,
     ExtendPrevious,
     Select,
     SelectAll,
-    Copy,
+    CopySelection,
     FocusSearch,
     NextMatch,
     PreviousMatch,
@@ -913,13 +934,13 @@ impl Action {
             Action::Next => lines.then_some(Event::Next),
             Action::Previous => lines.then_some(Event::Previous),
             Action::First => lines.then_some(Event::First),
-            Action::Latest => Some(Event::Last),
+            Action::Last => Some(Event::Last),
             Action::NextPage => lines.then_some(Event::NextPage),
             Action::PreviousPage => lines.then_some(Event::PreviousPage),
             Action::ExtendNext => lines.then_some(Event::ExtendNext),
             Action::ExtendPrevious => lines.then_some(Event::ExtendPrevious),
             Action::SelectAll => lines.then_some(Event::SelectAll),
-            Action::Copy => state.can_copy().then_some(Event::Copy),
+            Action::CopySelection => state.can_copy().then_some(Event::CopySelection),
             Action::FocusSearch => Some(Event::FocusSearch),
             Action::NextMatch => (state.match_count() > 0).then_some(Event::NextMatch),
             Action::PreviousMatch => (state.match_count() > 0).then_some(Event::PreviousMatch),
@@ -936,14 +957,14 @@ impl keys::Action for Action {
         Action::Next,
         Action::Previous,
         Action::First,
-        Action::Latest,
+        Action::Last,
         Action::NextPage,
         Action::PreviousPage,
         Action::ExtendNext,
         Action::ExtendPrevious,
         Action::Select,
         Action::SelectAll,
-        Action::Copy,
+        Action::CopySelection,
         Action::FocusSearch,
         Action::NextMatch,
         Action::PreviousMatch,
@@ -962,14 +983,14 @@ impl keys::Action for Action {
             Action::Next => "Next",
             Action::Previous => "Previous",
             Action::First => "First",
-            Action::Latest => "Latest",
+            Action::Last => "Last",
             Action::NextPage => "NextPage",
             Action::PreviousPage => "PreviousPage",
             Action::ExtendNext => "ExtendNext",
             Action::ExtendPrevious => "ExtendPrevious",
             Action::Select => "Select",
             Action::SelectAll => "SelectAll",
-            Action::Copy => "Copy",
+            Action::CopySelection => "CopySelection",
             Action::FocusSearch => "FocusSearch",
             Action::NextMatch => "NextMatch",
             Action::PreviousMatch => "PreviousMatch",
@@ -985,14 +1006,14 @@ impl keys::Action for Action {
             Action::Next => "Highlights the next line.",
             Action::Previous => "Highlights the previous line.",
             Action::First => "Highlights the oldest line.",
-            Action::Latest => "Jumps to the newest line and follows new ones.",
+            Action::Last => "Jumps to the newest line and follows new ones.",
             Action::NextPage => "Moves the highlight down by a page of lines.",
             Action::PreviousPage => "Moves the highlight up by a page of lines.",
             Action::ExtendNext => "Moves down and extends the selection.",
             Action::ExtendPrevious => "Moves up and extends the selection.",
             Action::Select => "Selects or deselects the highlighted line.",
             Action::SelectAll => "Selects every shown line.",
-            Action::Copy => "Copies the selected lines, or the highlighted one.",
+            Action::CopySelection => "Copies the selected lines, or the highlighted one.",
             Action::FocusSearch => "Focuses the search field.",
             Action::NextMatch => "Moves to the next line matching the search.",
             Action::PreviousMatch => "Moves to the previous line matching the search.",
@@ -1011,14 +1032,14 @@ impl keys::Action for Action {
 /// | `ArrowDown` | [`Action::Next`] |
 /// | `ArrowUp` | [`Action::Previous`] |
 /// | `Home` | [`Action::First`] |
-/// | `End` | [`Action::Latest`] |
+/// | `End` | [`Action::Last`] |
 /// | `PageDown` | [`Action::NextPage`] |
 /// | `PageUp` | [`Action::PreviousPage`] |
 /// | `Shift+ArrowDown` | [`Action::ExtendNext`] |
 /// | `Shift+ArrowUp` | [`Action::ExtendPrevious`] |
 /// | `Space` | [`Action::Select`] |
 /// | `Mod+A` (Ctrl, or Cmd on macOS) | [`Action::SelectAll`] |
-/// | `Mod+C` | [`Action::Copy`] |
+/// | `Mod+C` | [`Action::CopySelection`] |
 /// | `Mod+F` | [`Action::FocusSearch`] |
 /// | `F3` | [`Action::NextMatch`] |
 /// | `Shift+F3` | [`Action::PreviousMatch`] |
@@ -1028,8 +1049,9 @@ impl keys::Action for Action {
 /// The log resolves these itself, only while it has focus, which it takes
 /// when any part of it is pressed. Keys the search field uses, such as
 /// typing, Home and End, stay with the field. While the field has focus,
-/// Enter and Shift+Enter step through the matches, and Escape clears the
-/// text, then a second Escape leaves the field. [`Action::TogglePause`]
+/// Enter and F3 step to the next match and Shift+Enter and Shift+F3 to the
+/// previous one, Mod+F selects its text, and Escape clears the text, then
+/// a second Escape leaves the field. [`Action::TogglePause`]
 /// and [`Action::ToggleWrap`] are on the toolbar and have no chord until
 /// one is bound. Pass a changed keymap with [`LogViewer::keymap`].
 pub fn default_keymap() -> Keymap<Action> {
@@ -1037,14 +1059,14 @@ pub fn default_keymap() -> Keymap<Action> {
         .bind(Chord::named(Named::ArrowDown), Action::Next)
         .bind(Chord::named(Named::ArrowUp), Action::Previous)
         .bind(Chord::named(Named::Home), Action::First)
-        .bind(Chord::named(Named::End), Action::Latest)
+        .bind(Chord::named(Named::End), Action::Last)
         .bind(Chord::named(Named::PageDown), Action::NextPage)
         .bind(Chord::named(Named::PageUp), Action::PreviousPage)
         .bind(Chord::named(Named::ArrowDown).shift(), Action::ExtendNext)
         .bind(Chord::named(Named::ArrowUp).shift(), Action::ExtendPrevious)
         .bind(Chord::named(Named::Space), Action::Select)
         .bind(Chord::character('a').command(), Action::SelectAll)
-        .bind(Chord::character('c').command(), Action::Copy)
+        .bind(Chord::character('c').command(), Action::CopySelection)
         .bind(Chord::character('f').command(), Action::FocusSearch)
         .bind(Chord::named(Named::F3), Action::NextMatch)
         .bind(Chord::named(Named::F3).shift(), Action::PreviousMatch)
@@ -1070,18 +1092,12 @@ pub fn focus_search<T>(state: &State) -> Task<T> {
     widget::operation::focus(state.search_id.clone())
 }
 
-/// The text beside the search field: which match is current, of how many.
-/// Empty while there is no search.
+/// The text beside the search field: "3 of 12" for the current match of
+/// all matches, "12 found" before one is current, "None" when nothing
+/// matches, and empty without a search.
 pub fn match_label(state: &State) -> String {
-    if state.query().is_empty() {
-        return String::new();
-    }
-    let total = state.match_count();
-    match (total, state.current_match()) {
-        (0, _) => "No matches".to_owned(),
-        (_, Some((_, position))) => format!("{position} of {total}"),
-        (_, None) => format!("{total} found"),
-    }
+    let current = state.current_match().map(|(_, position)| position);
+    match_count_label(state.query(), state.match_count(), current)
 }
 
 /// An entry of the context menu from [`menu`].
@@ -1390,23 +1406,15 @@ impl<'a, Message: Clone + 'a> View<'a, Message> {
                 self.on_event
                     .clone()
                     .map(|on_event| move |query| on_event(Event::Search(query))),
-            )
-            .on_submit_maybe(self.send(Event::NextMatch).filter(|_| has_matches));
+            );
         let search = search_keys(field, state.search_id.clone())
             .on_clear(
                 self.send(Event::ClearSearch)
                     .filter(|_| !state.query().is_empty()),
             )
+            .on_next(self.send(Event::NextMatch).filter(|_| has_matches))
             .on_previous(self.send(Event::PreviousMatch).filter(|_| has_matches));
-        let found = container(
-            text(match_label(state))
-                .size(text_size::XS)
-                .wrapping(Wrapping::None)
-                .style(|theme| text::Style {
-                    color: Some(muted(theme)),
-                }),
-        )
-        .center_x(COUNTER_WIDTH);
+        let found = search_count(match_label(state));
         let previous = icon_button(crate::lucide!(ChevronUp))
             .label("Previous match")
             .tooltip(Some(Position::Bottom))
@@ -1450,7 +1458,7 @@ impl<'a, Message: Clone + 'a> View<'a, Message> {
                 .label("Copy selected lines")
                 .tooltip(Some(Position::Bottom))
                 .size(button::Size::Sm)
-                .on_press_maybe(self.send(Event::Copy).filter(|_| can_copy))
+                .on_press_maybe(self.send(Event::CopySelection).filter(|_| can_copy))
                 .into(),
             icon_button(crate::lucide!(Trash))
                 .label("Clear")
@@ -1819,9 +1827,14 @@ mod tests {
         let _ = state.update(Event::Search("REQUEST".into()));
         assert_eq!(state.query(), "REQUEST");
         assert_eq!(state.matches().collect::<Vec<_>>(), [3, 4]);
-        assert_eq!(state.current_match(), None);
+        assert_eq!(
+            state.current_match(),
+            Some((4, 2)),
+            "typing jumps to the newest match while following"
+        );
+        assert!(state.is_following(), "the newest line keeps following");
         let _ = state.update(Event::NextMatch);
-        assert_eq!(state.current_match(), Some((3, 1)));
+        assert_eq!(state.current_match(), Some((3, 1)), "wraps to the first");
         assert_eq!(state.highlighted(), Some(3));
         assert!(
             !state.is_following(),
@@ -1830,8 +1843,8 @@ mod tests {
         let _ = state.update(Event::NextMatch);
         assert_eq!(state.current_match(), Some((4, 2)));
         assert!(state.is_following(), "the newest line follows again");
-        let _ = state.update(Event::NextMatch);
-        assert_eq!(state.current_match(), Some((3, 1)), "wraps to the first");
+        let _ = state.update(Event::PreviousMatch);
+        assert_eq!(state.current_match(), Some((3, 1)));
         let _ = state.update(Event::PreviousMatch);
         assert_eq!(state.current_match(), Some((4, 2)), "wraps to the last");
         let _ = state.update(Event::Received(vec![entry(Level::Info, "request queued")]));
@@ -1847,11 +1860,33 @@ mod tests {
     }
 
     #[test]
-    fn previous_match_from_nothing_starts_at_the_newest() {
+    fn typing_jumps_to_the_nearest_match_at_or_after_the_highlight() {
         let mut state = sample();
+        let _ = state.update(Event::Press(1, Modifiers::empty()));
         let _ = state.update(Event::Search("request".into()));
-        let _ = state.update(Event::PreviousMatch);
-        assert_eq!(state.current_match(), Some((4, 2)));
+        assert_eq!(state.current_match(), Some((3, 1)));
+        assert_eq!(state.reveal_target().map(|(index, _)| index), Some(3));
+        let _ = state.update(Event::Search("request s".into()));
+        assert_eq!(state.current_match(), Some((4, 1)), "narrows onwards");
+        let _ = state.update(Event::Search("server".into()));
+        assert_eq!(
+            state.current_match(),
+            Some((0, 1)),
+            "nothing after the highlight takes the last before it"
+        );
+
+        let mut scrolled = sample();
+        let _ = scrolled.update(Event::Follow(false));
+        let _ = scrolled.update(Event::Search("request".into()));
+        assert_eq!(
+            scrolled.current_match(),
+            Some((3, 1)),
+            "the oldest while not following"
+        );
+    }
+
+    #[test]
+    fn stepping_without_matches_does_nothing() {
         let mut none = sample();
         let _ = none.update(Event::Search("nothing like this".into()));
         let _ = none.update(Event::NextMatch);
@@ -1904,12 +1939,15 @@ mod tests {
     #[test]
     fn copying_returns_the_selected_lines_in_order() {
         let mut state = sample();
-        assert!(state.update(Event::Copy).is_none(), "nothing to copy");
+        assert!(
+            state.update(Event::CopySelection).is_none(),
+            "nothing to copy"
+        );
         assert!(!state.can_copy());
         let _ = state.update(Event::Press(3, Modifiers::empty()));
         assert!(state.can_copy());
         let _ = state.update(Event::Press(0, Modifiers::COMMAND));
-        let Some(Output::Copy(text)) = state.update(Event::Copy) else {
+        let Some(Output::Copy(text)) = state.update(Event::CopySelection) else {
             panic!("copies the selection");
         };
         assert_eq!(text, "INFO  server started\nERROR request failed: timeout");
@@ -2078,7 +2116,7 @@ mod tests {
         let _ = state.update(Event::Press(0, Modifiers::empty()));
         assert!(matches!(
             resolve(&state, character("c", Modifiers::COMMAND)),
-            Some(Event::Copy)
+            Some(Event::CopySelection)
         ));
         assert!(matches!(
             resolve(&state, named(Named::ArrowDown, Modifiers::SHIFT)),
@@ -2219,11 +2257,17 @@ mod tests {
         let mut state = sample();
         assert_eq!(match_label(&state), "");
         let _ = state.update(Event::Search("request".into()));
-        assert_eq!(match_label(&state), "2 found");
+        assert_eq!(match_label(&state), "2 of 2");
         let _ = state.update(Event::NextMatch);
         assert_eq!(match_label(&state), "1 of 2");
+        let _ = state.update(Event::ToggleLevel(Level::Error));
+        assert_eq!(
+            match_label(&state),
+            "1 found",
+            "the current match was hidden"
+        );
         let _ = state.update(Event::Search("nothing like this".into()));
-        assert_eq!(match_label(&state), "No matches");
+        assert_eq!(match_label(&state), "None");
     }
 
     #[test]

@@ -81,7 +81,7 @@ impl<'a, Message> Scope<'a, Message> {
     /// Sends `message` for Escape while the text field `id` has focus,
     /// before the field can take the key and lose focus. Without a message
     /// Escape reaches the field as usual.
-    #[cfg(any(feature = "json-viewer", feature = "property-grid"))]
+    #[cfg(feature = "property-grid")]
     pub(crate) fn escape(mut self, id: widget::Id, message: Option<Message>) -> Self
     where
         Message: Clone + 'a,
@@ -480,61 +480,138 @@ where
     }
 }
 
-/// Wraps a search field so the keys a field would otherwise swallow follow
-/// the shared search convention while it has focus: Escape clears the
-/// text, leaving the field for a second Escape, and Shift+Enter steps back
-/// a match. Enter stays with the field's own submit.
-#[cfg(feature = "log-viewer")]
+/// What a key press means to a focused search field.
+#[cfg(any(
+    feature = "json-viewer",
+    feature = "log-viewer",
+    feature = "property-grid"
+))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SearchKey {
+    /// Escape: clear the text, or leave the field when it is empty.
+    Clear,
+    /// Enter or F3.
+    Next,
+    /// Shift+Enter or Shift+F3.
+    Previous,
+    /// Ctrl+F, or Cmd+F on macOS: select the text rather than type.
+    SelectAll,
+}
+
+#[cfg(any(
+    feature = "json-viewer",
+    feature = "log-viewer",
+    feature = "property-grid"
+))]
+fn search_key(press: &keys::Event) -> Option<SearchKey> {
+    use keyboard::key::Named;
+
+    let shift = press.modifiers.shift();
+    match &press.key {
+        keyboard::Key::Named(Named::Escape) => Some(SearchKey::Clear),
+        keyboard::Key::Named(Named::Enter | Named::F3) if shift => Some(SearchKey::Previous),
+        keyboard::Key::Named(Named::Enter | Named::F3) => Some(SearchKey::Next),
+        keyboard::Key::Character(c) if press.modifiers.command() && c.eq_ignore_ascii_case("f") => {
+            Some(SearchKey::SelectAll)
+        }
+        _ => None,
+    }
+}
+
+/// Wraps a search field so it follows the search convention every data
+/// view shares while it has focus:
+///
+/// - Escape clears the text, and on an empty field leaves it.
+/// - Enter and F3 step to the next match, Shift+Enter and Shift+F3 to the
+///   previous one, where the view steps through matches.
+/// - Ctrl+F, or Cmd+F on macOS, selects the text instead of typing it.
+///
+/// A key without a message reaches the field as usual.
+#[cfg(any(
+    feature = "json-viewer",
+    feature = "log-viewer",
+    feature = "property-grid"
+))]
 pub(crate) struct SearchKeys<'a, Message> {
     content: Element<'a, Message>,
-    id: iced::widget::Id,
+    id: widget::Id,
     clear: Option<Message>,
+    next: Option<Message>,
     previous: Option<Message>,
 }
 
-#[cfg(feature = "log-viewer")]
+#[cfg(any(
+    feature = "json-viewer",
+    feature = "log-viewer",
+    feature = "property-grid"
+))]
 pub(crate) fn search_keys<'a, Message>(
     content: impl Into<Element<'a, Message>>,
-    id: iced::widget::Id,
+    id: widget::Id,
 ) -> SearchKeys<'a, Message> {
     SearchKeys {
         content: content.into(),
         id,
         clear: None,
+        next: None,
         previous: None,
     }
 }
 
-#[cfg(feature = "log-viewer")]
+#[cfg(any(
+    feature = "json-viewer",
+    feature = "log-viewer",
+    feature = "property-grid"
+))]
 impl<Message> SearchKeys<'_, Message> {
-    /// Sent for Escape while the field has focus. `None` leaves Escape to
-    /// the field, which then loses focus.
+    /// Sent for Escape. `None`, as for an empty field, leaves Escape to the
+    /// field, which then loses focus.
     pub(crate) fn on_clear(mut self, message: Option<Message>) -> Self {
         self.clear = message;
         self
     }
 
-    /// Sent for Shift+Enter while the field has focus.
+    /// Sent for Enter and F3.
+    #[cfg(any(feature = "json-viewer", feature = "log-viewer"))]
+    pub(crate) fn on_next(mut self, message: Option<Message>) -> Self {
+        self.next = message;
+        self
+    }
+
+    /// Sent for Shift+Enter and Shift+F3.
+    #[cfg(any(feature = "json-viewer", feature = "log-viewer"))]
     pub(crate) fn on_previous(mut self, message: Option<Message>) -> Self {
         self.previous = message;
         self
     }
 
-    /// The message a key press stands for while the field has focus.
-    fn message(&self, event: &Event) -> Option<&Message> {
-        let press = key_press(event)?;
-        let keyboard::Key::Named(named) = press.key else {
-            return None;
-        };
-        match named {
-            keyboard::key::Named::Escape => self.clear.as_ref(),
-            keyboard::key::Named::Enter if press.modifiers.shift() => self.previous.as_ref(),
-            _ => None,
+    fn message(&self, key: SearchKey) -> Option<&Message> {
+        match key {
+            SearchKey::Clear => self.clear.as_ref(),
+            SearchKey::Next => self.next.as_ref(),
+            SearchKey::Previous => self.previous.as_ref(),
+            SearchKey::SelectAll => None,
         }
+    }
+
+    /// Whether the field has focus.
+    fn is_focused(&mut self, tree: &mut Tree, layout: Layout<'_>, renderer: &Renderer) -> bool {
+        let mut probe = Probe {
+            target: &self.id,
+            focused: false,
+        };
+        self.content
+            .as_widget_mut()
+            .operate(&mut tree.children[0], layout, renderer, &mut probe);
+        probe.focused
     }
 }
 
-#[cfg(feature = "log-viewer")]
+#[cfg(any(
+    feature = "json-viewer",
+    feature = "log-viewer",
+    feature = "property-grid"
+))]
 impl<Message: Clone> Widget<Message, Theme, Renderer> for SearchKeys<'_, Message> {
     fn children(&self) -> Vec<Tree> {
         vec![Tree::new(&self.content)]
@@ -607,22 +684,28 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for SearchKeys<'_, Message
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) {
-        if let Some(message) = self.message(event).cloned() {
-            let mut probe = Probe {
-                target: &self.id,
-                focused: false,
-            };
-            self.content.as_widget_mut().operate(
-                &mut tree.children[0],
-                layout,
-                renderer,
-                &mut probe,
-            );
-            if probe.focused {
-                shell.publish(message);
-                shell.capture_event();
-                return;
+        let key = key_press(event).as_ref().and_then(search_key);
+        let handled = key.filter(|&key| key == SearchKey::SelectAll || self.message(key).is_some());
+        if let Some(key) = handled
+            && self.is_focused(tree, layout, renderer)
+        {
+            match self.message(key).cloned() {
+                Some(message) => shell.publish(message),
+                None => {
+                    let mut select = iced::advanced::widget::operation::text_input::select_all::<()>(
+                        self.id.clone(),
+                    );
+                    self.content.as_widget_mut().operate(
+                        &mut tree.children[0],
+                        layout,
+                        renderer,
+                        &mut select,
+                    );
+                    shell.request_redraw();
+                }
             }
+            shell.capture_event();
+            return;
         }
         self.content.as_widget_mut().update(
             &mut tree.children[0],
@@ -671,21 +754,69 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for SearchKeys<'_, Message
     }
 }
 
-#[cfg(feature = "log-viewer")]
+#[cfg(any(
+    feature = "json-viewer",
+    feature = "log-viewer",
+    feature = "property-grid"
+))]
 impl<'a, Message: Clone + 'a> From<SearchKeys<'a, Message>> for Element<'a, Message> {
     fn from(keys: SearchKeys<'a, Message>) -> Self {
         Element::new(keys)
     }
 }
 
+/// The count beside a search that steps through matches: "3 of 12" once a
+/// match is current, counted from one, "12 found" before that, "None" when
+/// nothing matches, and nothing without a search.
+#[cfg(any(feature = "json-viewer", feature = "log-viewer"))]
+pub(crate) fn match_count_label(query: &str, total: usize, current: Option<usize>) -> String {
+    if query.trim().is_empty() {
+        return String::new();
+    }
+    match (total, current) {
+        (0, _) => NO_MATCHES.to_owned(),
+        (_, Some(position)) => format!("{position} of {total}"),
+        (_, None) => format!("{total} found"),
+    }
+}
+
+/// The count beside a search that filters rows: "3 shown", "None" when
+/// nothing passes, and nothing without a search.
+#[cfg(feature = "property-grid")]
+pub(crate) fn shown_label(query: &str, shown: usize) -> String {
+    if query.trim().is_empty() {
+        return String::new();
+    }
+    match shown {
+        0 => NO_MATCHES.to_owned(),
+        shown => format!("{shown} shown"),
+    }
+}
+
+/// The count when nothing matches a search.
+#[cfg(any(
+    feature = "json-viewer",
+    feature = "log-viewer",
+    feature = "property-grid"
+))]
+const NO_MATCHES: &str = "None";
+
 /// The room kept beside a search box for its count, such as "3 of 12", so
 /// the box keeps its width when the count appears.
-#[cfg(any(feature = "json-viewer", feature = "property-grid"))]
+#[cfg(any(
+    feature = "json-viewer",
+    feature = "log-viewer",
+    feature = "property-grid"
+))]
 pub(crate) const COUNT_WIDTH: f32 = 64.0;
 
 /// A search box's count in its fixed slot, ending in an ellipsis when it
 /// does not fit.
-#[cfg(any(feature = "json-viewer", feature = "property-grid"))]
+#[cfg(any(
+    feature = "json-viewer",
+    feature = "log-viewer",
+    feature = "property-grid"
+))]
 pub(crate) fn search_count<'a, Message: 'a>(label: String) -> Element<'a, Message> {
     use crate::data::ellipsis::ellipsis;
     use crate::theme::{Tokens, text_size};
@@ -1017,6 +1148,71 @@ mod tests {
         assert_eq!(press_at(&pressed, mouse::Cursor::Unavailable), None);
         let moved = Event::Mouse(mouse::Event::CursorMoved { position: at });
         assert_eq!(press_at(&moved, mouse::Cursor::Available(at)), None);
+    }
+
+    #[cfg(any(
+        feature = "json-viewer",
+        feature = "log-viewer",
+        feature = "property-grid"
+    ))]
+    #[test]
+    fn search_fields_share_one_set_of_keys() {
+        use keyboard::key::Named;
+
+        let named = |name, modifiers| keys::Event {
+            key: keyboard::Key::Named(name),
+            modifiers,
+        };
+        let character = |c: &str, modifiers| keys::Event {
+            key: keyboard::Key::Character(c.into()),
+            modifiers,
+        };
+        let none = Modifiers::empty();
+        assert_eq!(
+            search_key(&named(Named::Escape, none)),
+            Some(SearchKey::Clear)
+        );
+        assert_eq!(
+            search_key(&named(Named::Enter, none)),
+            Some(SearchKey::Next)
+        );
+        assert_eq!(search_key(&named(Named::F3, none)), Some(SearchKey::Next));
+        assert_eq!(
+            search_key(&named(Named::Enter, Modifiers::SHIFT)),
+            Some(SearchKey::Previous)
+        );
+        assert_eq!(
+            search_key(&named(Named::F3, Modifiers::SHIFT)),
+            Some(SearchKey::Previous)
+        );
+        assert_eq!(
+            search_key(&character("f", Modifiers::COMMAND)),
+            Some(SearchKey::SelectAll)
+        );
+        assert_eq!(
+            search_key(&character("F", Modifiers::COMMAND | Modifiers::SHIFT)),
+            Some(SearchKey::SelectAll)
+        );
+        assert_eq!(search_key(&character("f", none)), None, "typing");
+        assert_eq!(search_key(&named(Named::Home, none)), None);
+    }
+
+    #[cfg(any(feature = "json-viewer", feature = "log-viewer"))]
+    #[test]
+    fn stepping_search_counts_read_the_same_everywhere() {
+        assert_eq!(match_count_label("", 4, None), "");
+        assert_eq!(match_count_label("  ", 4, None), "");
+        assert_eq!(match_count_label("a", 12, None), "12 found");
+        assert_eq!(match_count_label("a", 12, Some(3)), "3 of 12");
+        assert_eq!(match_count_label("a", 0, None), "None");
+    }
+
+    #[cfg(feature = "property-grid")]
+    #[test]
+    fn filtering_search_counts_say_how_many_are_shown() {
+        assert_eq!(shown_label("", 4), "");
+        assert_eq!(shown_label("a", 3), "3 shown");
+        assert_eq!(shown_label("a", 0), "None");
     }
 
     #[test]

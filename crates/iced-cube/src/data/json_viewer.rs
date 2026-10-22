@@ -32,7 +32,9 @@ use iced::{Alignment, Border, Color, Element, Font, Length, Task, Theme, mouse};
 use serde_json::Value;
 
 use crate::data::ellipsis::ellipsis;
-use crate::data::interaction::{Look, RowMenu, pressable, ringed, row_menu, scope, search_count};
+use crate::data::interaction::{
+    Look, RowMenu, match_count_label, pressable, ringed, row_menu, scope, search_count, search_keys,
+};
 use crate::data::rows::rows;
 use crate::feedback::alert::{self, alert};
 use crate::icon::{opacity, themed};
@@ -199,7 +201,7 @@ pub enum Event {
     NextMatch,
     PreviousMatch,
     /// Shows only matches, their parents and what is inside them.
-    Filter(bool),
+    OnlyMatches(bool),
     CopyValue(NodeId),
     CopyPath(NodeId),
     /// Asks the app to focus the search box.
@@ -234,7 +236,7 @@ pub struct State {
     /// The ancestors of every match.
     trail: HashSet<NodeId>,
     current: Option<usize>,
-    filter: bool,
+    only_matches: bool,
     error: Option<ParseError>,
     search_id: widget::Id,
 }
@@ -262,7 +264,7 @@ impl State {
             matched: HashSet::new(),
             trail: HashSet::new(),
             current: None,
-            filter: false,
+            only_matches: false,
             error: None,
             search_id: SEARCH,
         }
@@ -295,8 +297,8 @@ impl State {
     }
 
     /// Starts with only the matches shown while searching.
-    pub fn with_filter(mut self, filter: bool) -> Self {
-        self.filter = filter;
+    pub fn with_only_matches(mut self, only_matches: bool) -> Self {
+        self.only_matches = only_matches;
         self
     }
 
@@ -394,15 +396,15 @@ impl State {
             .copied()
     }
 
-    /// Whether only matches are shown: the filter is on and there is a
-    /// search.
+    /// Whether only matches are shown: [`only_matches`](Self::only_matches)
+    /// is on and there is a search.
     pub fn is_filtering(&self) -> bool {
-        self.filter && !self.query.trim().is_empty()
+        self.only_matches && !self.query.trim().is_empty()
     }
 
-    /// Whether the filter is on, searching or not.
-    pub fn filter(&self) -> bool {
-        self.filter
+    /// Whether a search shows only its matches, searching or not.
+    pub fn only_matches(&self) -> bool {
+        self.only_matches
     }
 
     /// The rows on screen when scrolled through, in document order.
@@ -513,7 +515,7 @@ impl State {
             Event::Search(query) => self.search(query),
             Event::NextMatch => self.cycle(true),
             Event::PreviousMatch => self.cycle(false),
-            Event::Filter(filter) => self.filter = filter,
+            Event::OnlyMatches(only_matches) => self.only_matches = only_matches,
             Event::CopyValue(id) => {
                 self.highlight(id);
                 return self.pretty(id).map(Output::CopyValue);
@@ -716,9 +718,15 @@ impl State {
             }
         }
         self.expanded.extend(self.trail.iter().copied());
-        if let Some(&first) = self.matches.first() {
-            self.current = Some(0);
-            self.highlighted = Some(first);
+        // The nearest match: the first at or after the highlight, or else
+        // the last before it.
+        let at = self
+            .highlighted
+            .map_or(0, |from| self.matches.partition_point(|&id| id < from));
+        let index = at.min(self.matches.len().saturating_sub(1));
+        if let Some(&nearest) = self.matches.get(index) {
+            self.current = Some(index);
+            self.highlighted = Some(nearest);
         }
     }
 
@@ -977,8 +985,8 @@ impl keys::Action for Action {
 /// | `ArrowLeft` | [`Action::Collapse`] |
 /// | `Enter` | [`Action::Toggle`] |
 /// | `*` | [`Action::ExpandSiblings`] |
-/// | `Shift+ArrowRight` | [`Action::ExpandAll`] |
-/// | `Shift+ArrowLeft` | [`Action::CollapseAll`] |
+/// | `Mod+Shift+ArrowRight` | [`Action::ExpandAll`] |
+/// | `Mod+Shift+ArrowLeft` | [`Action::CollapseAll`] |
 /// | `Mod+C` (Ctrl, or Cmd on macOS) | [`Action::CopyValue`] |
 /// | `Mod+Shift+C` | [`Action::CopyPath`] |
 /// | `Mod+F` | [`Action::FocusSearch`] |
@@ -988,8 +996,11 @@ impl keys::Action for Action {
 ///
 /// Enter does what a double click does, as in the tree, where it activates
 /// a node: here it opens or closes an object or array. Space is left free,
-/// since the viewer has nothing to select. Escape in the search box clears
-/// it, and a second Escape leaves it. The viewer resolves these itself,
+/// since the viewer has nothing to select, and Shift+Arrow is left alone,
+/// as other views extend a selection with it. While the search box has
+/// focus, Enter and F3 step to the next match and Shift+Enter and Shift+F3
+/// to the previous one, Mod+F selects its text, and Escape clears it, then
+/// a second Escape leaves it. The viewer resolves these itself,
 /// only while it has focus, so they never clash with other components.
 /// Pass a changed keymap with [`JsonViewer::keymap`].
 pub fn default_keymap() -> Keymap<Action> {
@@ -1002,8 +1013,14 @@ pub fn default_keymap() -> Keymap<Action> {
         .bind(Chord::named(Named::ArrowLeft), Action::Collapse)
         .bind(Chord::named(Named::Enter), Action::Toggle)
         .bind(Chord::character('*'), Action::ExpandSiblings)
-        .bind(Chord::named(Named::ArrowRight).shift(), Action::ExpandAll)
-        .bind(Chord::named(Named::ArrowLeft).shift(), Action::CollapseAll)
+        .bind(
+            Chord::named(Named::ArrowRight).command().shift(),
+            Action::ExpandAll,
+        )
+        .bind(
+            Chord::named(Named::ArrowLeft).command().shift(),
+            Action::CollapseAll,
+        )
         .bind(Chord::character('c').command(), Action::CopyValue)
         .bind(Chord::character('c').command().shift(), Action::CopyPath)
         .bind(Chord::character('f').command(), Action::FocusSearch)
@@ -1175,7 +1192,7 @@ type BuildMenu<'a, Message> =
 /// A JSON viewer builder. Convert it into an [`Element`] to render.
 pub struct JsonViewer<'a, Message> {
     state: &'a State,
-    search: bool,
+    search_bar: bool,
     placeholder: String,
     frame: bool,
     key_width: f32,
@@ -1192,7 +1209,7 @@ pub struct JsonViewer<'a, Message> {
 pub fn json_viewer<Message>(state: &State) -> JsonViewer<'_, Message> {
     JsonViewer {
         state,
-        search: false,
+        search_bar: false,
         placeholder: "Search".to_owned(),
         frame: true,
         key_width: KEY_WIDTH,
@@ -1209,7 +1226,7 @@ impl<Message> fmt::Debug for JsonViewer<'_, Message> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("JsonViewer")
             .field("state", self.state)
-            .field("search", &self.search)
+            .field("search_bar", &self.search_bar)
             .field("placeholder", &self.placeholder)
             .field("frame", &self.frame)
             .field("key_width", &self.key_width)
@@ -1224,8 +1241,8 @@ impl<'a, Message> JsonViewer<'a, Message> {
     /// Shows a search box above the rows, with the match count, buttons
     /// for the previous and next match and a toggle that shows only
     /// matches.
-    pub fn search(mut self, search: bool) -> Self {
-        self.search = search;
+    pub fn search_bar(mut self, search_bar: bool) -> Self {
+        self.search_bar = search_bar;
         self
     }
 
@@ -1319,7 +1336,7 @@ where
     fn from(viewer: JsonViewer<'a, Message>) -> Self {
         let JsonViewer {
             state,
-            search,
+            search_bar,
             placeholder,
             frame,
             key_width,
@@ -1403,7 +1420,7 @@ where
             body
         };
         let mut parts = column![].spacing(space::SM).width(width);
-        if search {
+        if search_bar {
             parts = parts.push(toolbar(state, &placeholder, on_event.clone()));
         }
         let parts = parts.push(body);
@@ -1412,9 +1429,7 @@ where
             return parts.into();
         };
         let on_focus = on_event.clone();
-        let clear = (!state.query().is_empty()).then(|| on_event(Event::Search(String::new())));
         scope(parts)
-            .escape(state.search_id().clone(), clear)
             .on_focus(move |focused| on_focus(Event::Focus(focused)))
             .on_key(move |key| {
                 let opened = menu
@@ -1433,17 +1448,12 @@ pub fn focus_search<Message>(state: &State) -> Task<Message> {
     widget::operation::focus(state.search_id().clone())
 }
 
-/// The text beside the search box: which match is current, of how many.
+/// The text beside the search box: "3 of 12" for the current match of all
+/// matches, "12 found" before one is current, "None" when nothing matches,
+/// and empty without a search.
 pub fn match_label(state: &State) -> String {
-    if state.query().trim().is_empty() {
-        return String::new();
-    }
-    let total = state.matches().len();
-    match (total, state.current) {
-        (0, _) => "No matches".to_owned(),
-        (_, Some(index)) => format!("{} of {total}", index + 1),
-        (_, None) => format!("{total} found"),
-    }
+    let current = state.current.map(|index| index + 1);
+    match_count_label(state.query(), state.matches().len(), current)
 }
 
 fn toolbar<'a, Message: Clone + 'a>(
@@ -1459,13 +1469,16 @@ fn toolbar<'a, Message: Clone + 'a>(
             .clone()
             .map(|on_event| move |query| on_event(Event::Search(query)));
         input(placeholder, state.query())
-            .id(id)
+            .id(id.clone())
             .icon(crate::lucide!(Search))
             .size(input::Size::Sm)
             .width(Length::Fill)
             .on_input_maybe(on_input)
-            .on_submit_maybe(send(Event::NextMatch).filter(|_| searching))
     };
+    let field = search_keys(field, id)
+        .on_clear(send(Event::Search(String::new())).filter(|_| !state.query().is_empty()))
+        .on_next(send(Event::NextMatch).filter(|_| searching))
+        .on_previous(send(Event::PreviousMatch).filter(|_| searching));
     let count = search_count(match_label(state));
     row![
         field,
@@ -1481,8 +1494,8 @@ fn toolbar<'a, Message: Clone + 'a>(
         icon_button(crate::lucide!(ListFilter))
             .label("Only matches")
             .size(Size::Sm)
-            .pressed(state.filter())
-            .on_press_maybe(send(Event::Filter(!state.filter()))),
+            .pressed(state.only_matches())
+            .on_press_maybe(send(Event::OnlyMatches(!state.only_matches()))),
     ]
     .spacing(space::XS)
     .align_y(Alignment::Center)
@@ -1925,12 +1938,30 @@ mod tests {
         );
         let _ = state.update(Event::Search("1".into()));
         assert!(state.matches().is_empty(), "indices are not searched");
-        assert_eq!(match_label(&state), "No matches");
+        assert_eq!(match_label(&state), "None");
         let _ = state.update(Event::Search("  ".into()));
         assert!(state.matches().is_empty());
         assert_eq!(match_label(&state), "");
         let _ = state.update(Event::Search("36".into()));
         assert_eq!(state.matches(), &[id(&state, "$.age")], "numbers as text");
+    }
+
+    #[test]
+    fn typing_jumps_to_the_nearest_match_at_or_after_the_highlight() {
+        let mut state = sample().with_depth(1);
+        let address = id(&state, "$.address");
+        let _ = state.update(Event::Press(address));
+        let _ = state.update(Event::Search("a".into()));
+        assert_eq!(state.current_match(), Some(address), "at the highlight");
+        let _ = state.update(Event::Search("ag".into()));
+        assert_eq!(state.current_match(), Some(id(&state, "$.age")), "after it");
+        assert_eq!(match_label(&state), "2 of 2", "tags comes first");
+        let _ = state.update(Event::Search("name".into()));
+        assert_eq!(
+            state.current_match(),
+            Some(id(&state, "$.name")),
+            "the last before it when nothing follows"
+        );
     }
 
     #[test]
@@ -1958,8 +1989,8 @@ mod tests {
             "users": [{ "name": "Ada", "role": "admin" }, { "name": "Grace" }],
             "meta": { "count": 2 }
         }))
-        .with_filter(true);
-        assert!(state.filter() && !state.is_filtering());
+        .with_only_matches(true);
+        assert!(state.only_matches() && !state.is_filtering());
         let _ = state.update(Event::Search("grace".into()));
         assert!(state.is_filtering());
         let shown: Vec<String> = state.visible().iter().map(|&id| state.path(id)).collect();
@@ -1973,10 +2004,10 @@ mod tests {
             ["$.users", "$.users[0]", "$.users[1]", "$.users[1].name"],
             "a match shows what is inside"
         );
-        let _ = state.update(Event::Filter(false));
+        let _ = state.update(Event::OnlyMatches(false));
         assert_eq!(state.visible().len(), 5);
         let _ = state.update(Event::Search("nothing".into()));
-        let _ = state.update(Event::Filter(true));
+        let _ = state.update(Event::OnlyMatches(true));
         assert!(state.visible().is_empty());
     }
 
@@ -2039,8 +2070,14 @@ mod tests {
         assert_eq!(press("Enter"), Some(Action::Toggle));
         assert_eq!(press("Space"), None, "left free, as nothing is selected");
         assert_eq!(press("*"), Some(Action::ExpandSiblings));
-        assert_eq!(press("Shift+ArrowRight"), Some(Action::ExpandAll));
-        assert_eq!(press("Shift+ArrowLeft"), Some(Action::CollapseAll));
+        assert_eq!(press("Mod+Shift+ArrowRight"), Some(Action::ExpandAll));
+        assert_eq!(press("Mod+Shift+ArrowLeft"), Some(Action::CollapseAll));
+        assert_eq!(
+            press("Shift+ArrowRight"),
+            None,
+            "Shift+Arrow extends a selection elsewhere"
+        );
+        assert_eq!(press("Shift+ArrowLeft"), None);
         assert_eq!(press("Mod+C"), Some(Action::CopyValue));
         assert_eq!(press("Mod+Shift+C"), Some(Action::CopyPath));
         assert_eq!(press("Mod+F"), Some(Action::FocusSearch));
@@ -2339,14 +2376,14 @@ mod tests {
     fn builder_defaults_and_options() {
         let state = sample();
         let view: JsonViewer<'_, ()> = json_viewer(&state);
-        assert!(!view.search && !view.is_enabled());
+        assert!(!view.search_bar && !view.is_enabled());
         assert!(view.frame);
         assert_eq!(view.placeholder, "Search");
         assert_eq!((view.width, view.height), (Length::Fill, Length::Shrink));
         assert_eq!(view.key_width, KEY_WIDTH);
         assert_eq!(view.keymap, default_keymap());
         let view = view
-            .search(true)
+            .search_bar(true)
             .placeholder("Find")
             .frame(false)
             .key_width(120.0)
@@ -2355,7 +2392,7 @@ mod tests {
             .keymap(Keymap::new())
             .context_menu_keymap(Keymap::new())
             .on_event(|_| ());
-        assert!(view.search && view.is_enabled() && !view.frame);
+        assert!(view.search_bar && view.is_enabled() && !view.frame);
         assert_eq!(view.placeholder, "Find");
         assert_eq!(state.search_id(), &SEARCH);
         let other = sample().with_search_id("other");

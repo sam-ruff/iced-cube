@@ -219,7 +219,12 @@ fn ctrl_f_moves_the_keyboard_to_the_filter() {
     let mut ui = simulator::simulator(view(&state));
     assert_eq!(focused(&mut ui), Some(SEARCH));
     let _ = ui.typewrite("w");
-    assert_eq!(events(ui), vec![Event::Filter("w".into())]);
+    let _ = ui.simulate([press_key(Key::Character("f".into()), Modifiers::COMMAND)]);
+    assert_eq!(
+        events(ui),
+        vec![Event::Search("w".into())],
+        "Ctrl+F in the box selects its text rather than typing"
+    );
 }
 
 #[test]
@@ -347,18 +352,18 @@ fn a_narrow_inspector_keeps_every_row_on_one_line() {
 #[test]
 fn escape_in_the_filter_clears_it_then_leaves_it() {
     let mut state = sample();
-    let _ = state.update(Event::Filter("wid".into()));
+    let _ = state.update(Event::Search("wid".into()));
     let mut ui = simulator::simulator(view(&state));
     assert!(ui.click("wid").is_ok());
     let _ = ui.simulate([press_key(Key::Named(Named::Escape), Modifiers::empty())]);
     assert_eq!(focused(&mut ui), Some(SEARCH), "the first Escape stays");
     let emitted = events(ui);
     assert!(
-        emitted.contains(&Event::Filter(String::new())),
+        emitted.contains(&Event::Search(String::new())),
         "{emitted:?}"
     );
     let _ = apply(emitted, &mut state);
-    assert_eq!(state.filter(), "");
+    assert_eq!(state.query(), "");
 
     let mut ui = simulator::simulator(view(&state));
     assert!(ui.click("Filter").is_ok());
@@ -368,7 +373,7 @@ fn escape_in_the_filter_clears_it_then_leaves_it() {
     assert!(
         !events(ui)
             .iter()
-            .any(|event| matches!(event, Event::Filter(_))),
+            .any(|event| matches!(event, Event::Search(_))),
     );
 }
 
@@ -379,17 +384,17 @@ fn the_filter_keeps_its_width_when_the_count_appears() {
         .find(SEARCH)
         .expect("filter")
         .bounds();
-    let _ = state.update(Event::Filter("i".into()));
+    let _ = state.update(Event::Search("i".into()));
     {
         let mut ui = simulator::simulator(view(&state));
         let after = ui.find(SEARCH).expect("filter").bounds();
-        assert!(ui.find("5 of 6").is_ok(), "every name but Blend");
+        assert!(ui.find("5 shown").is_ok(), "every name but Blend");
         assert_eq!(before.width, after.width);
     }
 
-    let _ = state.update(Event::Filter("zebra".into()));
+    let _ = state.update(Event::Search("zebra".into()));
     let mut ui = simulator::simulator(view(&state));
-    assert!(ui.find("No matches").is_ok());
+    assert!(ui.find("None").is_ok());
 }
 
 #[test]

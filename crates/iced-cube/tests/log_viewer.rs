@@ -178,6 +178,33 @@ fn enter_and_shift_enter_in_the_search_field_step_through_matches() {
 }
 
 #[test]
+fn f3_steps_and_ctrl_f_selects_in_the_search_field() {
+    let mut state = sample();
+    let _ = state.update(Event::Search("request".into()));
+    let mut ui = sized(view(&state), 720.0);
+    ui.click("request").expect("search field shows the query");
+    let _ = ui.simulate([
+        press_key(Key::Named(Named::F3), Modifiers::empty()),
+        press_key(Key::Named(Named::F3), Modifiers::SHIFT),
+        press_key(Key::Character("f".into()), Modifiers::COMMAND),
+    ]);
+    let emitted = events(ui);
+    let steps: Vec<String> = emitted
+        .iter()
+        .filter(|event| matches!(event, Event::NextMatch | Event::PreviousMatch))
+        .map(|event| format!("{event:?}"))
+        .collect();
+    assert_eq!(steps, ["NextMatch", "PreviousMatch"], "{emitted:?}");
+    assert!(!has(&emitted, "FocusSearch"), "{emitted:?}");
+    assert!(
+        !emitted
+            .iter()
+            .any(|event| matches!(event, Event::Search(_))),
+        "Ctrl+F does not type an f: {emitted:?}"
+    );
+}
+
+#[test]
 fn enter_on_the_lines_leaves_the_matches_alone() {
     let mut state = sample();
     let _ = state.update(Event::Search("request".into()));
@@ -236,7 +263,10 @@ fn the_match_counter_shows_the_current_match() {
     let _ = state.update(Event::Search("request".into()));
     {
         let mut ui = sized(view(&state), 720.0);
-        assert!(ui.find("2 found").is_ok());
+        assert!(
+            ui.find("2 of 2").is_ok(),
+            "typing jumps to the newest match"
+        );
     }
     let _ = state.update(Event::NextMatch);
     {
@@ -245,7 +275,7 @@ fn the_match_counter_shows_the_current_match() {
     }
     let _ = state.update(Event::Search("nothing like this".into()));
     let mut ui = sized(view(&state), 720.0);
-    assert!(ui.find("No matches").is_ok());
+    assert!(ui.find("None").is_ok());
 }
 
 #[test]
@@ -256,7 +286,7 @@ fn the_toolbar_fits_a_phone_while_searching() {
     let mut ui = sized(element, 280.0);
     let field = ui.find("nothing like this").expect("field").bounds();
     assert!(field.width > 240.0, "the field takes the row: {field:?}");
-    let counter = ui.find("No matches").expect("counter").bounds();
+    let counter = ui.find("None").expect("counter").bounds();
     assert!(counter.width <= 64.0, "{counter:?}");
     // The two step buttons, 32 pixels each, follow the counter.
     let right = counter.x + counter.width + 2.0 * (space::XS + 32.0);

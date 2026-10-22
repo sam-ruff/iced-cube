@@ -282,7 +282,11 @@ fn the_open_menu_lists_its_entries() {
 #[test]
 fn the_search_box_searches_and_steps_through_matches() {
     let mut state = user();
-    let mut ui = simulator::simulator(json_viewer(&state).search(true).on_event(Message::Viewer));
+    let mut ui = simulator::simulator(
+        json_viewer(&state)
+            .search_bar(true)
+            .on_event(Message::Viewer),
+    );
     ui.click("Search").expect("search box");
     ui.typewrite("ad");
     let _ = apply(events(ui), &mut state);
@@ -293,7 +297,11 @@ fn the_search_box_searches_and_steps_through_matches() {
         "Ada and the admin and address keys"
     );
 
-    let mut ui = simulator::simulator(json_viewer(&state).search(true).on_event(Message::Viewer));
+    let mut ui = simulator::simulator(
+        json_viewer(&state)
+            .search_bar(true)
+            .on_event(Message::Viewer),
+    );
     assert!(ui.find("1 of 3").is_ok());
     ui.click("ad").expect("search box with its text");
     let _ = ui.tap_key(Named::Enter);
@@ -304,10 +312,44 @@ fn the_search_box_searches_and_steps_through_matches() {
 fn searching(state: &State) -> Simulator<'_, Message> {
     sized(
         json_viewer(state)
-            .search(true)
+            .search_bar(true)
             .on_event(Message::Viewer)
             .into(),
     )
+}
+
+#[test]
+fn search_box_keys_step_and_select_rather_than_type() {
+    let mut state = user();
+    let _ = state.update(Event::Search("ad".into()));
+    let mut ui = searching(&state);
+    ui.click("ad").expect("search box with its text");
+    let _ = ui.simulate([
+        press_key(Key::Named(Named::F3), Modifiers::empty()),
+        press_key(Key::Named(Named::F3), Modifiers::SHIFT),
+        press_key(Key::Named(Named::Enter), Modifiers::SHIFT),
+        press_key(Key::Character("f".into()), Modifiers::COMMAND),
+    ]);
+    let emitted = events(ui);
+    let steps: Vec<&Event> = emitted
+        .iter()
+        .filter(|event| matches!(event, Event::NextMatch | Event::PreviousMatch))
+        .collect();
+    assert_eq!(
+        steps,
+        [
+            &Event::NextMatch,
+            &Event::PreviousMatch,
+            &Event::PreviousMatch
+        ],
+        "{emitted:?}"
+    );
+    assert!(
+        !emitted
+            .iter()
+            .any(|event| matches!(event, Event::Search(_) | Event::FocusSearch)),
+        "Ctrl+F does not type an f: {emitted:?}"
+    );
 }
 
 /// Whether the search box has focus.
@@ -376,10 +418,13 @@ fn the_search_box_keeps_its_width_when_the_count_appears() {
 fn the_search_box_fits_a_phone() {
     const PHONE: f32 = 328.0;
     let state = user();
-    let element: Element<'_, Message> =
-        container(json_viewer(&state).search(true).on_event(Message::Viewer))
-            .width(PHONE)
-            .into();
+    let element: Element<'_, Message> = container(
+        json_viewer(&state)
+            .search_bar(true)
+            .on_event(Message::Viewer),
+    )
+    .width(PHONE)
+    .into();
     let mut ui = Simulator::with_size(iced::Settings::default(), Size::new(PHONE, 400.0), element);
     let field = ui.find(json_viewer::SEARCH).expect("search box").bounds();
     let placeholder = ui.find("Search").expect("placeholder").bounds();
@@ -414,7 +459,7 @@ fn enter_toggles_and_space_is_left_free() {
 
 #[test]
 fn the_filter_leaves_only_matches_and_says_when_nothing_matches() {
-    let mut state = user().with_filter(true);
+    let mut state = user().with_only_matches(true);
     let _ = state.update(Event::Search("london".into()));
     {
         let mut ui = simulator::simulator(view(&state));

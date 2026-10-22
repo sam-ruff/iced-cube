@@ -43,7 +43,7 @@ impl Default for Example {
             toggle(12, "Visible", true).category("State"),
         ])
         .with_sort(Sort::Alphabetical);
-        let _ = button.update(Event::Filter("colour".into()));
+        let _ = button.update(Event::Search("colour".into()));
 
         Self { button }
     }

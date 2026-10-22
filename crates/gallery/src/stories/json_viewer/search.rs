@@ -46,7 +46,7 @@ impl Example {
     pub fn view(&self) -> Element<'_, Message> {
         column![
             json_viewer(&self.team)
-                .search(true)
+                .search_bar(true)
                 .height(296)
                 .on_event(Message::Viewer),
         ]

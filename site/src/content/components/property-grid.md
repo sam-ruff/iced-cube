@@ -27,13 +27,13 @@ api:
   - name: ".with_sort(Sort) / .with_collapsed(categories) / .with_name_width(px)"
     description: "Sort::Categorised (the default) or Alphabetical, categories to start closed, and a fixed starting width for the name column."
   - name: "state.update(Event)"
-    description: "Handles presses, editing, typing, keyboard navigation, the filter, sorting and resizing. Returns Output::Changed { id, value } whenever a value changes, Output::Reset { id, value } when one goes back to its default and Output::CopyValue(text) for the app to write to the clipboard."
+    description: "Handles presses, editing, typing, keyboard navigation, the search (Event::Search), sorting and resizing. Returns Output::Changed { id, value } whenever a value changes, Output::Reset { id, value } when one goes back to its default and Output::CopyValue(text) for the app to write to the clipboard."
   - name: "state.value(id) / state.property(id) / state.set(id, value)"
     description: "Reads a value or property, and sets one from the app, such as from a custom editor or after an undo."
   - name: "state.editing() / state.draft(id) / state.error(id) / state.can_reset(id)"
     description: "The property being typed into, its text, why that text is not valid yet, and whether a reset would change anything."
-  - name: "state.entries() / state.highlighted() / state.filter() / state.sort()"
-    description: "The rows on screen in order, the row the keyboard acts on, the filter text and the sort."
+  - name: "state.entries() / state.highlighted() / state.query() / state.sort()"
+    description: "The rows on screen in order, the row the keyboard acts on, the search text and the sort."
   - name: "property_grid(&state)"
     description: "Renders the filter box, the rows and the description area. Editors render disabled until .on_event is set."
   - name: ".custom(id, render)"
@@ -58,8 +58,8 @@ Text, numbers and colours show as plain text until clicked, or until Enter or F2
 
 Toggles and choices change straight away: a checkbox or switch flips, a select picks an option, and Enter on the row does the same from the keyboard. A property with a default shows a dot and a bold name while its value differs, and a reset button at the end of its row.
 
-The box above the rows filters properties by name, with a count such as "3 of 12" or "No matches" beside it, and the two buttons switch between categories and one alphabetical list. Escape in the box clears it, and a second Escape leaves it. In a narrow panel the value column gives up its room first, down to a minimum, so names stay readable; drag the line between the columns to change the split, and a dragged width is kept. Names that still do not fit end in an ellipsis rather than wrapping, so every row keeps the same height. The description under the rows wraps and grows to fit.
+The box above the rows filters properties by name, with a count such as "3 shown" or "None" beside it, and the two buttons switch between categories and one alphabetical list. Typing keeps the highlight on the nearest shown property at or after it. Escape in the box clears it, a second Escape leaves it, and Ctrl+F in the box selects its text, as in the log viewer and the JSON viewer. In a narrow panel the value column gives up its room first, down to a minimum, so names stay readable; drag the line between the columns to change the split, and a dragged width is kept. Names that still do not fit end in an ellipsis rather than wrapping, so every row keeps the same height. The description under the rows wraps and grows to fit.
 
-Right-click a property, long-press it or press Shift+F10 to open its context menu when the grid has one, and Ctrl+C copies the highlighted value as it is shown. The grid selects nothing, so the row the keyboard acts on carries only a ring, shown while the grid has focus, as in the tree and the JSON viewer.
+Right-click a property, press and hold it or press Shift+F10 to open its context menu when the grid has one; the property carries the ring while the menu is open. Ctrl+C copies the highlighted value as it is shown. Colour swatches keep a lighter ring in dark themes, so a near-black colour still shows its edge. The grid selects nothing, so the row the keyboard acts on carries only a ring, shown while the grid has focus, as in the tree and the JSON viewer.
 
 The grid resolves its keys itself, and only while it has focus, which it takes when pressed. While a field is being typed into it keeps the keys it uses, such as the arrows that move its cursor, but Up and Down step a number up or down.

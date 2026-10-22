@@ -114,6 +114,7 @@ impl<'a> Ellipsis<'a> {
     #[cfg(any(
         feature = "data-table",
         feature = "json-viewer",
+        feature = "log-viewer",
         feature = "property-grid"
     ))]
     pub(crate) fn align_x(mut self, align: impl Into<text::Alignment>) -> Self {

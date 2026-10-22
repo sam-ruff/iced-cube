@@ -33,7 +33,9 @@ use iced::{
 };
 
 use crate::data::ellipsis::ellipsis;
-use crate::data::interaction::{Look, RowMenu, pressable, ringed, row_menu, scope, search_count};
+use crate::data::interaction::{
+    Look, RowMenu, pressable, ringed, row_menu, scope, search_count, search_keys, shown_label,
+};
 use crate::data::rows::rows;
 use crate::forms::select::select;
 use crate::icon::{opacity, themed};
@@ -656,8 +658,8 @@ pub enum Event<Id> {
     /// Puts a property back to its default.
     Reset(Id),
     ResetHighlighted,
-    /// The filter text changed.
-    Filter(String),
+    /// The search text, which filters properties by name, changed.
+    Search(String),
     /// Moves keyboard focus to the filter box.
     FocusSearch,
     /// Asks the app to copy a property's value, as it is shown.
@@ -693,7 +695,7 @@ pub struct State<Id> {
     categories: Vec<String>,
     collapsed: HashSet<String>,
     sort: Sort,
-    filter: String,
+    query: String,
     highlighted: Option<Entry<Id>>,
     editing: Option<Editing<Id>>,
     drafts: HashMap<Id, Draft>,
@@ -738,7 +740,7 @@ impl<Id: Copy + Eq + Hash> State<Id> {
             categories,
             collapsed: HashSet::new(),
             sort: Sort::default(),
-            filter: String::new(),
+            query: String::new(),
             highlighted: None,
             editing: None,
             drafts: HashMap::new(),
@@ -823,8 +825,9 @@ impl<Id: Copy + Eq + Hash> State<Id> {
         self.sort
     }
 
-    pub fn filter(&self) -> &str {
-        &self.filter
+    /// The search text, which filters properties by name.
+    pub fn query(&self) -> &str {
+        &self.query
     }
 
     /// The row the keyboard acts on, which the description area describes.
@@ -894,12 +897,8 @@ impl<Id: Copy + Eq + Hash> State<Id> {
     }
 
     fn passes(&self, property: &Property<Id>) -> bool {
-        let filter = self.filter.trim();
-        filter.is_empty()
-            || property
-                .name
-                .to_lowercase()
-                .contains(&filter.to_lowercase())
+        let query = self.query.trim();
+        query.is_empty() || property.name.to_lowercase().contains(&query.to_lowercase())
     }
 
     /// How many properties in a category pass the filter.
@@ -995,10 +994,10 @@ impl<Id: Copy + Eq + Hash> State<Id> {
                     return self.reset(id);
                 }
             }
-            Event::Filter(filter) => {
+            Event::Search(query) => {
                 self.finish();
-                self.filter = filter;
-                self.keep_highlight_visible();
+                self.query = query;
+                self.highlight_nearest_shown();
             }
             Event::FocusSearch => {
                 self.finish();
@@ -1062,6 +1061,61 @@ impl<Id: Copy + Eq + Hash> State<Id> {
             .find(|entry| matches!(entry, Entry::Property(_)))
             .or(entries.first())
             .cloned()
+    }
+
+    /// Every property in the order the grid lists them, shown or not.
+    fn display_order(&self) -> Vec<Id> {
+        if self.sort == Sort::Alphabetical {
+            let mut sorted: Vec<&Property<Id>> = self.properties.iter().collect();
+            sorted.sort_by_cached_key(|property| property.name.to_lowercase());
+            return sorted.into_iter().map(|property| property.id).collect();
+        }
+        let mut order: Vec<Id> = Vec::with_capacity(self.properties.len());
+        for category in std::iter::once(None).chain(self.categories.iter().map(Some)) {
+            order.extend(
+                self.properties
+                    .iter()
+                    .filter(|property| property.category.as_ref() == category)
+                    .map(|property| property.id),
+            );
+        }
+        order
+    }
+
+    /// After the search changed, keeps the highlight on a shown row: the
+    /// highlighted property if it still passes, or else the nearest one
+    /// shown at or after it, or else the last shown before it.
+    fn highlight_nearest_shown(&mut self) {
+        let shown = self.entries();
+        if self.highlighted.is_none() && !self.query.trim().is_empty() {
+            self.highlighted = self.first_property();
+            return;
+        }
+        let Some(highlighted) = self.highlighted.clone() else {
+            return;
+        };
+        if shown.contains(&highlighted) {
+            return;
+        }
+        let order = self.display_order();
+        let start = match &highlighted {
+            Entry::Property(id) => order.iter().position(|other| other == id),
+            Entry::Category(name) => order.iter().position(|&id| {
+                self.property(id)
+                    .is_some_and(|property| property.category.as_ref() == Some(name))
+            }),
+        }
+        .unwrap_or(0);
+        let (before, after) = order.split_at(start.min(order.len()));
+        let is_shown = |id: &&Id| shown.contains(&Entry::Property(**id));
+        let nearest = after
+            .iter()
+            .find(is_shown)
+            .or_else(|| before.iter().rev().find(is_shown));
+        self.highlighted = match nearest {
+            Some(&id) => Some(Entry::Property(id)),
+            None => self.first_property(),
+        };
     }
 
     fn keep_highlight_visible(&mut self) {
@@ -1272,7 +1326,7 @@ impl<Id: Copy + Eq + Hash> State<Id> {
 
     fn cancel(&mut self) -> Option<Output<Id>> {
         let Some(editing) = self.editing.take() else {
-            self.filter.clear();
+            self.query.clear();
             return None;
         };
         let _ = self.drafts.remove(&editing.id);
@@ -1381,7 +1435,7 @@ impl Action {
                     .then_some(Event::EditHighlighted)
             }
             Action::Cancel => {
-                (state.editing().is_some() || !state.filter().is_empty()).then_some(Event::Cancel)
+                (state.editing().is_some() || !state.query().is_empty()).then_some(Event::Cancel)
             }
             Action::Reset => property
                 .filter(|property| state.can_reset(property.id))
@@ -1495,22 +1549,15 @@ pub fn focus_search<Id, Message>(_state: &State<Id>) -> Task<Message> {
     widget::operation::focus(SEARCH)
 }
 
-/// The text beside the filter box: how many properties pass the filter,
-/// of how many, such as "3 of 12", or "No matches".
+/// The text beside the search box: how many properties pass it, such as
+/// "3 shown", "None" when nothing does, and empty without a search.
 pub fn match_label<Id: Copy + Eq + Hash>(state: &State<Id>) -> String {
-    if state.filter().trim().is_empty() {
-        return String::new();
-    }
-    let total = state.properties().len();
-    match state
+    let shown = state
         .properties()
         .iter()
         .filter(|property| state.passes(property))
-        .count()
-    {
-        0 => "No matches".to_owned(),
-        shown => format!("{shown} of {total}"),
-    }
+        .count();
+    shown_label(state.query(), shown)
 }
 
 /// An entry of the context menu from [`menu`].
@@ -1971,13 +2018,11 @@ where
             request,
         };
         let cancel = state.editing().map(|_| on_event(Event::Cancel));
-        let clear = (!state.filter().is_empty()).then(|| on_event(Event::Filter(String::new())));
         let on_focus = on_event.clone();
         let keymap = self.keymap.clone();
         let view = Rc::clone(self);
         scope(focuser)
             .escape(EDITOR_ID, cancel)
-            .escape(SEARCH, clear)
             .on_focus(move |focused| on_focus(Event::Focus(focused)))
             .on_key(move |key| {
                 let opened = view
@@ -1993,12 +2038,16 @@ where
     fn toolbar(&self) -> Element<'a, Message> {
         let state = self.state;
         let on_event = self.on_event.clone();
-        let filter = input(&self.placeholder, state.filter())
+        let field = input(&self.placeholder, state.query())
             .id(SEARCH)
             .icon(crate::lucide!(Search))
             .size(input::Size::Sm)
             .width(Length::Fill)
-            .on_input_maybe(on_event.map(|on_event| move |query| on_event(Event::Filter(query))));
+            .on_input_maybe(on_event.map(|on_event| move |query| on_event(Event::Search(query))));
+        let filter = search_keys(field, SEARCH).on_clear(
+            self.send(Event::Search(String::new()))
+                .filter(|_| !state.query().is_empty()),
+        );
         let sort = |sort: Sort, glyph, label| {
             icon_button(glyph)
                 .label(label)
@@ -2632,7 +2681,7 @@ mod tests {
     fn the_filter_matches_names_and_drops_empty_categories() {
         let mut state = sample();
         let _ = state.update(Event::Press(Entry::Property(2)));
-        let _ = state.update(Event::Filter("FI".into()));
+        let _ = state.update(Event::Search("FI".into()));
         assert_eq!(
             state.entries(),
             vec![category("Appearance"), Entry::Property(5)]
@@ -2642,11 +2691,39 @@ mod tests {
         assert_eq!(
             state.highlighted(),
             Some(&Entry::Property(5)),
-            "a hidden highlight moves to the first match"
+            "a hidden highlight moves to the nearest match after it"
         );
-        let _ = state.update(Event::Filter("nothing".into()));
+        let _ = state.update(Event::Search("nothing".into()));
         assert!(state.entries().is_empty());
         assert_eq!(state.highlighted(), None);
+    }
+
+    #[test]
+    fn searching_keeps_the_highlight_on_the_nearest_shown_property() {
+        let mut state = sample();
+        let _ = state.update(Event::Press(Entry::Property(6)));
+        let _ = state.update(Event::Search("ab".into()));
+        assert_eq!(
+            state.highlighted(),
+            Some(&Entry::Property(7)),
+            "Label follows Blend"
+        );
+        let _ = state.update(Event::Search("la".into()));
+        assert_eq!(state.highlighted(), Some(&Entry::Property(7)), "stays put");
+        let _ = state.update(Event::Search("wid".into()));
+        assert_eq!(
+            state.highlighted(),
+            Some(&Entry::Property(2)),
+            "the last before it when nothing follows"
+        );
+
+        let mut fresh = sample();
+        let _ = fresh.update(Event::Search("e".into()));
+        assert_eq!(
+            fresh.highlighted(),
+            Some(&Entry::Property(3)),
+            "typing highlights the first shown property"
+        );
     }
 
     #[test]
@@ -2786,11 +2863,11 @@ mod tests {
     }
 
     #[test]
-    fn cancel_without_an_edit_clears_the_filter() {
+    fn cancel_without_an_edit_clears_the_search() {
         let mut state = sample();
-        let _ = state.update(Event::Filter("wid".into()));
+        let _ = state.update(Event::Search("wid".into()));
         let _ = state.update(Event::Cancel);
-        assert_eq!(state.filter(), "");
+        assert_eq!(state.query(), "");
     }
 
     #[test]
@@ -3130,17 +3207,17 @@ mod tests {
     }
 
     #[test]
-    fn the_match_label_counts_what_passes_the_filter() {
+    fn the_match_label_counts_what_passes_the_search() {
         let mut state = sample();
         assert_eq!(match_label(&state), "");
-        let _ = state.update(Event::Filter("i".into()));
+        let _ = state.update(Event::Search("i".into()));
         assert_eq!(
             match_label(&state),
-            "5 of 8",
+            "5 shown",
             "Id, Width, Height, Visible, Fill"
         );
-        let _ = state.update(Event::Filter("zebra".into()));
-        assert_eq!(match_label(&state), "No matches");
+        let _ = state.update(Event::Search("zebra".into()));
+        assert_eq!(match_label(&state), "None");
     }
 
     #[test]
