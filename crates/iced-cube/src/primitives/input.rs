@@ -240,8 +240,10 @@ pub fn style(tokens: &Tokens, status: Status, invalid: bool) -> Style {
         (false, Status::Active | Status::Disabled) => tokens.border,
     };
 
+    // Transparent so the field takes the colour of whatever surface it sits
+    // on, such as a dialog or popover.
     let active = Style {
-        background: Background::Color(tokens.background),
+        background: Background::Color(Color::TRANSPARENT),
         border: Border {
             color: border,
             width: 1.0,
@@ -387,6 +389,19 @@ mod tests {
                 disabled.background,
                 Background::Color(tokens.disabled_field())
             );
+        }
+    }
+
+    #[test]
+    fn enabled_fields_take_the_colour_of_their_surface() {
+        for theme in [light(), dark()] {
+            let tokens = Tokens::of(&theme);
+            for status in STATES.into_iter().filter(|s| *s != Status::Disabled) {
+                for invalid in [false, true] {
+                    let style = style(&tokens, status, invalid);
+                    assert_eq!(style.background, Background::Color(Color::TRANSPARENT));
+                }
+            }
         }
     }
 
