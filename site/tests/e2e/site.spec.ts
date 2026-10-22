@@ -170,6 +170,18 @@ test("preview frames use each story's height", async ({ page }) => {
   await expect(tall).toHaveCSS("height", "340px");
 });
 
+test("long inline code in usage notes wraps instead of widening the page", async ({ page }) => {
+  await page.goto("docs/components/json-viewer/");
+  await noHorizontalScroll(page);
+});
+
+test("long lists take the wheel and touch inside their previews", async ({ page }) => {
+  await page.goto("docs/components/virtual-list/");
+  await expect(page.locator('[data-story="virtual-list/large"]').first()).toHaveAttribute("data-wheel", "true");
+  await page.goto("docs/components/button/");
+  await expect(page.locator('[data-story="button/variants"]').first()).not.toHaveAttribute("data-wheel");
+});
+
 // Stat cards sit in one row on desktop and stack on a phone, so the frame
 // grows to the height the story reports.
 test("a preview whose cards wrap grows to fit them", async ({ page, isMobile }) => {

@@ -154,6 +154,7 @@ code {
   background: color-mix(in srgb, var(--fg) 6%, transparent);
   border-radius: 4px;
   padding: 1px 5px;
+  overflow-wrap: anywhere;
 }
 
 /* Copy buttons added to guide code blocks by the Guide layout. */
