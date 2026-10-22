@@ -109,7 +109,7 @@ impl Default for Example {
         Self {
             shape,
             menu: property_grid::menu(),
-            last: "Click a value to edit it, or right-click a row.".into(),
+            last: "Click a value to edit it, or right-click or press and hold a row.".into(),
         }
     }
 }
@@ -120,6 +120,7 @@ impl Example {
             Message::Shape(event) => self.shape(event),
             Message::Menu(event) => {
                 let chosen = self.menu.update(event);
+                property_grid::sync_menu(&mut self.menu, &self.shape);
                 match (chosen, self.menu.target()) {
                     (Some(dropdown_menu::Output::Activated(item)), Some(&id)) => {
                         self.shape(item.event(id))

@@ -46,7 +46,7 @@ use crate::primitives::checkbox::checkbox;
 use crate::primitives::icon_button::icon_button;
 use crate::primitives::input::{self, input};
 use crate::primitives::switch::switch;
-use crate::theme::{self, Tokens, fade, radius, space, text_size};
+use crate::theme::{self, Tokens, fade, mix, radius, space, text_size};
 
 /// Height of every row, which fits a select.
 pub const ROW_HEIGHT: f32 = 36.0;
@@ -863,6 +863,16 @@ impl<Id: Copy + Eq + Hash> State<Id> {
             .and_then(|draft| draft.error.as_deref())
     }
 
+    /// Whether resetting the property would change anything: it has a
+    /// default, is enabled, and differs from the default or holds a draft.
+    pub fn can_reset(&self, id: Id) -> bool {
+        self.property(id).is_some_and(|property| {
+            !property.disabled
+                && property.default.is_some()
+                && (property.is_modified() || self.draft(id).is_some())
+        })
+    }
+
     pub fn is_focused(&self) -> bool {
         self.focused
     }
@@ -1374,8 +1384,7 @@ impl Action {
                 (state.editing().is_some() || !state.filter().is_empty()).then_some(Event::Cancel)
             }
             Action::Reset => property
-                .filter(|property| !property.disabled && property.default.is_some())
-                .filter(|property| property.is_modified() || state.draft(property.id).is_some())
+                .filter(|property| state.can_reset(property.id))
                 .map(|_| Event::ResetHighlighted),
             Action::CopyValue => property.map(|property| Event::CopyValue(property.id)),
             Action::FocusSearch => Some(Event::FocusSearch),
@@ -1521,16 +1530,40 @@ impl MenuItem {
             MenuItem::Reset => Event::Reset(id),
         }
     }
+
+    /// Whether the entry would do anything for property `id`.
+    pub fn is_enabled<Id: Copy + Eq + Hash>(self, state: &State<Id>, id: Id) -> bool {
+        match self {
+            MenuItem::CopyValue => state.property(id).is_some(),
+            MenuItem::Reset => state.can_reset(id),
+        }
+    }
 }
 
 /// A context menu to pass to [`PropertyGrid::context_menu`]: copy the
 /// value, or reset it to its default. Turn the chosen entry into an event
-/// with [`MenuItem::event`].
+/// with [`MenuItem::event`], and call [`sync_menu`] after each menu event
+/// so entries that would do nothing are disabled.
 pub fn menu<Id: Clone + PartialEq>() -> context_menu::State<MenuItem, Id> {
     context_menu::State::new([
         item(MenuItem::CopyValue, "Copy value").icon(crate::lucide!(Copy)),
         item(MenuItem::Reset, "Reset to default").icon(crate::lucide!(RotateCcw)),
     ])
+}
+
+/// Disables the entries of a [`menu`] that would do nothing for the
+/// property it is open on, such as "Reset to default" on a property that
+/// already holds its default.
+pub fn sync_menu<Id: Copy + Eq + Hash>(
+    menu: &mut context_menu::State<MenuItem, Id>,
+    state: &State<Id>,
+) {
+    let Some(&id) = menu.target() else {
+        return;
+    };
+    for item in MenuItem::ALL {
+        menu.set_disabled(item, !item.is_enabled(state, id));
+    }
 }
 
 /// How a row is shown.
@@ -1616,12 +1649,22 @@ pub fn frame_style(tokens: &Tokens) -> container::Style {
     }
 }
 
-/// A colour swatch: the colour inside a thin border.
+/// The ring around a colour swatch. Dark themes lift it towards the text
+/// colour, so a near-black swatch still shows its edge.
+pub fn swatch_ring(tokens: &Tokens) -> Color {
+    if tokens.is_dark {
+        mix(tokens.border, tokens.foreground, 0.4)
+    } else {
+        tokens.border
+    }
+}
+
+/// A colour swatch: the colour inside a thin ring.
 pub fn swatch_style(tokens: &Tokens, colour: Color) -> container::Style {
     container::Style {
         background: Some(Background::Color(colour)),
         border: Border {
-            color: tokens.border,
+            color: swatch_ring(tokens),
             width: 1.0,
             radius: radius::SM.into(),
         },
@@ -2163,9 +2206,7 @@ where
             .align_y(Alignment::Center);
 
         let reset: Element<'a, Message> = match &on_event {
-            Some(on_event)
-                if modified || (state.draft(id).is_some() && property.default.is_some()) =>
-            {
+            Some(on_event) if state.can_reset(id) => {
                 let icon = themed(crate::lucide!(RotateCcw), RESET_ICON_SIZE, 1.0, muted);
                 let button = mouse_area(container(icon).center(RESET_WIDTH))
                     .on_press(on_event(Event::Reset(id)))
@@ -2796,6 +2837,27 @@ mod tests {
     }
 
     #[test]
+    fn the_menu_disables_reset_on_a_property_at_its_default() {
+        let disabled = |menu: &context_menu::State<MenuItem, u32>, item| {
+            menu.menu().item(item).is_some_and(|item| item.disabled)
+        };
+        let mut state = sample();
+        let mut menu = menu();
+        let _ = menu.update(context_menu::Event::OpenFromKeyboard(2));
+        sync_menu(&mut menu, &state);
+        assert!(state.can_reset(2));
+        assert!(!disabled(&menu, MenuItem::Reset));
+        assert!(!disabled(&menu, MenuItem::CopyValue));
+
+        let _ = state.update(Event::Reset(2));
+        sync_menu(&mut menu, &state);
+        assert!(!state.can_reset(2));
+        assert!(disabled(&menu, MenuItem::Reset));
+        assert!(!disabled(&menu, MenuItem::CopyValue));
+        assert!(!state.can_reset(8), "disabled");
+    }
+
+    #[test]
     fn reset_puts_back_the_default() {
         let mut state = sample();
         assert!(state.property(2).is_some_and(Property::is_modified));
@@ -3252,8 +3314,21 @@ mod tests {
             assert_eq!(frame_style(&tokens).border.color, tokens.border);
             let swatch = swatch_style(&tokens, Color::WHITE);
             assert_eq!(swatch.background, Some(Background::Color(Color::WHITE)));
-            assert_eq!(swatch.border.color, tokens.border);
+            assert_eq!(swatch.border.color, swatch_ring(&tokens));
         }
+    }
+
+    #[test]
+    fn swatches_keep_a_visible_ring_on_a_dark_background() {
+        let tokens = Tokens::of(&dark());
+        let ring = swatch_ring(&tokens);
+        let near_black = Color::from_rgb8(0x18, 0x18, 0x1b);
+        let lift = |colour: Color| colour.r + colour.g + colour.b;
+        assert!(
+            lift(ring) - lift(near_black) > 0.6,
+            "{ring:?} stands out from {near_black:?}"
+        );
+        assert!(lift(ring) > lift(tokens.border), "stronger than the border");
     }
 
     #[test]
