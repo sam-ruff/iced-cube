@@ -1555,15 +1555,16 @@ impl<'a, Message: Clone + 'a> View<'a, Message> {
                 .on_follow(move |follow| on_event(Event::Follow(follow)));
         }
 
-        let Some(pill) = self.pill() else {
-            return frame(list.into()).into();
-        };
         // Below the lines, inside the frame, so the newest line stays in
-        // view above it.
-        let pill = container(pill)
-            .align_right(Length::Fill)
-            .padding(Padding::ZERO.top(FRAME_PADDING).right(space::XS));
-        frame(column![list, pill].into()).into()
+        // view above it. The lines stay the column's first child whether
+        // the pill shows or not, so they keep their scroll position.
+        let pill = self.pill().map(|pill| -> Element<'a, Message> {
+            container(pill)
+                .align_right(Length::Fill)
+                .padding(Padding::ZERO.top(FRAME_PADDING).right(space::XS))
+                .into()
+        });
+        frame(column(std::iter::once(list.into()).chain(pill)).into()).into()
     }
 
     /// A button under the lines: resume while paused, or jump to the newest

@@ -507,6 +507,64 @@ fn a_finger_swipe_scrolls_a_following_log_without_pressing_a_line() {
     assert!(!state.is_following());
 }
 
+/// Collects every text the widgets report.
+#[derive(Default)]
+struct Texts(Vec<String>);
+
+impl iced::advanced::widget::Operation for Texts {
+    fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn iced::advanced::widget::Operation)) {
+        operate(self);
+    }
+
+    fn text(&mut self, _id: Option<&iced::widget::Id>, _bounds: iced::Rectangle, text: &str) {
+        self.0.push(text.to_owned());
+    }
+}
+
+#[test]
+fn the_lines_keep_their_place_when_the_jump_button_appears() {
+    use iced_test::core::renderer::Headless;
+    use iced_test::runtime::user_interface::{Cache, UserInterface};
+
+    let Some(mut renderer) = block_on(<iced_test::renderer::Renderer as Headless>::new(
+        iced::Font::with_name("Fira Sans"),
+        iced::Pixels(16.0),
+        Some("tiny-skia"),
+    )) else {
+        panic!("a headless renderer");
+    };
+    let bounds = Size::new(720.0, 400.0);
+    let mut state = State::new();
+    state.extend((0..200).map(|n| entry(Level::Info, format!("line {n}"))));
+
+    let mut ui = UserInterface::build(view(&state), bounds, Cache::default(), &mut renderer);
+    let mut messages = Vec::new();
+    let _ = ui.update(
+        &[iced::Event::Mouse(mouse::Event::WheelScrolled {
+            delta: mouse::ScrollDelta::Pixels { x: 0.0, y: 120.0 },
+        })],
+        mouse::Cursor::Available(Point::new(300.0, 250.0)),
+        &mut renderer,
+        &mut iced::advanced::clipboard::Null,
+        &mut messages,
+    );
+    let cache = ui.into_cache();
+    for message in messages {
+        if let Message::Logs(event) = message {
+            let _ = state.update(event);
+        }
+    }
+    assert!(!state.is_following(), "scrolling up stops following");
+
+    let mut ui = UserInterface::build(view(&state), bounds, cache, &mut renderer);
+    let mut texts = Texts::default();
+    ui.operate(&renderer, &mut texts);
+    let shown = |label: &str| texts.0.iter().any(|text| text == label);
+    assert!(shown("Jump to latest"), "{:?}", texts.0);
+    assert!(shown("line 190"), "still near the end: {:?}", texts.0);
+    assert!(!shown("line 0"), "not back at the top: {:?}", texts.0);
+}
+
 #[test]
 fn an_empty_log_says_so() {
     let state = State::new();
