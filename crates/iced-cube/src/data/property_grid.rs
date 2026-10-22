@@ -22,22 +22,24 @@ use std::ops::Range;
 use std::rc::Rc;
 
 use iced::advanced::layout::{self, Layout};
-use iced::advanced::widget::operation::{self, Focusable};
+use iced::advanced::widget::operation;
 use iced::advanced::widget::{Operation, Tree, Widget, tree};
 use iced::advanced::{Clipboard, Shell, overlay, renderer};
-use iced::keyboard::{self, key::Named};
+use iced::keyboard::key::Named;
 use iced::widget::{self, Space, column, container, mouse_area, responsive, row};
 use iced::{
     Alignment, Background, Border, Color, Element, Length, Padding, Rectangle, Renderer, Size,
-    Theme, Vector, mouse,
+    Task, Theme, Vector, mouse,
 };
 
 use crate::data::ellipsis::ellipsis;
-use crate::data::interaction::{Look, pressable, scope};
+use crate::data::interaction::{Look, RowMenu, pressable, row_menu, scope, search_count};
 use crate::data::rows::rows;
 use crate::forms::select::select;
 use crate::icon::{opacity, themed};
 use crate::keys::{self, Chord, Keymap};
+use crate::overlay::context_menu;
+use crate::overlay::dropdown_menu::item;
 use crate::overlay::tooltip::tooltip;
 use crate::primitives::button;
 use crate::primitives::checkbox::checkbox;
@@ -54,14 +56,18 @@ pub const NAME_WIDTH: f32 = 160.0;
 pub const MIN_NAME_WIDTH: f32 = 64.0;
 /// The room the value column keeps when the name column is dragged wide.
 pub const MIN_VALUE_WIDTH: f32 = 88.0;
+/// The room the value column keeps before the name column, at its default
+/// width, starts to shrink: enough for a colour swatch and its hex.
+pub const VALUE_WIDTH: f32 = 112.0;
 /// Width of the draggable line between the columns.
 pub const HANDLE_WIDTH: f32 = 9.0;
 /// Width of the slot at the end of a row for the reset button.
 pub const RESET_WIDTH: f32 = 24.0;
-/// Height of the description area under the rows.
+/// The least height of the description area under the rows, which grows
+/// to fit a longer description.
 pub const DESCRIPTION_HEIGHT: f32 = 64.0;
-/// The widget id of the filter box, to find it in tests.
-pub const FILTER_ID: widget::Id = widget::Id::new("iced-cube-property-grid-filter");
+/// The widget id of the filter box, which [`focus_search`] focuses.
+pub const SEARCH: widget::Id = widget::Id::new("iced-cube-property-grid-filter");
 /// The widget id of the field being edited, to find it in tests.
 pub const EDITOR_ID: widget::Id = widget::Id::new("iced-cube-property-grid-editor");
 
@@ -653,7 +659,9 @@ pub enum Event<Id> {
     /// The filter text changed.
     Filter(String),
     /// Moves keyboard focus to the filter box.
-    FocusFilter,
+    FocusSearch,
+    /// Asks the app to copy a property's value, as it is shown.
+    CopyValue(Id),
     Sort(Sort),
     /// The pointer pressed the line between the columns.
     ResizeStart,
@@ -671,6 +679,9 @@ pub enum Output<Id> {
     Changed { id: Id, value: Value },
     /// A property went back to its default, which is `value`.
     Reset { id: Id, value: Value },
+    /// A value as it is shown, such as `120px` or `#3B82F6`, to write to
+    /// the clipboard.
+    CopyValue(String),
 }
 
 /// The properties, their values, and what is open, highlighted, filtered
@@ -753,8 +764,8 @@ impl<Id: Copy + Eq + Hash> State<Id> {
         self
     }
 
-    /// Starts the name column at `width` pixels rather than a share of the
-    /// grid's width.
+    /// Starts the name column at `width` pixels rather than
+    /// [`NAME_WIDTH`], which a narrow grid shrinks.
     pub fn with_name_width(mut self, width: f32) -> Self {
         self.name_width = Some(width.max(MIN_NAME_WIDTH));
         self
@@ -979,9 +990,17 @@ impl<Id: Copy + Eq + Hash> State<Id> {
                 self.filter = filter;
                 self.keep_highlight_visible();
             }
-            Event::FocusFilter => {
+            Event::FocusSearch => {
                 self.finish();
                 self.request(Target::Filter);
+            }
+            Event::CopyValue(id) => {
+                let value = self.property(id)?.display();
+                if self.editing_id() != Some(id) {
+                    self.finish();
+                }
+                self.highlighted = Some(Entry::Property(id));
+                return Some(Output::CopyValue(value));
             }
             Event::Sort(sort) => {
                 self.finish();
@@ -1316,7 +1335,8 @@ pub enum Action {
     Edit,
     Cancel,
     Reset,
-    FocusFilter,
+    CopyValue,
+    FocusSearch,
 }
 
 impl Action {
@@ -1357,7 +1377,8 @@ impl Action {
                 .filter(|property| !property.disabled && property.default.is_some())
                 .filter(|property| property.is_modified() || state.draft(property.id).is_some())
                 .map(|_| Event::ResetHighlighted),
-            Action::FocusFilter => Some(Event::FocusFilter),
+            Action::CopyValue => property.map(|property| Event::CopyValue(property.id)),
+            Action::FocusSearch => Some(Event::FocusSearch),
         }
     }
 }
@@ -1373,7 +1394,8 @@ impl keys::Action for Action {
         Action::Edit,
         Action::Cancel,
         Action::Reset,
-        Action::FocusFilter,
+        Action::CopyValue,
+        Action::FocusSearch,
     ];
 
     fn defaults() -> Keymap<Self> {
@@ -1391,7 +1413,8 @@ impl keys::Action for Action {
             Action::Edit => "Edit",
             Action::Cancel => "Cancel",
             Action::Reset => "Reset",
-            Action::FocusFilter => "FocusFilter",
+            Action::CopyValue => "CopyValue",
+            Action::FocusSearch => "FocusSearch",
         }
     }
 
@@ -1412,7 +1435,8 @@ impl keys::Action for Action {
             }
             Action::Cancel => "Cancels the edit and puts back the old value, or clears the filter.",
             Action::Reset => "Puts the highlighted property back to its default.",
-            Action::FocusFilter => "Moves the keyboard to the filter box.",
+            Action::CopyValue => "Copies the highlighted value as it is shown.",
+            Action::FocusSearch => "Moves the keyboard to the filter box.",
         }
     }
 }
@@ -1430,11 +1454,13 @@ impl keys::Action for Action {
 /// | `Enter`, `F2` | [`Action::Edit`] |
 /// | `Escape` | [`Action::Cancel`] |
 /// | `Delete` | [`Action::Reset`] |
-/// | `Mod+F` (Ctrl, or Cmd on macOS) | [`Action::FocusFilter`] |
+/// | `Mod+C` (Ctrl, or Cmd on macOS) | [`Action::CopyValue`] |
+/// | `Mod+F` | [`Action::FocusSearch`] |
 ///
 /// While a field is being typed into it keeps the keys it uses, such as
 /// the arrows that move its cursor; Enter ends the edit and Escape cancels
-/// it. Up and Down step a number being edited. The grid resolves these
+/// it. Up and Down step a number being edited. Escape in the filter box
+/// clears it, and a second Escape leaves it. The grid resolves these
 /// itself, only while it has focus, so they never clash with other
 /// components. Pass a changed keymap with [`PropertyGrid::keymap`].
 pub fn default_keymap() -> Keymap<Action> {
@@ -1449,7 +1475,62 @@ pub fn default_keymap() -> Keymap<Action> {
         .bind(Chord::named(Named::F2), Action::Edit)
         .bind(Chord::named(Named::Escape), Action::Cancel)
         .bind(Chord::named(Named::Delete), Action::Reset)
-        .bind(Chord::character('f').command(), Action::FocusFilter)
+        .bind(Chord::character('c').command(), Action::CopyValue)
+        .bind(Chord::character('f').command(), Action::FocusSearch)
+}
+
+/// Focuses the filter box of a grid, for an app that moves the keyboard
+/// there itself. [`Action::FocusSearch`] does the same from inside the
+/// grid.
+pub fn focus_search<Id, Message>(_state: &State<Id>) -> Task<Message> {
+    widget::operation::focus(SEARCH)
+}
+
+/// The text beside the filter box: how many properties pass the filter,
+/// of how many, such as "3 of 12", or "No matches".
+pub fn match_label<Id: Copy + Eq + Hash>(state: &State<Id>) -> String {
+    if state.filter().trim().is_empty() {
+        return String::new();
+    }
+    let total = state.properties().len();
+    match state
+        .properties()
+        .iter()
+        .filter(|property| state.passes(property))
+        .count()
+    {
+        0 => "No matches".to_owned(),
+        shown => format!("{shown} of {total}"),
+    }
+}
+
+/// An entry of the context menu from [`menu`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MenuItem {
+    CopyValue,
+    Reset,
+}
+
+impl MenuItem {
+    pub const ALL: [MenuItem; 2] = [MenuItem::CopyValue, MenuItem::Reset];
+
+    /// The event the entry sends for the property the menu opened on.
+    pub fn event<Id>(self, id: Id) -> Event<Id> {
+        match self {
+            MenuItem::CopyValue => Event::CopyValue(id),
+            MenuItem::Reset => Event::Reset(id),
+        }
+    }
+}
+
+/// A context menu to pass to [`PropertyGrid::context_menu`]: copy the
+/// value, or reset it to its default. Turn the chosen entry into an event
+/// with [`MenuItem::event`].
+pub fn menu<Id: Clone + PartialEq>() -> context_menu::State<MenuItem, Id> {
+    context_menu::State::new([
+        item(MenuItem::CopyValue, "Copy value").icon(crate::lucide!(Copy)),
+        item(MenuItem::Reset, "Reset to default").icon(crate::lucide!(RotateCcw)),
+    ])
 }
 
 /// How a row is shown.
@@ -1475,16 +1556,16 @@ pub struct RowStyle {
     pub ring: Option<Color>,
 }
 
-/// Resolves a row's colours. Headings sit on a muted band; the highlighted
-/// row uses the accent, and carries a ring while the grid has focus.
+/// Resolves a row's colours. Headings sit on a muted band. The grid selects
+/// nothing, so the highlighted row only carries a ring, and only while the
+/// grid has focus.
 pub fn row_style(tokens: &Tokens, status: Status) -> RowStyle {
     let hovered = status.hovered && !status.disabled;
-    let background = match (status.highlighted, hovered, status.heading) {
-        (true, _, _) => Some(tokens.accent),
-        (false, true, true) => Some(tokens.muted),
-        (false, true, false) => Some(fade(tokens.accent, 0.6)),
-        (false, false, true) => Some(fade(tokens.muted, 0.6)),
-        (false, false, false) => None,
+    let background = match (hovered, status.heading) {
+        (true, true) => Some(tokens.muted),
+        (true, false) => Some(fade(tokens.accent, 0.6)),
+        (false, true) => Some(fade(tokens.muted, 0.6)),
+        (false, false) => None,
     };
     let text = if status.disabled {
         tokens.muted_foreground
@@ -1548,18 +1629,22 @@ pub fn swatch_style(tokens: &Tokens, colour: Color) -> container::Style {
     }
 }
 
-/// The name column's width in a row `width` pixels wide: the requested
-/// width, or a share of the row, kept between [`MIN_NAME_WIDTH`] and
-/// what leaves the value column [`MIN_VALUE_WIDTH`].
+/// The name column's width in a row `width` pixels wide. A dragged or set
+/// width is kept between [`MIN_NAME_WIDTH`] and what leaves the value
+/// column [`MIN_VALUE_WIDTH`]. Otherwise names take [`NAME_WIDTH`], and in
+/// a narrow grid the value column gives up its room first, down to
+/// [`VALUE_WIDTH`], so names stay readable.
 pub fn name_width(requested: Option<f32>, width: f32) -> f32 {
     let room = width - HANDLE_WIDTH - RESET_WIDTH;
     let max = (room - MIN_VALUE_WIDTH).max(MIN_NAME_WIDTH);
-    let wanted = requested.unwrap_or((room * 0.4).min(NAME_WIDTH));
+    let wanted = requested.unwrap_or_else(|| NAME_WIDTH.min(room - VALUE_WIDTH));
     wanted.clamp(MIN_NAME_WIDTH, max)
 }
 
 type OnEvent<'a, Id, Message> = dyn Fn(Event<Id>) -> Message + 'a;
 type Render<'a, Id, Message> = dyn Fn(&'a Property<Id>) -> Element<'a, Message> + 'a;
+type BuildMenu<'a, Id, Message> =
+    dyn FnOnce(Keymap<context_menu::Action>) -> RowMenu<'a, Id, Message> + 'a;
 
 /// A property grid builder. Convert it into an [`Element`] to render.
 pub struct PropertyGrid<'a, Id, Message> {
@@ -1571,6 +1656,8 @@ pub struct PropertyGrid<'a, Id, Message> {
     width: Length,
     height: Length,
     keymap: Keymap<Action>,
+    menu: Option<Box<BuildMenu<'a, Id, Message>>>,
+    menu_keymap: Keymap<context_menu::Action>,
     on_event: Option<Box<OnEvent<'a, Id, Message>>>,
 }
 
@@ -1582,10 +1669,12 @@ pub fn property_grid<Id, Message>(state: &State<Id>) -> PropertyGrid<'_, Id, Mes
         customs: Vec::new(),
         toolbar: true,
         description: true,
-        placeholder: "Filter properties".to_owned(),
+        placeholder: "Filter".to_owned(),
         width: Length::Fill,
         height: Length::Shrink,
         keymap: default_keymap(),
+        menu: None,
+        menu_keymap: context_menu::default_keymap(),
         on_event: None,
     }
 }
@@ -1664,6 +1753,32 @@ impl<'a, Id, Message> PropertyGrid<'a, Id, Message> {
         self
     }
 
+    /// Gives every property row the context menu of `menu`, keyed by
+    /// property, such as the one from [`menu()`]. It opens on a right-click
+    /// or a long press, and on the highlighted property with its opening
+    /// chord while the grid has focus.
+    pub fn context_menu<MenuId>(
+        mut self,
+        menu: &'a context_menu::State<MenuId, Id>,
+        on_event: impl Fn(context_menu::Event<MenuId, Id>) -> Message + 'a,
+    ) -> Self
+    where
+        MenuId: Copy + PartialEq + 'a,
+        Id: Clone + PartialEq + 'a,
+        Message: Clone + 'a,
+    {
+        let on_event: Rc<dyn Fn(context_menu::Event<MenuId, Id>) -> Message + 'a> =
+            Rc::new(on_event);
+        self.menu = Some(Box::new(move |keymap| row_menu(menu, keymap, on_event)));
+        self
+    }
+
+    /// Replaces the context menu's default keymap.
+    pub fn context_menu_keymap(mut self, keymap: Keymap<context_menu::Action>) -> Self {
+        self.menu_keymap = keymap;
+        self
+    }
+
     pub fn is_enabled(&self) -> bool {
         self.on_event.is_some()
     }
@@ -1684,8 +1799,13 @@ where
             width,
             height,
             keymap,
+            menu,
+            menu_keymap,
             on_event,
         } = grid;
+        let menu = menu
+            .filter(|_| on_event.is_some())
+            .map(|build| build(menu_keymap));
         let view = Rc::new(View {
             state,
             customs,
@@ -1694,6 +1814,7 @@ where
             placeholder,
             height,
             keymap,
+            menu,
             entries: state.entries(),
             on_event: on_event.map(Rc::from),
         });
@@ -1713,6 +1834,7 @@ struct View<'a, Id, Message> {
     placeholder: String,
     height: Length,
     keymap: Keymap<Action>,
+    menu: Option<RowMenu<'a, Id, Message>>,
     entries: Vec<Entry<Id>>,
     on_event: Option<Rc<OnEvent<'a, Id, Message>>>,
 }
@@ -1798,20 +1920,30 @@ where
             return parts;
         };
         let request = state.focus_request().map(|(count, target)| match target {
-            Target::Filter => (count, FILTER_ID, false),
+            Target::Filter => (count, SEARCH, false),
             Target::Editor => (count, EDITOR_ID, true),
         });
-        let cancel = state.editing().map(|_| on_event(Event::Cancel));
         let focuser = Focuser {
             content: parts,
             request,
-            cancel,
         };
+        let cancel = state.editing().map(|_| on_event(Event::Cancel));
+        let clear = (!state.filter().is_empty()).then(|| on_event(Event::Filter(String::new())));
         let on_focus = on_event.clone();
         let keymap = self.keymap.clone();
+        let view = Rc::clone(self);
         scope(focuser)
+            .escape(EDITOR_ID, cancel)
+            .escape(SEARCH, clear)
             .on_focus(move |focused| on_focus(Event::Focus(focused)))
-            .on_key(move |key| state.key_event(&keymap, key).map(|event| on_event(event)))
+            .on_key(move |key| {
+                let opened = view
+                    .menu
+                    .as_ref()
+                    .zip(state.highlighted_property())
+                    .and_then(|(menu, property)| menu.key(key, property.id));
+                opened.or_else(|| state.key_event(&keymap, key).map(|event| on_event(event)))
+            })
             .into()
     }
 
@@ -1819,9 +1951,10 @@ where
         let state = self.state;
         let on_event = self.on_event.clone();
         let filter = input(&self.placeholder, state.filter())
-            .id(FILTER_ID)
+            .id(SEARCH)
             .icon(crate::lucide!(Search))
             .size(input::Size::Sm)
+            .width(Length::Fill)
             .on_input_maybe(on_event.map(|on_event| move |query| on_event(Event::Filter(query))));
         let sort = |sort: Sort, glyph, label| {
             icon_button(glyph)
@@ -1832,6 +1965,7 @@ where
         };
         row![
             filter,
+            search_count(match_label(state)),
             sort(Sort::Categorised, crate::lucide!(ListTree), "Categorised"),
             sort(
                 Sort::Alphabetical,
@@ -1865,9 +1999,13 @@ where
             Some(Entry::Category(name)) => (name.as_str(), None),
             None => ("", None),
         };
-        let mut content = column![].spacing(2);
+        let mut content = column![].spacing(2).width(Length::Fill);
         if self.description && title.is_empty() {
-            content = content.push(ellipsis(NOTHING_SELECTED).colour(muted));
+            content = content.push(widget::text(NOTHING_SELECTED).size(text_size::SM).style(
+                |theme: &Theme| widget::text::Style {
+                    color: Some(muted(theme)),
+                },
+            ));
         } else if self.description {
             content = content.push(ellipsis(title).font(theme::semibold()));
         }
@@ -1888,17 +2026,17 @@ where
             }
             _ => {}
         }
-        let height = if self.description {
+        let least = if self.description {
             DESCRIPTION_HEIGHT
         } else {
             DESCRIPTION_HEIGHT / 2.0
         };
+        // The strut keeps the least height; longer text grows the area.
+        let strut = Space::new().height(least - space::SM * 2.0);
         Some(
-            container(content)
+            container(row![content, strut])
                 .padding([space::SM, space::MD])
                 .width(Length::Fill)
-                .height(height)
-                .clip(true)
                 .into(),
         )
     }
@@ -1907,7 +2045,13 @@ where
         let entries = self.entries.get(range).unwrap_or_default();
         column(entries.iter().map(|entry| match entry {
             Entry::Category(name) => self.heading(name),
-            Entry::Property(id) => self.property(*id, names),
+            Entry::Property(id) => {
+                let row = self.property(*id, names);
+                match &self.menu {
+                    Some(menu) => menu.wrap(*id, row),
+                    None => row,
+                }
+            }
         }))
         .into()
     }
@@ -2178,50 +2322,15 @@ fn look(style: RowStyle) -> Look {
 }
 
 /// Focuses a field inside the grid once for each request the state makes,
-/// selecting its text when asked, and turns Escape in the field being
-/// edited into a cancel before the field can swallow it.
+/// selecting its text when asked.
 struct Focuser<'a, Message> {
     content: Element<'a, Message>,
     request: Option<(u64, widget::Id, bool)>,
-    cancel: Option<Message>,
 }
 
 /// The last focus request acted on.
 #[derive(Debug, Default)]
 struct Handled(u64);
-
-/// Finds whether the field with an id has focus.
-struct Probe<'a> {
-    target: &'a widget::Id,
-    focused: bool,
-}
-
-impl Operation for Probe<'_> {
-    fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation)) {
-        operate(self);
-    }
-
-    fn focusable(
-        &mut self,
-        id: Option<&widget::Id>,
-        _bounds: Rectangle,
-        state: &mut dyn Focusable,
-    ) {
-        if id == Some(self.target) && state.is_focused() {
-            self.focused = true;
-        }
-    }
-}
-
-fn is_escape(event: &iced::Event) -> bool {
-    matches!(
-        event,
-        iced::Event::Keyboard(keyboard::Event::KeyPressed {
-            key: keyboard::Key::Named(Named::Escape),
-            ..
-        })
-    )
-}
 
 impl<Message: Clone> Widget<Message, Theme, Renderer> for Focuser<'_, Message> {
     fn tag(&self) -> tree::Tag {
@@ -2328,22 +2437,6 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for Focuser<'_, Message> {
         let Some(child) = tree.children.first_mut() else {
             return;
         };
-        if let Some(cancel) = &self.cancel
-            && is_escape(event)
-        {
-            let mut probe = Probe {
-                target: &EDITOR_ID,
-                focused: false,
-            };
-            self.content
-                .as_widget_mut()
-                .operate(child, layout, renderer, &mut probe);
-            if probe.focused {
-                shell.publish(cancel.clone());
-                shell.capture_event();
-                return;
-            }
-        }
         self.content.as_widget_mut().update(
             child, event, layout, cursor, renderer, clipboard, shell, viewport,
         );
@@ -2901,7 +2994,14 @@ mod tests {
     fn the_name_column_keeps_room_for_values() {
         assert_eq!(name_width(None, 600.0), NAME_WIDTH);
         let narrow = name_width(None, 260.0);
-        assert!((narrow - (260.0 - HANDLE_WIDTH - RESET_WIDTH) * 0.4).abs() < 0.01);
+        let room = 260.0 - HANDLE_WIDTH - RESET_WIDTH;
+        assert_eq!(narrow, room - VALUE_WIDTH, "the values give way first");
+        assert!(narrow > room * 0.45, "names keep a fair share");
+        assert_eq!(
+            name_width(None, 300.0 + NAME_WIDTH),
+            NAME_WIDTH,
+            "values only give way when room runs short"
+        );
         assert_eq!(
             name_width(Some(500.0), 300.0),
             300.0 - HANDLE_WIDTH - RESET_WIDTH - MIN_VALUE_WIDTH
@@ -2928,14 +3028,51 @@ mod tests {
     }
 
     #[test]
-    fn focus_filter_asks_for_the_filter_box() {
+    fn focus_search_asks_for_the_filter_box() {
         let mut state = sample();
         let _ = state.update(Event::Edit(7));
-        let _ = state.update(Event::FocusFilter);
+        let _ = state.update(Event::FocusSearch);
         assert_eq!(state.editing(), None);
         assert_eq!(state.focus_request(), Some((2, Target::Filter)));
         let _ = state.update(Event::Sort(Sort::Alphabetical));
         assert_eq!(state.sort(), Sort::Alphabetical);
+    }
+
+    #[test]
+    fn copying_gives_the_value_as_shown_and_highlights_it() {
+        let mut state = sample();
+        assert_eq!(
+            state.update(Event::CopyValue(2)),
+            Some(Output::CopyValue("120px".into()))
+        );
+        assert_eq!(state.highlighted(), Some(&Entry::Property(2)));
+        assert_eq!(
+            state.update(Event::CopyValue(5)),
+            Some(Output::CopyValue("#3B82F6".into()))
+        );
+        assert_eq!(state.update(Event::CopyValue(99)), None);
+    }
+
+    #[test]
+    fn menu_items_map_to_events() {
+        assert_eq!(MenuItem::ALL.len(), 2);
+        assert_eq!(MenuItem::CopyValue.event(4), Event::CopyValue(4));
+        assert_eq!(MenuItem::Reset.event(4), Event::Reset(4));
+        assert!(!menu::<u32>().is_open());
+    }
+
+    #[test]
+    fn the_match_label_counts_what_passes_the_filter() {
+        let mut state = sample();
+        assert_eq!(match_label(&state), "");
+        let _ = state.update(Event::Filter("i".into()));
+        assert_eq!(
+            match_label(&state),
+            "5 of 8",
+            "Id, Width, Height, Visible, Fill"
+        );
+        let _ = state.update(Event::Filter("zebra".into()));
+        assert_eq!(match_label(&state), "No matches");
     }
 
     #[test]
@@ -2953,8 +3090,12 @@ mod tests {
             (named(Named::Escape), Action::Cancel),
             (named(Named::Delete), Action::Reset),
             (
+                key(Key::Character("c".into()), Modifiers::COMMAND),
+                Action::CopyValue,
+            ),
+            (
                 key(Key::Character("f".into()), Modifiers::COMMAND),
-                Action::FocusFilter,
+                Action::FocusSearch,
             ),
         ];
         for (press, action) in cases {
@@ -2989,9 +3130,11 @@ mod tests {
         let mut state = sample();
         assert_eq!(Action::Edit.event(&state), None, "nothing highlighted");
         assert_eq!(Action::Cancel.event(&state), None);
-        assert_eq!(Action::FocusFilter.event(&state), Some(Event::FocusFilter));
+        assert_eq!(Action::FocusSearch.event(&state), Some(Event::FocusSearch));
+        assert_eq!(Action::CopyValue.event(&state), None);
 
         let _ = state.update(Event::Press(Entry::Property(1)));
+        assert_eq!(Action::CopyValue.event(&state), Some(Event::CopyValue(1)));
         assert_eq!(Action::Edit.event(&state), None, "read-only");
         assert_eq!(Action::Expand.event(&state), None);
         assert_eq!(Action::Collapse.event(&state), None, "no category");
@@ -3036,7 +3179,8 @@ mod tests {
             };
             assert_eq!(
                 row_style(&tokens, highlighted).background,
-                Some(tokens.accent)
+                None,
+                "nothing is selected, so the highlight has no fill"
             );
             assert_eq!(
                 row_style(&tokens, highlighted).ring,
@@ -3048,6 +3192,16 @@ mod tests {
                 ..highlighted
             };
             assert_eq!(row_style(&tokens, focused).ring, Some(tokens.ring));
+            let focused_heading = Status {
+                heading: true,
+                ..focused
+            };
+            assert_eq!(
+                row_style(&tokens, focused_heading).background,
+                Some(fade(tokens.muted, 0.6)),
+                "a highlighted heading keeps its band and adds the ring"
+            );
+            assert_eq!(row_style(&tokens, focused_heading).ring, Some(tokens.ring));
 
             let hovered = Status {
                 hovered: true,

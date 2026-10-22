@@ -119,6 +119,7 @@ json-viewer = [
 property-grid = [
     "iced/advanced",
     "checkbox",
+    "context-menu",
     "icon-button",
     "input",
     "scroll-area",

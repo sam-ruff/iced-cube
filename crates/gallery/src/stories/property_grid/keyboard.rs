@@ -67,7 +67,8 @@ impl Example {
             text(
                 "Click the grid, then move with the arrows or J and K. Left and Right close \
                  and open a category, Enter or F2 edits, Up and Down step a number being \
-                 edited, Escape cancels, Delete resets and Ctrl+F jumps to the filter."
+                 edited, Escape cancels, Delete resets, Ctrl+C copies and Ctrl+F jumps to \
+                 the filter."
             )
             .size(14),
             property_grid(&self.widget)

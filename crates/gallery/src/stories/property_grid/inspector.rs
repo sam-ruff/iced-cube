@@ -1,10 +1,14 @@
 use iced::widget::{column, text};
-use iced::{Color, Element, Length};
+use iced::{Color, Element, Length, Task};
+use iced_cube::context_menu;
 use iced_cube::data::property_grid::{
-    Entry, Event, Output, Property, State, choice, colour, custom, number, property_grid,
-    read_only, toggle,
+    self, Entry, Event, MenuItem, Output, Property, State, choice, colour, custom, number,
+    property_grid, read_only, toggle,
 };
+use iced_cube::dropdown_menu;
 use iced_cube::primitives::slider;
+
+use crate::bridge;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Field {
@@ -26,12 +30,14 @@ pub enum Field {
 #[derive(Debug, Clone)]
 pub enum Message {
     Shape(Event<Field>),
+    Menu(context_menu::Event<MenuItem, Field>),
     Opacity(u8),
 }
 
 #[derive(Debug)]
 pub struct Example {
     shape: State<Field>,
+    menu: context_menu::State<MenuItem, Field>,
     last: String,
 }
 
@@ -102,25 +108,44 @@ impl Default for Example {
 
         Self {
             shape,
-            last: "Click a value to edit it.".into(),
+            menu: property_grid::menu(),
+            last: "Click a value to edit it, or right-click a row.".into(),
         }
     }
 }
 
 impl Example {
-    pub fn update(&mut self, message: Message) {
+    pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::Shape(event) => {
-                if let Some(Output::Changed { id, .. } | Output::Reset { id, .. }) =
-                    self.shape.update(event)
-                {
-                    self.describe(id);
+            Message::Shape(event) => self.shape(event),
+            Message::Menu(event) => {
+                let chosen = self.menu.update(event);
+                match (chosen, self.menu.target()) {
+                    (Some(dropdown_menu::Output::Activated(item)), Some(&id)) => {
+                        self.shape(item.event(id))
+                    }
+                    _ => Task::none(),
                 }
             }
             Message::Opacity(opacity) => {
                 let _ = self.shape.set(Field::Opacity, f64::from(opacity));
                 self.describe(Field::Opacity);
+                Task::none()
             }
+        }
+    }
+
+    fn shape(&mut self, event: Event<Field>) -> Task<Message> {
+        match self.shape.update(event) {
+            Some(Output::Changed { id, .. } | Output::Reset { id, .. }) => {
+                self.describe(id);
+                Task::none()
+            }
+            Some(Output::CopyValue(value)) => {
+                self.last = format!("Copied {value}");
+                bridge::copy(value)
+            }
+            None => Task::none(),
         }
     }
 
@@ -134,6 +159,7 @@ impl Example {
         column![
             property_grid(&self.shape)
                 .custom(Field::Opacity, opacity)
+                .context_menu(&self.menu, Message::Menu)
                 .height(340)
                 .on_event(Message::Shape),
             text(&self.last).size(14),

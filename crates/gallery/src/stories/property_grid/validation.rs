@@ -79,7 +79,7 @@ impl Example {
         let (id, verb) = match self.settings.update(event) {
             Some(Output::Changed { id, .. }) => (id, "changed to"),
             Some(Output::Reset { id, .. }) => (id, "reset to"),
-            None => return,
+            Some(Output::CopyValue(_)) | None => return,
         };
         if let Some(property) = self.settings.property(id) {
             self.last = format!("{} {verb} {}", property.name, property.display());

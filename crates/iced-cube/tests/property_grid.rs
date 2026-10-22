@@ -4,9 +4,11 @@ use iced::keyboard::{Key, Modifiers, key::Named};
 use iced::widget::{self, container};
 use iced::{Color, Element, Point, Size, keyboard, mouse};
 use iced_cube::data::property_grid::{
-    EDITOR_ID, Entry, Event, FILTER_ID, HANDLE_WIDTH, NOTHING_SELECTED, Output, RESET_WIDTH, State,
-    Value, choice, colour, name_width, number, property_grid, read_only, text, toggle,
+    self, DESCRIPTION_HEIGHT, EDITOR_ID, Entry, Event, HANDLE_WIDTH, MenuItem, NOTHING_SELECTED,
+    Output, RESET_WIDTH, SEARCH, State, Value, choice, colour, name_width, number, property_grid,
+    read_only, text, toggle,
 };
+use iced_cube::overlay::context_menu;
 use iced_test::selector::Candidate;
 use iced_test::simulator::{self, Simulator};
 
@@ -211,11 +213,11 @@ fn ctrl_f_moves_the_keyboard_to_the_filter() {
         let _ = ui.simulate([press_key(Key::Character("f".into()), Modifiers::COMMAND)]);
         events(ui)
     };
-    assert_eq!(pressed.last(), Some(&Event::FocusFilter));
+    assert_eq!(pressed.last(), Some(&Event::FocusSearch));
     let _ = apply(pressed, &mut state);
 
     let mut ui = simulator::simulator(view(&state));
-    assert_eq!(focused(&mut ui), Some(FILTER_ID));
+    assert_eq!(focused(&mut ui), Some(SEARCH));
     let _ = ui.typewrite("w");
     assert_eq!(events(ui), vec![Event::Filter("w".into())]);
 }
@@ -338,6 +340,156 @@ fn a_narrow_inspector_keeps_every_row_on_one_line() {
         long.x + long.width <= value.x,
         "the name stops at its column"
     );
-    let filter = ui.find(FILTER_ID).expect("the filter").bounds();
+    let filter = ui.find(SEARCH).expect("the filter").bounds();
     assert!(filter.x + filter.width <= WIDTH);
+}
+
+#[test]
+fn escape_in_the_filter_clears_it_then_leaves_it() {
+    let mut state = sample();
+    let _ = state.update(Event::Filter("wid".into()));
+    let mut ui = simulator::simulator(view(&state));
+    assert!(ui.click("wid").is_ok());
+    let _ = ui.simulate([press_key(Key::Named(Named::Escape), Modifiers::empty())]);
+    assert_eq!(focused(&mut ui), Some(SEARCH), "the first Escape stays");
+    let emitted = events(ui);
+    assert!(
+        emitted.contains(&Event::Filter(String::new())),
+        "{emitted:?}"
+    );
+    let _ = apply(emitted, &mut state);
+    assert_eq!(state.filter(), "");
+
+    let mut ui = simulator::simulator(view(&state));
+    assert!(ui.click("Filter").is_ok());
+    assert_eq!(focused(&mut ui), Some(SEARCH));
+    let _ = ui.simulate([press_key(Key::Named(Named::Escape), Modifiers::empty())]);
+    assert_eq!(focused(&mut ui), None, "the second Escape leaves the box");
+    assert!(
+        !events(ui)
+            .iter()
+            .any(|event| matches!(event, Event::Filter(_))),
+    );
+}
+
+#[test]
+fn the_filter_keeps_its_width_when_the_count_appears() {
+    let mut state = sample();
+    let before = simulator::simulator(view(&state))
+        .find(SEARCH)
+        .expect("filter")
+        .bounds();
+    let _ = state.update(Event::Filter("i".into()));
+    {
+        let mut ui = simulator::simulator(view(&state));
+        let after = ui.find(SEARCH).expect("filter").bounds();
+        assert!(ui.find("5 of 6").is_ok(), "every name but Blend");
+        assert_eq!(before.width, after.width);
+    }
+
+    let _ = state.update(Event::Filter("zebra".into()));
+    let mut ui = simulator::simulator(view(&state));
+    assert!(ui.find("No matches").is_ok());
+}
+
+#[test]
+fn a_right_click_opens_the_menu_on_a_property() {
+    #[derive(Debug, Clone)]
+    enum Menu {
+        Grid,
+        Menu(context_menu::Event<MenuItem, u32>),
+    }
+    let state = sample();
+    let menu = property_grid::menu();
+    let grid: Element<'_, Menu> = property_grid(&state)
+        .context_menu(&menu, Menu::Menu)
+        .on_event(|_| Menu::Grid)
+        .into();
+    let mut ui = simulator::simulator(grid);
+    let row = ui.find("120px").expect("a value").bounds();
+    ui.point_at(row.center());
+    let _ = ui.simulate([
+        iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right)),
+        iced::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Right)),
+    ]);
+    let opened: Vec<u32> = ui
+        .into_messages()
+        .filter_map(|message| match message {
+            Menu::Menu(context_menu::Event::Open(id, _)) => Some(id),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(opened, [2]);
+
+    let mut state = state;
+    assert_eq!(
+        state.update(MenuItem::Reset.event(2)),
+        Some(Output::Reset {
+            id: 2,
+            value: Value::Number(100.0)
+        })
+    );
+    assert_eq!(
+        state.update(MenuItem::CopyValue.event(2)),
+        Some(Output::CopyValue("100px".into()))
+    );
+}
+
+#[test]
+fn the_open_menu_lists_its_entries() {
+    let state = sample();
+    let mut menu = property_grid::menu();
+    let _ = menu.update(context_menu::Event::OpenFromKeyboard(2));
+    let grid: Element<'_, Message> = property_grid(&state)
+        .context_menu(&menu, |_| Message::Grid(Event::Next))
+        .on_event(Message::Grid)
+        .into();
+    let mut ui = simulator::simulator(grid);
+    for label in ["Copy value", "Reset to default"] {
+        assert!(ui.find(label).is_ok(), "{label}");
+    }
+}
+
+#[test]
+fn a_narrow_grid_gives_names_the_room_values_can_spare() {
+    const WIDTH: f32 = 300.0;
+    let state = sample();
+    let grid = container(view(&state)).width(WIDTH);
+    let mut ui = Simulator::with_size(iced::Settings::default(), Size::new(WIDTH, 600.0), grid);
+    let name = ui.find("Width").expect("a name").bounds();
+    let value = ui.find("120px").expect("its value").bounds();
+    let names = value.x - name.x;
+    let values = WIDTH - value.x;
+    assert!(names > values, "names {names}, values {values}");
+}
+
+#[test]
+fn the_description_wraps_and_grows() {
+    const WIDTH: f32 = 240.0;
+    let long = "A description long enough that it needs several lines in a narrow grid, \
+                and more lines still, so the area under the rows has to grow to show it.";
+    let mut state = State::new([text(1, "Name", "Box").description(long)]);
+    {
+        let grid = container(view(&state)).width(WIDTH);
+        let mut ui = Simulator::with_size(iced::Settings::default(), Size::new(WIDTH, 600.0), grid);
+        let empty = ui.find(NOTHING_SELECTED).expect("placeholder").bounds();
+        assert!(empty.x + empty.width <= WIDTH, "{empty:?}");
+        assert!(empty.height > 20.0, "the placeholder wraps: {empty:?}");
+    }
+    let _ = state.update(Event::Press(Entry::Property(1)));
+    let grid = iced::widget::column![
+        container(view(&state)).width(WIDTH),
+        iced::widget::text("Below the grid"),
+    ];
+    let mut ui = Simulator::with_size(iced::Settings::default(), Size::new(WIDTH, 600.0), grid);
+    let title = ui.find("Name").expect("title").bounds();
+    let body = ui.find(long).expect("description").bounds();
+    let below = ui.find("Below the grid").expect("text below").bounds();
+    assert!(body.height > 40.0, "wraps: {body:?}");
+    assert!(
+        body.y + body.height - title.y > DESCRIPTION_HEIGHT,
+        "the area grows past its least height"
+    );
+    assert!(body.y + body.height < below.y, "nothing is cut off");
+    assert!(body.x + body.width <= WIDTH);
 }
