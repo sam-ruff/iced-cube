@@ -158,7 +158,7 @@ impl keys::Action for Action {
         match self {
             Action::Close => "Dismisses the dialog, unless Escape dismissal is turned off.",
             Action::Confirm => {
-                "Sends the dialog's confirm message, such as the alert dialog's destructive action."
+                "Sends the dialog's confirm message. An alert dialog's destructive action only runs on Enter when it opts in."
             }
             Action::FocusNext => {
                 "Focuses the next text field in the dialog, wrapping from the last to the first."
@@ -184,7 +184,8 @@ impl keys::Action for Action {
 /// the dialog does, and a field that submits on Enter keeps it. A focused
 /// text field takes the first Escape to lose focus, so it takes a second
 /// Escape to dismiss the dialog. Enter does nothing in a dialog without
-/// [`Dialog::on_confirm`].
+/// [`Dialog::on_confirm`], or in an alert dialog without
+/// [`AlertDialog::confirm_on_enter`].
 pub fn default_keymap() -> Keymap<Action> {
     Keymap::new()
         .bind(Chord::named(Named::Escape), Action::Close)
@@ -1003,6 +1004,7 @@ pub struct AlertDialog<'a, Message> {
     confirm: text::Fragment<'a>,
     on_cancel: Option<Message>,
     on_confirm: Option<Message>,
+    confirm_on_enter: bool,
     dismiss_on_escape: bool,
     size: Size,
     keymap: Keymap<Action>,
@@ -1016,6 +1018,7 @@ impl<Message> std::fmt::Debug for AlertDialog<'_, Message> {
             .field("description", &self.description)
             .field("cancel", &self.cancel)
             .field("confirm", &self.confirm)
+            .field("confirm_on_enter", &self.confirm_on_enter)
             .field("dismiss_on_escape", &self.dismiss_on_escape)
             .field("size", &self.size)
             .finish_non_exhaustive()
@@ -1038,6 +1041,7 @@ pub fn alert_dialog<'a, Message>(
         confirm: "Continue".into(),
         on_cancel: None,
         on_confirm: None,
+        confirm_on_enter: false,
         dismiss_on_escape: true,
         size: Size::default(),
         keymap: default_keymap(),
@@ -1068,9 +1072,17 @@ impl<'a, Message> AlertDialog<'a, Message> {
         self
     }
 
-    /// Emitted by the destructive button and by Enter.
+    /// Emitted by the destructive button, and by Enter when
+    /// [`confirm_on_enter`](Self::confirm_on_enter) is on.
     pub fn on_confirm(mut self, message: Message) -> Self {
         self.on_confirm = Some(message);
+        self
+    }
+
+    /// Whether Enter ([`Action::Confirm`]) runs the destructive action.
+    /// Defaults to `false`, so a stray Enter never destroys anything.
+    pub fn confirm_on_enter(mut self, confirm: bool) -> Self {
+        self.confirm_on_enter = confirm;
         self
     }
 
@@ -1116,10 +1128,10 @@ impl<'a, Message: Clone + 'a> From<AlertDialog<'a, Message>> for Dialog<'a, Mess
         if let Some(message) = alert.on_cancel {
             dialog = dialog.on_dismiss(message);
         }
-        if let Some(message) = alert.on_confirm {
-            dialog = dialog.on_confirm(message);
-        }
-        dialog
+        let Some(message) = alert.on_confirm.filter(|_| alert.confirm_on_enter) else {
+            return dialog;
+        };
+        dialog.on_confirm(message)
     }
 }
 
@@ -1209,8 +1221,16 @@ mod tests {
         assert!(!d.close_button);
         assert!(d.dismiss_on_escape);
         assert_eq!(d.on_dismiss, Some(1));
-        assert_eq!(d.on_confirm, Some(2), "Enter confirms");
+        assert_eq!(d.on_confirm, None, "Enter does not destroy by default");
         assert_eq!(d.actions.len(), 2);
+    }
+
+    #[test]
+    fn alert_dialog_confirms_on_enter_only_when_asked() {
+        let alert = alert_dialog::<u8>(text("Base"), "Delete file?", "This cannot be undone.")
+            .on_confirm(2)
+            .confirm_on_enter(true);
+        assert_eq!(Dialog::from(alert).on_confirm, Some(2));
     }
 
     #[test]

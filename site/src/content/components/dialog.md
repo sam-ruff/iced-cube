@@ -43,7 +43,9 @@ api:
   - name: ".cancel(label) / .confirm(label)"
     description: "The button labels. They default to Cancel and Continue."
   - name: ".on_cancel(message) / .on_confirm(message)"
-    description: "Emitted by the buttons. Enter also confirms, and Escape also cancels unless .dismiss_on_escape(false) is set."
+    description: "Emitted by the buttons. Escape also cancels unless .dismiss_on_escape(false) is set."
+  - name: ".confirm_on_enter(bool)"
+    description: "Whether Enter runs the destructive action. Defaults to false, so a stray Enter never destroys anything."
   - name: "dialog::default_keymap()"
     description: "The default shortcuts as a Keymap<Action>. Bind, unbind or clear chords to change them."
   - name: "action.effect(dismiss_on_escape)"
@@ -56,7 +58,7 @@ api:
 
 Wrap the root of your view in `dialog`, so the scrim covers the whole window. While the dialog is open, the content underneath still draws but gets no clicks, hover or key presses. It keeps its widget state, such as scroll positions, when the dialog opens and closes.
 
-Use a dialog for a short task that needs attention before people go back to what they were doing. For a destructive confirmation, use `alert_dialog`: it has no close button and ignores clicks on the scrim, so the only ways out are Cancel, Escape or the destructive action. Enter confirms it, so the whole answer can come from the keyboard. Turn Escape off with `.dismiss_on_escape(false)` when even that is too easy.
+Use a dialog for a short task that needs attention before people go back to what they were doing. For a destructive confirmation, use `alert_dialog`: it has no close button and ignores clicks on the scrim, so the only ways out are Cancel, Escape or the destructive action. Enter does nothing in it by default, because a key press meant for something else should never delete anything; turn it on with `.confirm_on_enter(true)` when the action is easy to undo. Turn Escape off with `.dismiss_on_escape(false)` when even that is too easy.
 
 The dialog handles its own keys, so it needs no subscription. When it opens, it focuses its first text field and unfocuses anything underneath. Tab and Shift+Tab then move between the text fields inside it and wrap at either end, so focus never leaves the dialog. It captures every key press its content leaves, so app-wide shortcuts from `keys::subscription` cannot change tabs, sliders or menus behind the scrim. Let a chosen shortcut through with `.pass_through(...)`.
 
