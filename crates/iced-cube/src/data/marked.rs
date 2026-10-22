@@ -16,6 +16,8 @@ use iced::{
     mouse,
 };
 
+use crate::data::ellipsis::{MARK, fit};
+
 type Paragraph = <Renderer as core_text::Renderer>::Paragraph;
 type Colour<'a> = Box<dyn Fn(&Theme) -> Color + 'a>;
 
@@ -125,20 +127,64 @@ impl Marked<'_> {
         }
     }
 
-    /// The spans to shape, and which of them are marks.
-    fn spans(&self) -> (Vec<Span<'_, (), Font>>, Vec<usize>) {
-        let runs = runs(self.content, &self.marks);
-        let marks = runs
-            .iter()
-            .enumerate()
-            .filter_map(|(index, (_, marked))| marked.then_some(index))
-            .collect();
-        let spans = runs
-            .into_iter()
-            .map(|(range, _)| Span::new(&self.content[range]))
-            .collect();
-        (spans, marks)
+    fn measure(&self, content: &str) -> f32 {
+        Paragraph::with_text(Text {
+            wrapping: Wrapping::None,
+            ..self.format(content, Size::INFINITE)
+        })
+        .min_width()
     }
+
+    /// The text as shown `width` pixels wide, and its marks. Text that does
+    /// not wrap ends in an ellipsis when it is too wide, keeping the marks
+    /// on what is left.
+    fn shown(&self, state: &mut State, width: f32) -> (String, Vec<Range<usize>>) {
+        if self.wrapping != Wrapping::None {
+            return (self.content.to_owned(), self.marks.clone());
+        }
+        let cached = state
+            .fitted
+            .as_ref()
+            .filter(|(source, at, _)| source == self.content && *at == width);
+        let shown = match cached {
+            Some((_, _, shown)) => shown.clone(),
+            None => {
+                let shown = fit(self.content, width, |value| self.measure(value)).into_owned();
+                state.fitted = Some((self.content.to_owned(), width, shown.clone()));
+                shown
+            }
+        };
+        if shown.len() == self.content.len() {
+            return (shown, self.marks.clone());
+        }
+        let kept = shown.len().saturating_sub(MARK.len_utf8());
+        (shown, clip(&self.marks, kept))
+    }
+}
+
+/// The marks that fall within the first `end` bytes, cut at `end`.
+fn clip(marks: &[Range<usize>], end: usize) -> Vec<Range<usize>> {
+    marks
+        .iter()
+        .filter(|mark| mark.start < end)
+        .map(|mark| mark.start..mark.end.min(end))
+        .collect()
+}
+
+/// The spans to shape `content` with its `marks`, and which of them are
+/// marks.
+fn spans<'a>(content: &'a str, marks: &[Range<usize>]) -> (Vec<Span<'a, (), Font>>, Vec<usize>) {
+    let runs = runs(content, marks);
+    let marked = runs
+        .iter()
+        .enumerate()
+        .filter_map(|(index, (_, marked))| marked.then_some(index))
+        .collect();
+    let spans = runs
+        .into_iter()
+        .map(|(range, _)| Span::new(&content[range]))
+        .collect();
+    (spans, marked)
 }
 
 /// The shaped paragraph and what it was shaped from.
@@ -148,6 +194,9 @@ struct State {
     source: Option<(String, Vec<Range<usize>>)>,
     /// Which spans are marks.
     marks: Vec<usize>,
+    /// The last content shortened, the width it was shortened to and the
+    /// result.
+    fitted: Option<(String, f32, String)>,
 }
 
 impl<Message> Widget<Message, Theme, Renderer> for Marked<'_> {
@@ -172,25 +221,26 @@ impl<Message> Widget<Message, Theme, Renderer> for Marked<'_> {
         let state = tree.state.downcast_mut::<State>();
         layout::sized(limits, Length::Fill, Length::Shrink, |limits| {
             let bounds = limits.max();
+            let (content, marks) = self.shown(state, bounds.width);
             let same = state
                 .source
                 .as_ref()
-                .is_some_and(|(content, marks)| content == self.content && *marks == self.marks);
+                .is_some_and(|source| source.0 == content && source.1 == marks);
             if same {
                 match state.paragraph.compare(self.format((), bounds)) {
                     Difference::None => {}
                     Difference::Bounds => state.paragraph.resize(bounds),
                     Difference::Shape => {
-                        let (spans, _) = self.spans();
+                        let (spans, _) = spans(&content, &marks);
                         state.paragraph =
                             Paragraph::with_spans(self.format(spans.as_slice(), bounds));
                     }
                 }
             } else {
-                let (spans, marks) = self.spans();
+                let (spans, marked) = spans(&content, &marks);
                 state.paragraph = Paragraph::with_spans(self.format(spans.as_slice(), bounds));
-                state.marks = marks;
-                state.source = Some((self.content.to_owned(), self.marks.clone()));
+                state.marks = marked;
+                state.source = Some((content.clone(), marks));
             }
             state.paragraph.min_bounds()
         })
@@ -320,8 +370,8 @@ mod tests {
             |_| Color::BLACK,
             |_| Color::WHITE,
         );
-        let (spans, marks) = text.spans();
-        assert_eq!(spans.len(), 3);
+        let (parts, marks) = spans(text.content, &text.marks);
+        assert_eq!(parts.len(), 3);
         assert_eq!(marks, [1]);
         let text = text
             .size(12.0)
@@ -329,5 +379,13 @@ mod tests {
             .wrapping(Wrapping::None);
         assert_eq!(text.size, 12.0);
         assert_eq!(text.wrapping, Wrapping::None);
+    }
+
+    #[test]
+    fn shortened_text_keeps_the_marks_that_are_left() {
+        let marks = [0..4, 6..10, 12..16];
+        assert_eq!(clip(&marks, 8), [0..4, 6..8], "cut at the end");
+        assert_eq!(clip(&marks, 4), std::slice::from_ref(&(0..4)));
+        assert_eq!(clip(&marks, 0), Vec::<Range<usize>>::new());
     }
 }

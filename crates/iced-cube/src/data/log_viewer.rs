@@ -14,7 +14,9 @@
 //!
 //! Copying returns [`Output::Copy`] with the text, for the app to write to
 //! the clipboard, and the search shortcut returns [`Output::FocusSearch`],
-//! for the app to answer with [`focus_search`].
+//! for the app to answer with [`focus_search`]. Lines can carry a context
+//! menu, such as the one from [`menu()`], through
+//! [`LogViewer::context_menu`].
 //!
 //! ```no_run
 //! use iced::{Element, Subscription, Task};
@@ -64,19 +66,23 @@ use iced::futures::{Stream, StreamExt, stream};
 use iced::keyboard::Modifiers;
 use iced::keyboard::key::Named;
 use iced::widget::text::{LineHeight, Wrapping};
-use iced::widget::{self, Space, column, container, responsive, row, stack, text};
+use iced::widget::{self, Space, column, container, responsive, row, text};
 use iced::{Alignment, Border, Color, Element, Length, Padding, Pixels, Subscription, Task, Theme};
 
 use crate::data::ellipsis::ellipsis;
-use crate::data::interaction::{Look, pressable, scope};
+use crate::data::interaction::{Look, RowMenu, pressable, row_menu, scope, search_keys};
 use crate::data::marked::{find, marked};
 use crate::data::rows::rows;
 use crate::data::virtual_list::{self, Step, target};
 use crate::keys::{self, Chord, Keymap};
+use crate::overlay::context_menu;
+use crate::overlay::dropdown_menu::{item, separator};
 use crate::overlay::tooltip::Position;
 use crate::primitives::button::{self, button};
 use crate::primitives::icon_button::icon_button;
 use crate::primitives::input::{self, input};
+use crate::primitives::toggle;
+use crate::primitives::toggle_group::{self, toggle_group};
 use crate::theme::{self, Tokens, fade, mix, radius, space, text_size};
 
 /// Height of a line that does not wrap.
@@ -99,6 +105,8 @@ const TIMESTAMP_WIDTH: f32 = 84.0;
 const LEVEL_WIDTH: f32 = 44.0;
 const TARGET_WIDTH: f32 = 120.0;
 const FRAME_PADDING: f32 = 4.0;
+/// Room kept for the match counter, so the search field never moves.
+const COUNTER_WIDTH: f32 = 64.0;
 
 /// How severe an entry is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
@@ -228,6 +236,10 @@ pub enum Event {
     FocusSearch,
     /// Shows or hides a level.
     ToggleLevel(Level),
+    /// The level filters were pressed.
+    Levels(toggle_group::Event<Level>),
+    /// Shows only the level of this line.
+    FilterToLevel(LineId),
     ToggleWrap,
     /// Pauses the stream, holding new entries back, or resumes it.
     TogglePause,
@@ -235,6 +247,12 @@ pub enum Event {
     Clear,
     /// Copies the selected lines, or the highlighted one.
     Copy,
+    /// Copies one line as plain text, as [`Entry::line`] formats it.
+    CopyLine(LineId),
+    /// Copies only the message of one line.
+    CopyMessage(LineId),
+    /// Selects or deselects the highlighted line, keeping the others.
+    ToggleHighlighted,
     /// Starts or stops following the newest line. The log sends `false`
     /// when the user scrolls away from the end, and `true` when they
     /// scroll back.
@@ -275,6 +293,8 @@ pub struct State {
     limit: usize,
     counts: [usize; 5],
     shown: [bool; 5],
+    /// The level filters as drawn, labelled with their counts.
+    levels: toggle_group::State<Level>,
     /// Ids of the entries that pass the level filter, oldest first.
     visible: VecDeque<LineId>,
     /// Visible lines dropped from the front so far, so the lines in view
@@ -309,6 +329,7 @@ impl Default for State {
             limit: DEFAULT_LIMIT,
             counts: [0; 5],
             shown: [true; 5],
+            levels: level_filters(&[0; 5], &[true; 5]),
             visible: VecDeque::new(),
             visible_dropped: 0,
             query: String::new(),
@@ -343,6 +364,7 @@ impl State {
     pub fn with_limit(mut self, limit: usize) -> Self {
         self.limit = limit.max(1);
         self.trim();
+        self.sync_levels();
         self
     }
 
@@ -381,6 +403,7 @@ impl State {
             self.append(entry);
         }
         self.trim();
+        self.sync_levels();
     }
 
     /// Every kept entry, oldest first, whether shown or not.
@@ -424,6 +447,12 @@ impl State {
 
     pub fn is_shown(&self, level: Level) -> bool {
         self.shown[level.index()]
+    }
+
+    /// The level filters as a multiple-choice toggle group, each labelled
+    /// with its level's count.
+    pub fn levels(&self) -> &toggle_group::State<Level> {
+        &self.levels
     }
 
     pub fn query(&self) -> &str {
@@ -541,10 +570,34 @@ impl State {
                 self.shown[level.index()] = !self.shown[level.index()];
                 self.refilter();
             }
+            Event::Levels(event) => {
+                if self.levels.update(event).is_some() {
+                    for level in Level::ALL {
+                        self.shown[level.index()] = self.levels.is_selected(level);
+                    }
+                    self.refilter();
+                }
+            }
+            Event::FilterToLevel(id) => {
+                let level = self.entry(id)?.level;
+                self.shown = [false; 5];
+                self.shown[level.index()] = true;
+                self.refilter();
+            }
             Event::ToggleWrap => self.wrap = !self.wrap,
             Event::TogglePause => self.toggle_pause(),
             Event::Clear => self.clear(),
             Event::Copy => return self.copy_text().map(Output::Copy),
+            Event::CopyLine(id) => return self.entry(id).map(|entry| Output::Copy(entry.line())),
+            Event::CopyMessage(id) => {
+                return self
+                    .entry(id)
+                    .map(|entry| Output::Copy(entry.message.clone()));
+            }
+            Event::ToggleHighlighted => {
+                let id = self.highlighted()?;
+                self.press(id, Modifiers::COMMAND);
+            }
             Event::Follow(follow) => self.follow(follow),
             Event::Next => self.step(Step::Next),
             Event::Previous => self.step(Step::Previous),
@@ -652,6 +705,7 @@ impl State {
             .collect();
         let visible: BTreeSet<LineId> = self.visible.iter().copied().collect();
         self.selected.retain(|id| visible.contains(id));
+        self.sync_levels();
         self.rematch();
         if let Some(id) = self.highlighted() {
             self.reveal_line(id);
@@ -685,6 +739,12 @@ impl State {
         self.pending.clear();
         self.unseen = 0;
         self.following = true;
+        self.sync_levels();
+    }
+
+    /// Relabels the level filters with the current counts.
+    fn sync_levels(&mut self) {
+        self.levels = level_filters(&self.counts, &self.shown);
     }
 
     fn follow(&mut self, follow: bool) {
@@ -810,6 +870,16 @@ impl State {
     }
 }
 
+/// The level filters for these counts, with the shown levels on.
+fn level_filters(counts: &[usize; 5], shown: &[bool; 5]) -> toggle_group::State<Level> {
+    let items = Level::ALL.map(|level| {
+        let label = format!("{} {}", level.name(), counts[level.index()]);
+        toggle_group::item(level, label)
+    });
+    toggle_group::State::multiple(items)
+        .with_selected(Level::ALL.into_iter().filter(|level| shown[level.index()]))
+}
+
 /// What a log keyboard shortcut does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Action {
@@ -821,6 +891,7 @@ pub enum Action {
     PreviousPage,
     ExtendNext,
     ExtendPrevious,
+    Select,
     SelectAll,
     Copy,
     FocusSearch,
@@ -838,6 +909,7 @@ impl Action {
     pub fn event(self, state: &State) -> Option<Event> {
         let lines = state.visible_len() > 0;
         match self {
+            Action::Select => state.highlighted().map(|_| Event::ToggleHighlighted),
             Action::Next => lines.then_some(Event::Next),
             Action::Previous => lines.then_some(Event::Previous),
             Action::First => lines.then_some(Event::First),
@@ -869,6 +941,7 @@ impl keys::Action for Action {
         Action::PreviousPage,
         Action::ExtendNext,
         Action::ExtendPrevious,
+        Action::Select,
         Action::SelectAll,
         Action::Copy,
         Action::FocusSearch,
@@ -894,6 +967,7 @@ impl keys::Action for Action {
             Action::PreviousPage => "PreviousPage",
             Action::ExtendNext => "ExtendNext",
             Action::ExtendPrevious => "ExtendPrevious",
+            Action::Select => "Select",
             Action::SelectAll => "SelectAll",
             Action::Copy => "Copy",
             Action::FocusSearch => "FocusSearch",
@@ -916,6 +990,7 @@ impl keys::Action for Action {
             Action::PreviousPage => "Moves the highlight up by a page of lines.",
             Action::ExtendNext => "Moves down and extends the selection.",
             Action::ExtendPrevious => "Moves up and extends the selection.",
+            Action::Select => "Selects or deselects the highlighted line.",
             Action::SelectAll => "Selects every shown line.",
             Action::Copy => "Copies the selected lines, or the highlighted one.",
             Action::FocusSearch => "Focuses the search field.",
@@ -923,7 +998,7 @@ impl keys::Action for Action {
             Action::PreviousMatch => "Moves to the previous line matching the search.",
             Action::ClearSearch => "Clears the search.",
             Action::TogglePause => "Pauses the stream, or resumes it with the held lines.",
-            Action::ToggleWrap => "Wraps long lines, or cuts them at the edge.",
+            Action::ToggleWrap => "Wraps long lines, or ends them in an ellipsis.",
             Action::Clear => "Removes every line.",
         }
     }
@@ -941,20 +1016,22 @@ impl keys::Action for Action {
 /// | `PageUp` | [`Action::PreviousPage`] |
 /// | `Shift+ArrowDown` | [`Action::ExtendNext`] |
 /// | `Shift+ArrowUp` | [`Action::ExtendPrevious`] |
+/// | `Space` | [`Action::Select`] |
 /// | `Mod+A` (Ctrl, or Cmd on macOS) | [`Action::SelectAll`] |
 /// | `Mod+C` | [`Action::Copy`] |
 /// | `Mod+F` | [`Action::FocusSearch`] |
-/// | `Enter`, `F3` | [`Action::NextMatch`] |
-/// | `Shift+Enter`, `Shift+F3` | [`Action::PreviousMatch`] |
+/// | `F3` | [`Action::NextMatch`] |
+/// | `Shift+F3` | [`Action::PreviousMatch`] |
 /// | `Escape` | [`Action::ClearSearch`] |
-/// | `Space` | [`Action::TogglePause`] |
-/// | `W` | [`Action::ToggleWrap`] |
 /// | `Ctrl+L` | [`Action::Clear`] |
 ///
 /// The log resolves these itself, only while it has focus, which it takes
 /// when any part of it is pressed. Keys the search field uses, such as
-/// typing, Home and End, stay with the field. Pass a changed keymap with
-/// [`LogViewer::keymap`].
+/// typing, Home and End, stay with the field. While the field has focus,
+/// Enter and Shift+Enter step through the matches, and Escape clears the
+/// text, then a second Escape leaves the field. [`Action::TogglePause`]
+/// and [`Action::ToggleWrap`] are on the toolbar and have no chord until
+/// one is bound. Pass a changed keymap with [`LogViewer::keymap`].
 pub fn default_keymap() -> Keymap<Action> {
     Keymap::new()
         .bind(Chord::named(Named::ArrowDown), Action::Next)
@@ -965,16 +1042,13 @@ pub fn default_keymap() -> Keymap<Action> {
         .bind(Chord::named(Named::PageUp), Action::PreviousPage)
         .bind(Chord::named(Named::ArrowDown).shift(), Action::ExtendNext)
         .bind(Chord::named(Named::ArrowUp).shift(), Action::ExtendPrevious)
+        .bind(Chord::named(Named::Space), Action::Select)
         .bind(Chord::character('a').command(), Action::SelectAll)
         .bind(Chord::character('c').command(), Action::Copy)
         .bind(Chord::character('f').command(), Action::FocusSearch)
-        .bind(Chord::named(Named::Enter), Action::NextMatch)
         .bind(Chord::named(Named::F3), Action::NextMatch)
-        .bind(Chord::named(Named::Enter).shift(), Action::PreviousMatch)
         .bind(Chord::named(Named::F3).shift(), Action::PreviousMatch)
         .bind(Chord::named(Named::Escape), Action::ClearSearch)
-        .bind(Chord::named(Named::Space), Action::TogglePause)
-        .bind(Chord::character('w'), Action::ToggleWrap)
         .bind(Chord::character('l').ctrl(), Action::Clear)
 }
 
@@ -994,6 +1068,57 @@ pub fn stream() -> impl Stream<Item = Event> {
 /// Focuses the search field of `state`'s log.
 pub fn focus_search<T>(state: &State) -> Task<T> {
     widget::operation::focus(state.search_id.clone())
+}
+
+/// The text beside the search field: which match is current, of how many.
+/// Empty while there is no search.
+pub fn match_label(state: &State) -> String {
+    if state.query().is_empty() {
+        return String::new();
+    }
+    let total = state.match_count();
+    match (total, state.current_match()) {
+        (0, _) => "No matches".to_owned(),
+        (_, Some((_, position))) => format!("{position} of {total}"),
+        (_, None) => format!("{total} found"),
+    }
+}
+
+/// An entry of the context menu from [`menu`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MenuItem {
+    CopyLine,
+    CopyMessage,
+    FilterToLevel,
+}
+
+impl MenuItem {
+    pub const ALL: [MenuItem; 3] = [
+        MenuItem::CopyLine,
+        MenuItem::CopyMessage,
+        MenuItem::FilterToLevel,
+    ];
+
+    /// The event the entry sends for the line the menu opened on.
+    pub fn event(self, id: LineId) -> Event {
+        match self {
+            MenuItem::CopyLine => Event::CopyLine(id),
+            MenuItem::CopyMessage => Event::CopyMessage(id),
+            MenuItem::FilterToLevel => Event::FilterToLevel(id),
+        }
+    }
+}
+
+/// A context menu to pass to [`LogViewer::context_menu`]: copy the line or
+/// only its message, or show only lines of its level. Turn the chosen entry
+/// into an event with [`MenuItem::event`].
+pub fn menu() -> context_menu::State<MenuItem, LineId> {
+    context_menu::State::new([
+        item(MenuItem::CopyLine, "Copy line").icon(crate::lucide!(Copy)),
+        item(MenuItem::CopyMessage, "Copy message").icon(crate::lucide!(TextQuote)),
+        separator(),
+        item(MenuItem::FilterToLevel, "Show only this level").icon(crate::lucide!(ListFilter)),
+    ])
 }
 
 /// The colour of a level's tag.
@@ -1030,22 +1155,30 @@ pub struct LineStyle {
     pub mark: Color,
 }
 
-/// Resolves a line's colours. Lines take the list rows' colours, and an
-/// error line is tinted when nothing else colours it. The current match is
-/// marked more strongly than the others.
+/// Resolves a line's colours. Lines take the list rows' colours, with the
+/// accent's text on a selected line, and an error line is tinted when
+/// nothing else colours it. The current match is marked more strongly than
+/// the others.
 pub fn line_style(tokens: &Tokens, level: Level, current: bool, status: Status) -> LineStyle {
     let row = virtual_list::row_style(tokens, status);
     let tint = (level == Level::Error)
         .then(|| fade(tokens.destructive, if tokens.is_dark { 0.14 } else { 0.07 }));
+    let selected = status.selected && !status.disabled;
     LineStyle {
         background: row.background.or(tint),
         ring: row.ring,
-        text: tokens.foreground,
+        text: if selected {
+            tokens.accent_foreground
+        } else {
+            tokens.foreground
+        },
         mark: fade(tokens.warning, if current { 0.7 } else { 0.35 }),
     }
 }
 
 type OnEvent<'a, Message> = dyn Fn(Event) -> Message + 'a;
+type BuildMenu<'a, Message> =
+    dyn FnOnce(Keymap<context_menu::Action>) -> RowMenu<'a, LineId, Message> + 'a;
 
 /// A log viewer builder. Convert it into an [`Element`] to render.
 pub struct LogViewer<'a, Message> {
@@ -1056,6 +1189,8 @@ pub struct LogViewer<'a, Message> {
     placeholder: String,
     empty: String,
     keymap: Keymap<Action>,
+    menu: Option<Box<BuildMenu<'a, Message>>>,
+    menu_keymap: Keymap<context_menu::Action>,
     on_event: Option<Box<OnEvent<'a, Message>>>,
 }
 
@@ -1071,6 +1206,8 @@ pub fn log_viewer<'a, Message>(state: &'a State) -> LogViewer<'a, Message> {
         placeholder: "Search messages".to_owned(),
         empty: "No log lines yet".to_owned(),
         keymap: default_keymap(),
+        menu: None,
+        menu_keymap: context_menu::default_keymap(),
         on_event: None,
     }
 }
@@ -1130,6 +1267,31 @@ impl<'a, Message> LogViewer<'a, Message> {
         self
     }
 
+    /// Gives every line the context menu of `menu`, keyed by line, such as
+    /// the one from [`menu()`]. It opens on a right-click or a long press,
+    /// and on the highlighted line with its opening chord while the log has
+    /// focus.
+    pub fn context_menu<MenuId>(
+        mut self,
+        menu: &'a context_menu::State<MenuId, LineId>,
+        on_event: impl Fn(context_menu::Event<MenuId, LineId>) -> Message + 'a,
+    ) -> Self
+    where
+        MenuId: Copy + PartialEq + 'a,
+        Message: Clone + 'a,
+    {
+        let on_event: Rc<dyn Fn(context_menu::Event<MenuId, LineId>) -> Message + 'a> =
+            Rc::new(on_event);
+        self.menu = Some(Box::new(move |keymap| row_menu(menu, keymap, on_event)));
+        self
+    }
+
+    /// Replaces the context menu's default keymap.
+    pub fn context_menu_keymap(mut self, keymap: Keymap<context_menu::Action>) -> Self {
+        self.menu_keymap = keymap;
+        self
+    }
+
     pub fn is_enabled(&self) -> bool {
         self.on_event.is_some()
     }
@@ -1148,14 +1310,20 @@ where
             placeholder,
             empty,
             keymap,
+            menu,
+            menu_keymap,
             on_event,
         } = viewer;
         let on_event: Option<Rc<OnEvent<'a, Message>>> = on_event.map(Rc::from);
+        let menu = menu
+            .filter(|_| on_event.is_some())
+            .map(|build| Rc::new(build(menu_keymap)));
         let view = Rc::new(View {
             state,
             toolbar,
             placeholder,
             empty,
+            menu: menu.clone(),
             on_event: on_event.clone(),
         });
         let body = responsive(move |size| view.body(size.width < BREAKPOINT))
@@ -1168,7 +1336,13 @@ where
         let on_focus = on_event.clone();
         scope(body)
             .on_focus(move |focused| on_focus(Event::Focus(focused)))
-            .on_key(move |key| state.key_event(&keymap, key).map(&*on_event))
+            .on_key(move |key| {
+                let opened = menu
+                    .as_ref()
+                    .zip(state.highlighted())
+                    .and_then(|(menu, target)| menu.key(key, target));
+                opened.or_else(|| state.key_event(&keymap, key).map(&*on_event))
+            })
             .into()
     }
 }
@@ -1179,6 +1353,7 @@ struct View<'a, Message> {
     toolbar: bool,
     placeholder: String,
     empty: String,
+    menu: Option<Rc<RowMenu<'a, LineId, Message>>>,
     on_event: Option<Rc<OnEvent<'a, Message>>>,
 }
 
@@ -1201,7 +1376,8 @@ impl<'a, Message: Clone + 'a> View<'a, Message> {
 
     fn toolbar(&self, narrow: bool) -> Element<'a, Message> {
         let state = self.state;
-        let search = input(&self.placeholder, state.query())
+        let has_matches = state.match_count() > 0;
+        let field = input(&self.placeholder, state.query())
             .id(state.search_id.clone())
             .icon(crate::lucide!(Search))
             .size(input::Size::Sm)
@@ -1214,20 +1390,23 @@ impl<'a, Message: Clone + 'a> View<'a, Message> {
                 self.on_event
                     .clone()
                     .map(|on_event| move |query| on_event(Event::Search(query))),
-            );
-        let found = (!state.query().is_empty()).then(|| {
-            let label = match state.current_match() {
-                Some((_, position)) => format!("{position}/{}", state.match_count()),
-                None => format!("0/{}", state.match_count()),
-            };
-            text(label)
+            )
+            .on_submit_maybe(self.send(Event::NextMatch).filter(|_| has_matches));
+        let search = search_keys(field, state.search_id.clone())
+            .on_clear(
+                self.send(Event::ClearSearch)
+                    .filter(|_| !state.query().is_empty()),
+            )
+            .on_previous(self.send(Event::PreviousMatch).filter(|_| has_matches));
+        let found = container(
+            text(match_label(state))
                 .size(text_size::XS)
                 .wrapping(Wrapping::None)
                 .style(|theme| text::Style {
                     color: Some(muted(theme)),
-                })
-        });
-        let has_matches = state.match_count() > 0;
+                }),
+        )
+        .center_x(COUNTER_WIDTH);
         let previous = icon_button(crate::lucide!(ChevronUp))
             .label("Previous match")
             .tooltip(Some(Position::Bottom))
@@ -1238,24 +1417,14 @@ impl<'a, Message: Clone + 'a> View<'a, Message> {
             .tooltip(Some(Position::Bottom))
             .size(button::Size::Sm)
             .on_press_maybe(self.send(Event::NextMatch).filter(|_| has_matches));
-        let mut search_row = row![search].spacing(space::XS).align_y(Alignment::Center);
-        if let Some(found) = found {
-            search_row = search_row.push(found);
-        }
-        let search_row = search_row.push(previous).push(next);
+        let stepper = row![found, previous, next]
+            .spacing(space::XS)
+            .align_y(Alignment::Center);
 
-        let levels = Level::ALL.iter().map(|&level| {
-            let variant = if state.is_shown(level) {
-                button::Variant::Secondary
-            } else {
-                button::Variant::Ghost
-            };
-            button(format!("{} {}", level.name(), state.count(level)))
-                .size(button::Size::Sm)
-                .variant(variant)
-                .on_press_maybe(self.send(Event::ToggleLevel(level)))
-                .into()
-        });
+        let mut levels = toggle_group(&state.levels).size(toggle::Size::Sm);
+        if let Some(on_event) = self.on_event.clone() {
+            levels = levels.on_event(move |event| on_event(Event::Levels(event)));
+        }
 
         let can_copy = state.can_copy();
         let actions: [Element<'a, Message>; 4] = [
@@ -1291,28 +1460,28 @@ impl<'a, Message: Clone + 'a> View<'a, Message> {
                 .into(),
         ];
 
-        // Narrow, the filters and the actions, kept together, share rows
-        // that wrap.
+        // Narrow, the search field, the filters and the actions each take a
+        // row, the filters wrap, and the match stepper joins the actions so
+        // the field keeps the full width.
         if narrow {
-            return column![
-                search_row,
-                row(levels)
-                    .push(row(actions).spacing(space::XS))
-                    .spacing(space::XS)
-                    .wrap(),
+            let tools = row![
+                row(actions).spacing(space::XS),
+                Space::new().width(Length::Fill),
+                stepper,
             ]
-            .spacing(space::SM)
-            .into();
+            .align_y(Alignment::Center);
+            return column![search, levels, tools].spacing(space::SM).into();
         }
         column![
             row![
-                search_row,
+                search,
+                stepper,
                 Space::new().width(Length::Fill),
                 row(actions).spacing(space::XS),
             ]
             .spacing(space::SM)
             .align_y(Alignment::Center),
-            row(levels).spacing(space::XS).wrap(),
+            levels,
         ]
         .spacing(space::SM)
         .into()
@@ -1337,12 +1506,17 @@ impl<'a, Message: Clone + 'a> View<'a, Message> {
         }
 
         let on_event = self.on_event.clone();
+        let menu = self.menu.clone();
         let wrap = state.is_wrapped();
         let build = move |range: std::ops::Range<usize>| -> Element<'a, Message> {
             column(range.filter_map(|index| {
                 let id = *state.visible.get(index)?;
                 let entry = state.entry(id)?;
-                Some(line_view(state, id, entry, narrow, on_event.as_ref()))
+                let line = line_view(state, id, entry, narrow, on_event.as_ref());
+                Some(match &menu {
+                    Some(menu) => menu.wrap(id, line),
+                    None => line,
+                })
             }))
             .into()
         };
@@ -1370,16 +1544,16 @@ impl<'a, Message: Clone + 'a> View<'a, Message> {
         let Some(pill) = self.pill() else {
             return frame(list.into()).into();
         };
-        // In the corner, where it covers the least of the lines.
+        // Below the lines, inside the frame, so the newest line stays in
+        // view above it.
         let pill = container(pill)
             .align_right(Length::Fill)
-            .align_bottom(Length::Fill)
-            .padding(Padding::from([space::MD, space::LG + space::SM]));
-        stack![frame(list.into()), pill].into()
+            .padding(Padding::ZERO.top(FRAME_PADDING).right(space::XS));
+        frame(column![list, pill].into()).into()
     }
 
-    /// A button over the bottom of the lines: resume while paused, or jump
-    /// to the newest line while not following.
+    /// A button under the lines: resume while paused, or jump to the newest
+    /// line while not following.
     fn pill(&self) -> Option<Element<'a, Message>> {
         let state = self.state;
         if state.is_paused() {
@@ -1390,6 +1564,7 @@ impl<'a, Message: Clone + 'a> View<'a, Message> {
             let resume = button(label)
                 .icon(crate::lucide!(Play))
                 .size(button::Size::Sm)
+                .variant(button::Variant::Secondary)
                 .on_press_maybe(self.send(Event::TogglePause));
             return Some(resume.into());
         }
@@ -1853,14 +2028,18 @@ mod tests {
             resolve(&state, named(Named::End, Modifiers::empty())),
             Some(Event::Last)
         ));
-        assert!(matches!(
-            resolve(&state, named(Named::Space, Modifiers::empty())),
-            Some(Event::TogglePause)
-        ));
-        assert!(matches!(
-            resolve(&state, character("w", Modifiers::empty())),
-            Some(Event::ToggleWrap)
-        ));
+        assert!(
+            resolve(&state, named(Named::Space, Modifiers::empty())).is_none(),
+            "nothing highlighted to select"
+        );
+        assert!(
+            resolve(&state, character("w", Modifiers::empty())).is_none(),
+            "no bare letters"
+        );
+        assert!(
+            resolve(&state, named(Named::Enter, Modifiers::empty())).is_none(),
+            "lines have no activation"
+        );
         assert!(matches!(
             resolve(&state, character("l", Modifiers::CTRL)),
             Some(Event::Clear)
@@ -1877,10 +2056,10 @@ mod tests {
             resolve(&state, named(Named::F3, Modifiers::empty())),
             Some(Event::NextMatch)
         ));
-        assert!(matches!(
-            resolve(&state, named(Named::Enter, Modifiers::SHIFT)),
-            Some(Event::PreviousMatch)
-        ));
+        assert!(
+            resolve(&state, named(Named::Enter, Modifiers::SHIFT)).is_none(),
+            "Enter steps through matches only in the search field"
+        );
         assert!(matches!(
             resolve(&state, named(Named::F3, Modifiers::SHIFT)),
             Some(Event::PreviousMatch)
@@ -1897,6 +2076,10 @@ mod tests {
         assert!(matches!(
             resolve(&state, named(Named::ArrowDown, Modifiers::SHIFT)),
             Some(Event::ExtendNext)
+        ));
+        assert!(matches!(
+            resolve(&state, named(Named::Space, Modifiers::empty())),
+            Some(Event::ToggleHighlighted)
         ));
 
         let empty = State::new();
@@ -1927,12 +2110,113 @@ mod tests {
     }
 
     #[test]
-    fn every_action_is_named_described_and_bound() {
+    fn every_action_is_named_described_and_bound_but_the_toolbar_toggles() {
+        let toolbar_only = [Action::TogglePause, Action::ToggleWrap];
         for action in Action::ALL {
             assert!(!action.name().is_empty());
             assert!(action.description().ends_with('.'));
-            assert!(!default_keymap().chords(action).is_empty(), "{action:?}");
+            let bound = !default_keymap().chords(action).is_empty();
+            assert_eq!(bound, !toolbar_only.contains(action), "{action:?}");
         }
+        let state = sample();
+        assert!(matches!(
+            Action::TogglePause.event(&state),
+            Some(Event::TogglePause)
+        ));
+        assert!(matches!(
+            Action::ToggleWrap.event(&state),
+            Some(Event::ToggleWrap)
+        ));
+    }
+
+    #[test]
+    fn no_default_chord_is_a_bare_letter_or_alt() {
+        for (chord, _) in default_keymap().bindings() {
+            let label = chord.to_string();
+            assert!(!label.contains("Alt"), "{label}");
+            let bare = label.chars().count() == 1;
+            assert!(!bare, "{label}");
+        }
+    }
+
+    #[test]
+    fn space_selects_the_highlighted_line_and_keeps_the_others() {
+        let mut state = sample();
+        let _ = state.update(Event::Press(1, Modifiers::empty()));
+        let _ = state.update(Event::Next);
+        let _ = state.update(Event::ToggleHighlighted);
+        assert_eq!(state.selected(), [1, 2]);
+        let _ = state.update(Event::ToggleHighlighted);
+        assert_eq!(state.selected(), [1]);
+        assert!(State::new().update(Event::ToggleHighlighted).is_none());
+    }
+
+    #[test]
+    fn the_level_filters_are_a_multiple_choice_group_with_counts() {
+        let mut state = sample();
+        let levels = state.levels();
+        assert_eq!(levels.mode(), toggle_group::Mode::Multiple);
+        assert_eq!(levels.selected(), Level::ALL);
+        let labels: Vec<&str> = levels
+            .items()
+            .iter()
+            .map(|item| item.label.as_str())
+            .collect();
+        assert_eq!(
+            labels,
+            ["Trace 0", "Debug 1", "Info 2", "Warn 1", "Error 1"]
+        );
+
+        let _ = state.update(Event::Levels(toggle_group::Event::Toggle(Level::Info)));
+        assert!(!state.is_shown(Level::Info));
+        assert!(!state.levels().is_selected(Level::Info));
+        assert_eq!(state.visible().collect::<Vec<_>>(), [1, 2, 3]);
+
+        let _ = state.update(Event::Received(vec![entry(Level::Info, "more")]));
+        assert_eq!(state.levels().items()[2].label, "Info 3", "counts follow");
+        assert!(!state.levels().is_selected(Level::Info), "and stay off");
+        let _ = state.update(Event::ToggleLevel(Level::Info));
+        assert!(state.levels().is_selected(Level::Info));
+        let _ = state.update(Event::Clear);
+        assert_eq!(state.levels().items()[2].label, "Info 0");
+    }
+
+    #[test]
+    fn the_menu_copies_and_filters_one_line() {
+        let mut state = sample();
+        let Some(Output::Copy(line)) = state.update(MenuItem::CopyLine.event(2)) else {
+            panic!("copies the line");
+        };
+        assert_eq!(line, "WARN  disk almost full");
+        let Some(Output::Copy(message)) = state.update(MenuItem::CopyMessage.event(3)) else {
+            panic!("copies the message");
+        };
+        assert_eq!(message, "request failed: timeout");
+        assert!(state.update(Event::CopyLine(99)).is_none());
+
+        let _ = state.update(MenuItem::FilterToLevel.event(0));
+        assert_eq!(state.visible().collect::<Vec<_>>(), [0, 4]);
+        assert_eq!(state.levels().selected(), [Level::Info]);
+        let _ = state.update(Event::FilterToLevel(99));
+        assert_eq!(state.visible_len(), 2, "a missing line changes nothing");
+
+        let menu = menu();
+        assert_eq!(MenuItem::ALL.len(), 3);
+        for item in MenuItem::ALL {
+            assert!(menu.menu().item(item).is_some(), "{item:?}");
+        }
+    }
+
+    #[test]
+    fn the_match_label_counts_matches() {
+        let mut state = sample();
+        assert_eq!(match_label(&state), "");
+        let _ = state.update(Event::Search("request".into()));
+        assert_eq!(match_label(&state), "2 found");
+        let _ = state.update(Event::NextMatch);
+        assert_eq!(match_label(&state), "1 of 2");
+        let _ = state.update(Event::Search("nothing like this".into()));
+        assert_eq!(match_label(&state), "No matches");
     }
 
     #[test]
@@ -1975,6 +2259,7 @@ mod tests {
                 },
             );
             assert_eq!(selected.background, Some(tokens.accent), "selection wins");
+            assert_eq!(selected.text, tokens.accent_foreground);
             let hovered = line_style(
                 &tokens,
                 Level::Warn,
@@ -2018,6 +2303,9 @@ mod tests {
         assert!(!viewer.is_enabled());
         assert!(viewer.toolbar);
         assert_eq!(viewer.height, Length::Fill);
+        assert!(viewer.menu.is_none());
+        assert_eq!(viewer.menu_keymap, context_menu::default_keymap());
+        let menu = menu();
         let viewer = viewer
             .toolbar(false)
             .height(300)
@@ -2025,7 +2313,11 @@ mod tests {
             .placeholder("Filter")
             .empty("Quiet")
             .keymap(Keymap::new())
+            .context_menu(&menu, |_| ())
+            .context_menu_keymap(Keymap::new())
             .on_event(|_| ());
+        assert!(viewer.menu.is_some());
+        assert!(viewer.menu_keymap.is_empty());
         assert!(viewer.is_enabled());
         assert!(!viewer.toolbar);
         assert_eq!(viewer.height, Length::Fixed(300.0));

@@ -8,13 +8,16 @@ use iced::keyboard::{Key, Modifiers, key::Named};
 use iced::widget::container;
 use iced::{Element, Point, Size, keyboard, mouse};
 use iced_cube::data::log_viewer::{
-    self, Entry, Event, Level, Output, ROW_HEIGHT, State, entry, log_viewer,
+    self, Entry, Event, Level, LineId, MenuItem, Output, ROW_HEIGHT, State, entry, log_viewer,
 };
+use iced_cube::overlay::context_menu;
+use iced_cube::theme::space;
 use iced_test::simulator::Simulator;
 
 #[derive(Debug, Clone)]
 enum Message {
     Logs(Event),
+    Menu(context_menu::Event<MenuItem, LineId>),
 }
 
 fn sample() -> State {
@@ -41,8 +44,9 @@ fn sized(element: Element<'_, Message>, width: f32) -> Simulator<'_, Message> {
 
 fn events(ui: Simulator<'_, Message>) -> Vec<Event> {
     ui.into_messages()
-        .map(|message| match message {
-            Message::Logs(event) => event,
+        .filter_map(|message| match message {
+            Message::Logs(event) => Some(event),
+            Message::Menu(_) => None,
         })
         .collect()
 }
@@ -136,11 +140,7 @@ fn a_match_among_wrapped_lines_scrolls_wholly_into_view() {
         .bounds();
     assert!(line.height > 40.0, "it wraps: {line:?}");
     // The toolbar stacks below 560 pixels, and the lines start below it.
-    let list = ui
-        .find("0/1")
-        .or_else(|_| ui.find("1/1"))
-        .expect("counter")
-        .bounds();
+    let list = ui.find("1 of 1").expect("counter").bounds();
     assert!(line.y > list.y + list.height, "below the toolbar: {line:?}");
     assert!(line.y + line.height <= 400.0, "above the bottom: {line:?}");
 }
@@ -161,19 +161,73 @@ fn typing_in_the_search_field_searches() {
 }
 
 #[test]
-fn enter_in_the_search_field_moves_to_the_next_match() {
+fn enter_and_shift_enter_in_the_search_field_step_through_matches() {
+    let mut state = sample();
+    let _ = state.update(Event::Search("request".into()));
+    for (modifiers, expected, other) in [
+        (Modifiers::empty(), "NextMatch", "PreviousMatch"),
+        (Modifiers::SHIFT, "PreviousMatch", "NextMatch"),
+    ] {
+        let mut ui = sized(view(&state), 720.0);
+        ui.click("request").expect("search field shows the query");
+        let _ = ui.simulate([press_key(Key::Named(Named::Enter), modifiers)]);
+        let emitted = events(ui);
+        assert!(has(&emitted, expected), "{emitted:?}");
+        assert!(!has(&emitted, other), "{emitted:?}");
+    }
+}
+
+#[test]
+fn enter_on_the_lines_leaves_the_matches_alone() {
     let mut state = sample();
     let _ = state.update(Event::Search("request".into()));
     let mut ui = sized(view(&state), 720.0);
-    ui.click("request").expect("search field shows the query");
+    ui.click("loaded config").expect("line");
     let _ = ui.simulate([
         press_key(Key::Named(Named::Enter), Modifiers::empty()),
-        press_key(Key::Named(Named::Enter), Modifiers::SHIFT),
         press_key(Key::Named(Named::F3), Modifiers::empty()),
     ]);
     let emitted = events(ui);
-    assert!(has(&emitted, "NextMatch"), "{emitted:?}");
-    assert!(has(&emitted, "PreviousMatch"), "{emitted:?}");
+    let steps = emitted
+        .iter()
+        .filter(|event| matches!(event, Event::NextMatch))
+        .count();
+    assert_eq!(steps, 1, "only F3 steps: {emitted:?}");
+}
+
+#[test]
+fn escape_in_the_search_field_clears_the_text_first() {
+    let mut state = sample();
+    let _ = state.update(Event::Search("request".into()));
+    let mut ui = sized(view(&state), 720.0);
+    ui.click("request").expect("search field");
+    let _ = ui.simulate([press_key(Key::Named(Named::Escape), Modifiers::empty())]);
+    let _ = ui.typewrite("x");
+    let emitted = events(ui);
+    assert!(has(&emitted, "ClearSearch"), "{emitted:?}");
+    assert!(
+        emitted
+            .iter()
+            .any(|event| matches!(event, Event::Search(query) if query.ends_with('x'))),
+        "the field keeps focus: {emitted:?}"
+    );
+}
+
+#[test]
+fn escape_in_an_empty_search_field_leaves_it() {
+    let state = sample();
+    let mut ui = sized(view(&state), 720.0);
+    ui.click("Search messages").expect("search field");
+    let _ = ui.simulate([press_key(Key::Named(Named::Escape), Modifiers::empty())]);
+    let _ = ui.typewrite("x");
+    let emitted = events(ui);
+    assert!(!has(&emitted, "ClearSearch"), "{emitted:?}");
+    assert!(
+        !emitted
+            .iter()
+            .any(|event| matches!(event, Event::Search(_))),
+        "the field lost focus: {emitted:?}"
+    );
 }
 
 #[test]
@@ -182,11 +236,43 @@ fn the_match_counter_shows_the_current_match() {
     let _ = state.update(Event::Search("request".into()));
     {
         let mut ui = sized(view(&state), 720.0);
-        assert!(ui.find("0/2").is_ok());
+        assert!(ui.find("2 found").is_ok());
     }
     let _ = state.update(Event::NextMatch);
+    {
+        let mut ui = sized(view(&state), 720.0);
+        assert!(ui.find("1 of 2").is_ok());
+    }
+    let _ = state.update(Event::Search("nothing like this".into()));
     let mut ui = sized(view(&state), 720.0);
-    assert!(ui.find("1/2").is_ok());
+    assert!(ui.find("No matches").is_ok());
+}
+
+#[test]
+fn the_toolbar_fits_a_phone_while_searching() {
+    let mut state = sample();
+    let _ = state.update(Event::Search("nothing like this".into()));
+    let element: Element<'_, Message> = container(view(&state)).width(280).into();
+    let mut ui = sized(element, 280.0);
+    let field = ui.find("nothing like this").expect("field").bounds();
+    assert!(field.width > 240.0, "the field takes the row: {field:?}");
+    let counter = ui.find("No matches").expect("counter").bounds();
+    assert!(counter.width <= 64.0, "{counter:?}");
+    // The two step buttons, 32 pixels each, follow the counter.
+    let right = counter.x + counter.width + 2.0 * (space::XS + 32.0);
+    assert!(right <= 280.0, "the stepper runs off the edge: {right}");
+}
+
+#[test]
+fn the_search_field_keeps_its_width_when_the_counter_appears() {
+    let idle = sample();
+    let mut ui = sized(view(&idle), 400.0);
+    let before = ui.find("Search messages").expect("field").bounds();
+    let mut searching = sample();
+    let _ = searching.update(Event::Search("request".into()));
+    let mut ui = sized(view(&searching), 400.0);
+    let after = ui.find("request").expect("field").bounds();
+    assert_eq!(before.width, after.width);
 }
 
 #[test]
@@ -195,7 +281,70 @@ fn level_filters_toggle_levels() {
     let mut ui = sized(view(&state), 720.0);
     ui.click("Debug 1").expect("level filter");
     let emitted = events(ui);
-    assert!(has(&emitted, "ToggleLevel(Debug)"), "{emitted:?}");
+    assert!(has(&emitted, "Levels(Toggle(Debug))"), "{emitted:?}");
+}
+
+#[test]
+fn a_right_click_opens_the_context_menu_on_that_line() {
+    let state = sample();
+    let menu = log_viewer::menu();
+    let element: Element<'_, Message> = log_viewer(&state)
+        .height(360)
+        .context_menu(&menu, Message::Menu)
+        .on_event(Message::Logs)
+        .into();
+    let mut ui = sized(element, 720.0);
+    let line = ui.find("disk almost full").expect("line").bounds();
+    ui.point_at(line.center());
+    let _ = ui.simulate([
+        iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right)),
+        iced::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Right)),
+    ]);
+    let opened: Vec<LineId> = ui
+        .into_messages()
+        .filter_map(|message| match message {
+            Message::Menu(context_menu::Event::Open(id, _)) => Some(id),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(opened, [2]);
+}
+
+#[test]
+fn shift_f10_opens_the_menu_on_the_highlighted_line() {
+    let mut state = sample();
+    let _ = state.update(Event::Press(3, Modifiers::empty()));
+    let _ = state.update(Event::Focus(true));
+    let menu = log_viewer::menu();
+    let element: Element<'_, Message> = log_viewer(&state)
+        .height(360)
+        .context_menu(&menu, Message::Menu)
+        .on_event(Message::Logs)
+        .into();
+    let mut ui = sized(element, 720.0);
+    ui.click("request failed: timeout").expect("line");
+    let _ = ui.simulate([press_key(Key::Named(Named::F10), Modifiers::SHIFT)]);
+    let opened = ui.into_messages().any(|message| {
+        matches!(
+            message,
+            Message::Menu(context_menu::Event::OpenFromKeyboard(3))
+        )
+    });
+    assert!(opened);
+}
+
+#[test]
+fn the_resume_button_leaves_the_newest_line_in_view() {
+    let mut state = State::new();
+    state.extend((0..200).map(|n| entry(Level::Info, format!("line {n}"))));
+    let _ = state.update(Event::TogglePause);
+    let mut ui = sized(view(&state), 720.0);
+    let newest = ui.find("line 199").expect("newest line").bounds();
+    let resume = ui.find("Resume").expect("resume button").bounds();
+    assert!(
+        newest.y + newest.height <= resume.y,
+        "{newest:?} sits above {resume:?}"
+    );
 }
 
 #[test]
@@ -223,7 +372,8 @@ fn clicking_a_line_focuses_the_log_and_presses_it() {
 
 #[test]
 fn keys_resolve_once_the_log_has_focus() {
-    let state = sample();
+    let mut state = sample();
+    let _ = state.update(Event::Press(1, Modifiers::empty()));
     let mut ui = sized(view(&state), 720.0);
     let _ = ui.simulate([press_key(Key::Character("f".into()), Modifiers::COMMAND)]);
     assert!(!has(&events(ui), "FocusSearch"), "not focused yet");
@@ -234,12 +384,16 @@ fn keys_resolve_once_the_log_has_focus() {
         press_key(Key::Character("f".into()), Modifiers::COMMAND),
         press_key(Key::Named(Named::End), Modifiers::empty()),
         press_key(Key::Named(Named::Space), Modifiers::empty()),
+        press_key(Key::Character("w".into()), Modifiers::empty()),
         press_key(Key::Character("l".into()), Modifiers::CTRL),
         press_key(Key::Character("c".into()), Modifiers::COMMAND),
     ]);
     let emitted = events(ui);
-    for expected in ["FocusSearch", "Last", "TogglePause", "Clear"] {
+    for expected in ["FocusSearch", "Last", "ToggleHighlighted", "Clear"] {
         assert!(has(&emitted, expected), "{expected} in {emitted:?}");
+    }
+    for unbound in ["TogglePause", "ToggleWrap"] {
+        assert!(!has(&emitted, unbound), "{unbound} in {emitted:?}");
     }
 }
 
