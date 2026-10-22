@@ -151,12 +151,7 @@ pub fn place(
     placement: Placement,
 ) -> Rectangle {
     let area = viewport.shrink(MARGIN);
-    let room = |side: Side| match side {
-        Side::Top => anchor.y - placement.gap - area.y,
-        Side::Bottom => area.y + area.height - (anchor.y + anchor.height + placement.gap),
-        Side::Left => anchor.x - placement.gap - area.x,
-        Side::Right => area.x + area.width - (anchor.x + anchor.width + placement.gap),
-    };
+    let room = |side: Side| room(anchor, area, placement.gap, side);
     let needed = |side: Side| {
         if side.is_vertical() {
             size.height
@@ -227,6 +222,41 @@ pub fn place(
     )
 }
 
+/// Space between the anchor and the edge of `area` on one side, less the gap.
+fn room(anchor: Rectangle, area: Rectangle, gap: f32, side: Side) -> f32 {
+    match side {
+        Side::Top => anchor.y - gap - area.y,
+        Side::Bottom => area.y + area.height - (anchor.y + anchor.height + gap),
+        Side::Left => anchor.x - gap - area.x,
+        Side::Right => area.x + area.width - (anchor.x + anchor.width + gap),
+    }
+}
+
+/// The tallest a panel may be with [`Anchored::fit_height`]: `None` when
+/// it fits above or below `anchor` as it is, or when neither side has
+/// [`MIN_FIT_HEIGHT`] to spare; otherwise the room on the roomier side.
+pub fn fitted_height(
+    anchor: Rectangle,
+    size: Size,
+    viewport: Rectangle,
+    placement: Placement,
+) -> Option<f32> {
+    if !placement.side.is_vertical() {
+        return None;
+    }
+    let area = viewport.shrink(MARGIN);
+    let above = room(anchor, area, placement.gap, Side::Top);
+    let below = room(anchor, area, placement.gap, Side::Bottom);
+    if above >= size.height || below >= size.height {
+        return None;
+    }
+    let best = above.max(below);
+    (best >= MIN_FIT_HEIGHT).then_some(best)
+}
+
+/// The least room [`fitted_height`] shrinks a panel into.
+pub const MIN_FIT_HEIGHT: f32 = 96.0;
+
 /// Keeps `value` within `low..=high`, preferring `low` when the range is empty.
 fn clamp(value: f32, low: f32, high: f32) -> f32 {
     value.min(high).max(low)
@@ -265,6 +295,7 @@ pub(crate) struct Behaviour<'a, Message> {
     pub(crate) placement: Placement,
     pub(crate) point: Option<Point>,
     pub(crate) match_width: bool,
+    pub(crate) fit_height: bool,
     pub(crate) on_dismiss: Option<Message>,
     pub(crate) dismiss_keys: Vec<Chord>,
     pub(crate) dismiss_on_anchor_press: bool,
@@ -286,6 +317,7 @@ impl<Message> Default for Behaviour<'_, Message> {
             placement: Placement::default(),
             point: None,
             match_width: false,
+            fit_height: false,
             on_dismiss: None,
             dismiss_keys: vec![Chord::named(Named::Escape)],
             dismiss_on_anchor_press: false,
@@ -345,6 +377,7 @@ impl<Message> std::fmt::Debug for Anchored<'_, Message> {
             .field("placement", &behaviour.placement)
             .field("point", &behaviour.point)
             .field("match_width", &behaviour.match_width)
+            .field("fit_height", &behaviour.fit_height)
             .field("dismissable", &behaviour.on_dismiss.is_some())
             .field("dismiss_keys", &behaviour.dismiss_keys)
             .field("pass_through", &behaviour.pass_through)
@@ -384,6 +417,14 @@ impl<'a, Message> Anchored<'a, Message> {
     /// field is.
     pub fn match_width(mut self, match_width: bool) -> Self {
         self.behaviour.match_width = match_width;
+        self
+    }
+
+    /// When the panel fits neither above nor below the anchor, limits its
+    /// height to the roomier side instead of shifting it over the anchor.
+    /// For content that scrolls, such as a long menu.
+    pub fn fit_height(mut self, fit: bool) -> Self {
+        self.behaviour.fit_height = fit;
         self
     }
 
@@ -785,17 +826,33 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, Renderer> for Floating<'_,
         let viewport = Rectangle::with_size(bounds);
         let room = viewport.shrink(MARGIN).size();
         let room = Size::new(room.width.max(0.0), room.height.max(0.0));
-        let limits = if self.behaviour.match_width {
-            let width = self.trigger.width.min(room.width);
-            layout::Limits::new(Size::new(width, 0.0), Size::new(width, room.height))
-        } else {
-            layout::Limits::new(Size::ZERO, room)
+        let match_width = self.behaviour.match_width;
+        let trigger_width = self.trigger.width;
+        let limits = |height: f32| {
+            if match_width {
+                let width = trigger_width.min(room.width);
+                layout::Limits::new(Size::new(width, 0.0), Size::new(width, height))
+            } else {
+                layout::Limits::new(Size::ZERO, Size::new(room.width, height))
+            }
         };
-        let node = self
-            .content
-            .as_widget_mut()
-            .layout(self.tree, renderer, &limits);
-        let panel = place(self.target, node.size(), viewport, self.behaviour.placement);
+        let placement = self.behaviour.placement;
+        let mut node =
+            self.content
+                .as_widget_mut()
+                .layout(self.tree, renderer, &limits(room.height));
+        let fitted = self
+            .behaviour
+            .fit_height
+            .then(|| fitted_height(self.target, node.size(), viewport, placement))
+            .flatten();
+        if let Some(height) = fitted {
+            node = self
+                .content
+                .as_widget_mut()
+                .layout(self.tree, renderer, &limits(height));
+        }
+        let panel = place(self.target, node.size(), viewport, placement);
         layout::Node::with_children(bounds, vec![node.move_to(panel.position())])
     }
 
@@ -1047,6 +1104,31 @@ mod tests {
             Placement::new(Side::Bottom, Align::Start),
         );
         assert_eq!(panel.y, MARGIN, "shifted up to fit, pinned at the margin");
+    }
+
+    #[test]
+    fn fitted_height_keeps_a_tall_panel_off_its_anchor() {
+        let below = Placement::new(Side::Bottom, Align::Start);
+        assert_eq!(fitted_height(anchor(), PANEL, VIEWPORT, below), None);
+        let tall = Size::new(60.0, 290.0);
+        let room_below = VIEWPORT.height - MARGIN - (140.0 + GAP);
+        assert_eq!(
+            fitted_height(anchor(), tall, VIEWPORT, below),
+            Some(room_below)
+        );
+        let panel = place(anchor(), Size::new(60.0, room_below), VIEWPORT, below);
+        assert_eq!(panel.y, 140.0 + GAP, "stays below the anchor");
+
+        let low = Rectangle::new(Point::new(150.0, 200.0), Size::new(100.0, 40.0));
+        let room_above = 200.0 - GAP - MARGIN;
+        assert_eq!(fitted_height(low, tall, VIEWPORT, below), Some(room_above));
+        let panel = place(low, Size::new(60.0, room_above), VIEWPORT, below);
+        assert_eq!(panel.y + panel.height, 200.0 - GAP, "flips above it");
+
+        let squeezed = Rectangle::new(Point::new(150.0, 100.0), Size::new(100.0, 120.0));
+        assert_eq!(fitted_height(squeezed, tall, VIEWPORT, below), None);
+        let beside = Placement::new(Side::Right, Align::Start);
+        assert_eq!(fitted_height(anchor(), tall, VIEWPORT, beside), None);
     }
 
     #[test]

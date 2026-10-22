@@ -492,7 +492,7 @@ crate::stories! {
     }
     DocumentTabsKeyboard => document_tabs::keyboard {
         id: "document-tabs/keyboard", component: "document-tabs", title: "Keyboard shortcuts",
-        description: "The default keymap with Alt chords added, since browsers keep Ctrl+Tab, Ctrl+W and Ctrl+PageDown for themselves. Releasing every modifier ends a walk through recent tabs.",
+        description: "The default keymap with extra chords that reach a web page, since browsers keep Ctrl+Tab, Ctrl+W and Ctrl+PageDown for themselves. Closing a modified tab asks first. Releasing every modifier ends a walk through recent tabs.",
         file: "document_tabs/keyboard.rs", height: 280, subscription: true,
     }
     AccordionSingle => accordion::single {

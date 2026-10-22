@@ -1,9 +1,16 @@
 #![cfg(feature = "document-tabs")]
 
+use iced::advanced::layout::{self, Layout};
+use iced::advanced::renderer;
+use iced::advanced::widget::{Operation, Tree, Widget, tree};
+use iced::advanced::{Clipboard, Shell};
 use iced::widget::container;
-use iced::{Element, Event as Input, Point, Rectangle, mouse};
+use iced::{
+    Element, Event as Input, Length, Point, Rectangle, Renderer, Size, Theme, keyboard, mouse,
+};
 use iced_cube::navigation::document_tabs::{Event, MenuItem, State, document, document_tabs};
 use iced_cube::overlay::{context_menu, dropdown_menu};
+use iced_test::selector::Candidate;
 use iced_test::simulator;
 use iced_test::simulator::Simulator;
 
@@ -281,6 +288,254 @@ fn the_wheel_scrolls_overflowing_tabs() {
     let events = messages(ui);
     assert_eq!(events.len(), 1);
     assert_ne!(events, [Event::Activate(1)], "scrolled past the first tab");
+}
+
+/// Lays its content out at `from` pixels wide until `r` is pressed, then at
+/// `to`, as a window resize would.
+struct Resizer<'a> {
+    content: Element<'a, Message>,
+    from: f32,
+    to: f32,
+}
+
+impl Widget<Message, Theme, Renderer> for Resizer<'_> {
+    fn size(&self) -> Size<Length> {
+        Size::new(Length::Shrink, Length::Shrink)
+    }
+
+    fn tag(&self) -> tree::Tag {
+        tree::Tag::of::<bool>()
+    }
+
+    fn state(&self) -> tree::State {
+        tree::State::new(false)
+    }
+
+    fn children(&self) -> Vec<Tree> {
+        vec![Tree::new(&self.content)]
+    }
+
+    fn diff(&self, tree: &mut Tree) {
+        tree.diff_children(std::slice::from_ref(&self.content));
+    }
+
+    fn layout(
+        &mut self,
+        tree: &mut Tree,
+        renderer: &Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
+        let width = if *tree.state.downcast_ref::<bool>() {
+            self.to
+        } else {
+            self.from
+        };
+        let limits = layout::Limits::new(Size::ZERO, Size::new(width, limits.max().height));
+        let node = self
+            .content
+            .as_widget_mut()
+            .layout(&mut tree.children[0], renderer, &limits);
+        layout::Node::with_children(node.size(), vec![node])
+    }
+
+    fn draw(
+        &self,
+        tree: &Tree,
+        renderer: &mut Renderer,
+        theme: &Theme,
+        style: &renderer::Style,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+    ) {
+        if let Some(child) = layout.children().next() {
+            self.content.as_widget().draw(
+                &tree.children[0],
+                renderer,
+                theme,
+                style,
+                child,
+                cursor,
+                viewport,
+            );
+        }
+    }
+
+    fn operate(
+        &mut self,
+        tree: &mut Tree,
+        layout: Layout<'_>,
+        renderer: &Renderer,
+        operation: &mut dyn Operation,
+    ) {
+        if let Some(child) = layout.children().next() {
+            self.content
+                .as_widget_mut()
+                .operate(&mut tree.children[0], child, renderer, operation);
+        }
+    }
+
+    fn update(
+        &mut self,
+        tree: &mut Tree,
+        event: &Input,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        renderer: &Renderer,
+        clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, Message>,
+        viewport: &Rectangle,
+    ) {
+        if let Input::Keyboard(keyboard::Event::KeyPressed { key, .. }) = event
+            && *key == keyboard::Key::Character("r".into())
+        {
+            *tree.state.downcast_mut::<bool>() = true;
+            shell.invalidate_layout();
+            return;
+        }
+        if let Some(child) = layout.children().next() {
+            self.content.as_widget_mut().update(
+                &mut tree.children[0],
+                event,
+                child,
+                cursor,
+                renderer,
+                clipboard,
+                shell,
+                viewport,
+            );
+        }
+    }
+}
+
+/// Asserts the active `file-6.rs` tab is shown in full before the menu
+/// button at the end of a strip `width` pixels wide.
+fn assert_last_tab_in_view(ui: &mut Simulator<'_, Message>, width: f32) {
+    let found = ui
+        .find("file-6.rs")
+        .map(|target| (target.bounds(), target.visible_bounds()));
+    let Ok((bounds, Some(shown))) = found else {
+        panic!("the active label is not visible: {found:?}");
+    };
+    assert_eq!(shown.width, bounds.width, "shown in full");
+    assert!(shown.x > 0.0, "starts at {}", shown.x);
+    assert!(
+        shown.x + shown.width <= width - 32.0,
+        "ends at {}",
+        shown.x + shown.width
+    );
+}
+
+#[test]
+fn the_active_tab_stays_in_view_when_the_strip_narrows() {
+    let state = many();
+    let resizer = Resizer {
+        content: document_tabs(&state).on_event(Message::Tabs).into(),
+        from: 1000.0,
+        to: 260.0,
+    };
+    let mut ui = simulator(Element::new(resizer));
+    assert!(ui.find("file-1.rs").is_ok());
+    let _ = ui.tap_key(keyboard::Key::Character("r".into()));
+    assert_last_tab_in_view(&mut ui, 260.0);
+}
+
+#[test]
+fn the_active_tab_stays_in_view_when_the_strip_widens() {
+    let state = many();
+    let resizer = Resizer {
+        content: document_tabs(&state).on_event(Message::Tabs).into(),
+        from: 200.0,
+        to: 300.0,
+    };
+    let mut ui = simulator(Element::new(resizer));
+    let _ = ui.tap_key(keyboard::Key::Character("r".into()));
+    assert_last_tab_in_view(&mut ui, 300.0);
+}
+
+const CHAPTERS: [&str; 12] = [
+    "Introduction to the project.md",
+    "Getting started.md",
+    "Installation.md",
+    "Configuration.md",
+    "Command line.md",
+    "Plugins.md",
+    "Theming.md",
+    "Keyboard shortcuts.md",
+    "Accessibility.md",
+    "Deployment.md",
+    "Troubleshooting.md",
+    "Release notes.md",
+];
+
+fn chapters() -> State<u8> {
+    let documents = (0u8..)
+        .zip(CHAPTERS)
+        .map(|(id, title)| document(id, title).modified(id == 4));
+    State::new(documents).with_active(10)
+}
+
+/// Where the row for `label` sits in the open list of every tab, below the
+/// strip, and the part of it that is shown.
+fn row_bounds(ui: &mut Simulator<'_, Message>, label: &str) -> (Rectangle, Option<Rectangle>) {
+    let selector = move |candidate: Candidate<'_>| match candidate {
+        Candidate::Text {
+            content,
+            bounds,
+            visible_bounds,
+            ..
+        } if content == label && bounds.y > 36.0 => Some((bounds, visible_bounds)),
+        _ => None,
+    };
+    ui.find(selector).unwrap_or_default()
+}
+
+fn small_window<'a>(state: &'a State<u8>) -> Simulator<'a, Message> {
+    let element: Element<'_, Message> = container(document_tabs(state).on_event(Message::Tabs))
+        .width(340)
+        .into();
+    Simulator::with_size(iced::Settings::default(), Size::new(360.0, 200.0), element)
+}
+
+#[test]
+fn the_list_of_every_tab_opens_below_its_button_on_one_line_per_tab() {
+    let mut state = chapters();
+    let _ = state.update(Event::Overflow(dropdown_menu::Event::Toggle));
+    let mut ui = small_window(&state);
+    let (first, _) = row_bounds(&mut ui, CHAPTERS[0]);
+    assert!(first.y >= 36.0 + 4.0, "below the strip, at {}", first.y);
+    for title in CHAPTERS {
+        let (bounds, _) = row_bounds(&mut ui, title);
+        assert!(bounds.height < 24.0, "{title} wraps: {bounds:?}");
+        assert!(
+            bounds.x + bounds.width <= 360.0,
+            "{title} runs off: {bounds:?}"
+        );
+    }
+    let (modified, _) = row_bounds(&mut ui, "Modified");
+    assert!(modified.height < 24.0);
+}
+
+#[test]
+fn the_list_of_every_tab_scrolls_to_the_active_one() {
+    let mut state = chapters();
+    let _ = state.update(Event::Overflow(dropdown_menu::Event::Toggle));
+    let mut ui = small_window(&state);
+    let (active, shown) = row_bounds(&mut ui, CHAPTERS[10]);
+    let shown = shown.expect("the active row is visible");
+    assert_eq!(shown.size(), active.size(), "shown in full");
+    assert!(shown.y + shown.height <= 200.0, "inside the window");
+    let (_, first) = row_bounds(&mut ui, CHAPTERS[0]);
+    assert_eq!(first, None, "the start of the list scrolled away");
+}
+
+#[test]
+fn the_keyboard_tab_menu_opens_below_the_tab_in_a_short_window() {
+    let mut state = chapters();
+    let _ = state.update(Event::Menu(context_menu::Event::OpenFromKeyboard(10)));
+    let mut ui = small_window(&state);
+    let (close, _) = row_bounds(&mut ui, "Close");
+    assert!(close.y >= 36.0, "below the strip, at {}", close.y);
 }
 
 #[test]

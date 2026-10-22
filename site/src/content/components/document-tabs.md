@@ -33,8 +33,8 @@ api:
     description: "Shows a new tab button after the last tab, and lets a double click on the empty strip ask for a new document."
   - name: ".max_label_width(f32)"
     description: "The widest a label grows before it ends in an ellipsis. Defaults to 200 pixels."
-  - name: ".menu_keymap(keymap) / .overflow_keymap(keymap)"
-    description: "Replaces the default keymap of the open tab menu or of the list of every tab."
+  - name: ".context_menu_keymap(keymap) / .overflow_keymap(keymap)"
+    description: "Replaces the default keymap of the open tab context menu or of the list of every tab."
   - name: "document_tabs::cycle_end()"
     description: "A subscription that reports when every modifier is released, which ends a walk through recent documents. Map it with Event::from."
   - name: "document_tabs::default_keymap() / action.event(&state)"
@@ -49,6 +49,8 @@ Closing never happens by itself. The close button, a middle click, `Ctrl+W` and 
 
 Each tab reserves a slot after its label. The active tab shows its close button there, other tabs show it on hover, and a document with unsaved changes shows a dot that turns into the close button under the pointer, so the label never moves. Pinned tabs sit before the others, show only their icon (or a short label when they have none), have no close button, and are left alone by Close others, Close to the right, Close saved and Close all. Dragging a tab moves it, with a line marking where it will land, and a pinned tab only moves among pinned tabs.
 
-When the tabs do not fit, the strip scrolls sideways with the wheel or a finger, keeps the active tab in view, and shows a button at its end that lists every tab. Labels stay on one line and end in an ellipsis past their maximum width.
+When the tabs do not fit, the strip scrolls sideways with the wheel or a finger and shows a button at its end that lists every tab. The strip keeps the active tab in view when it first appears, when the active tab changes and when the window is resized. The list opens below its button, marks the active tab and scrolls to it. Labels stay on one line, in the strip and in the list, and end in an ellipsis when they do not fit. A tab's context menu opens below the tab, whether from a right-click, a long press or the keyboard, and scrolls when the window is too short for it.
 
-`Ctrl+Tab` walks the documents in the order they were last used, as editors do: each press goes one further back until Ctrl is released, which the app learns from `document_tabs::cycle_end()`. `Ctrl+PageDown` and `Ctrl+PageUp` move through the strip in order. The segmented [tabs](../tabs/) also bind `Ctrl+Tab`, so an app showing both should unbind it from one of them. Browsers keep these chords for their own tabs, which is why the keyboard example adds Alt chords.
+`Ctrl+Tab` walks the documents in the order they were last used, as editors do: each press goes one further back until Ctrl is released, which the app learns from `document_tabs::cycle_end()`. `Ctrl+PageDown` and `Ctrl+PageUp` move through the strip in order. The segmented [tabs](../tabs/) also bind `Ctrl+Tab` and `Ctrl+Shift+Tab`, so an app showing both should unbind them from one of them, usually the segmented tabs. Browsers keep these chords for their own tabs, which is why the keyboard example adds chords such as `Ctrl+]` that reach the page.
+
+`Action::OpenMenu`, which opens the active tab's context menu, has no default chord. The strip never has keyboard focus, so an app-wide `Shift+F10` would also open any other [context menu](../context-menu/) on screen. Bind it with `default_keymap().bind(Chord::named(Named::F10).shift(), Action::OpenMenu)` when the tab strip is the only context menu, or resolve it only while the editor has focus. See [Keyboard shortcuts](../../keyboard/) for how components share keys.

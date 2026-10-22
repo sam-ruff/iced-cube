@@ -42,4 +42,6 @@ The app owns a `tabs::State` and routes events into it, then renders the view fo
 
 `Next` and `Previous` wrap round at the ends and skip disabled tabs. The widget does not listen to the keyboard itself: the app subscribes with `keys::subscription()` and resolves each key press through a keymap, as the keyboard example does. The arrow keys, Home and End are bound app-wide, so an app with text inputs or other arrow-driven controls may want to unbind them and keep `Ctrl+Tab`.
 
+[Document tabs](../document-tabs/) also bind `Ctrl+Tab` and `Ctrl+Shift+Tab`. When both are on screen, unbind the chords from one of the keymaps, usually this one, with `tabs::default_keymap().unbind(&Chord::named(Named::Tab).ctrl()).unbind(&Chord::named(Named::Tab).ctrl().shift())`. See [Keyboard shortcuts](../../keyboard/) for other shared keys.
+
 Use the underline variant for page sections and the pills variant for a compact switch between views of the same data.

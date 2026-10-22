@@ -43,13 +43,15 @@ use iced::{
 use crate::data::ellipsis::ellipsis;
 use crate::icon::{Glyph, opacity, themed};
 use crate::keys::{self, Chord, Keymap};
-use crate::overlay::anchored::Align;
-use crate::overlay::context_menu;
+use crate::overlay::anchored::{Align, Placement, Side, anchored};
+use crate::overlay::context_menu::{self, KEYBOARD_GAP};
 use crate::overlay::dropdown_menu::{self, Entry, item, radio_item, separator};
+use crate::overlay::menu::{self, RowStatus};
+use crate::overlay::scrolling::{fitted, scrolling};
 use crate::overlay::tooltip;
 use crate::primitives::button::Size as ButtonSize;
 use crate::primitives::icon_button::icon_button;
-use crate::theme::{Tokens, fade, mix, radius, space};
+use crate::theme::{Tokens, fade, mix, radius, space, text_size};
 
 /// Height of the strip and its tabs.
 pub const HEIGHT: f32 = 36.0;
@@ -59,6 +61,9 @@ pub const MAX_LABEL_WIDTH: f32 = 200.0;
 
 /// Widest label of a pinned tab without an icon.
 pub const PINNED_LABEL_WIDTH: f32 = 80.0;
+
+/// Widest the list of every tab grows before its labels end in an ellipsis.
+pub const OVERFLOW_WIDTH: f32 = 320.0;
 
 /// How far, in logical pixels, a pressed tab moves before it drags.
 pub const DRAG_THRESHOLD: f32 = 4.0;
@@ -480,6 +485,14 @@ impl<Id: Copy + PartialEq> State<Id> {
     }
 
     fn menu_event(&mut self, event: context_menu::Event<MenuItem, Id>) -> Option<Output<Id>> {
+        let event = match event {
+            // The menu opens below the tab, not at the pointer, so it never
+            // covers the tab's label.
+            context_menu::Event::Open(target, _) => {
+                context_menu::Event::Open(target, Point::new(0.0, HEIGHT + KEYBOARD_GAP))
+            }
+            event => event,
+        };
         if let context_menu::Event::Open(target, _)
         | context_menu::Event::OpenFromKeyboard(target) = event
         {
@@ -711,15 +724,29 @@ impl keys::Action for Action {
 /// | `Ctrl+N` | [`Action::New`] |
 /// | `Ctrl+1` to `Ctrl+8` | [`Action::Tab`] |
 /// | `Ctrl+9` | [`Action::LastTab`] |
-/// | `Shift+F10`, `Menu` | [`Action::OpenMenu`] |
 ///
 /// `Ctrl+Tab` walks the documents in most-recently-used order, and
 /// `Ctrl+PageDown` and `Ctrl+PageUp` in strip order. Ctrl+W, Ctrl+N and the
 /// digits use Cmd on macOS. Subscribe to [`cycle_end`] so a walk ends when
 /// Ctrl is released.
 ///
-/// The segmented tabs also bind `Ctrl+Tab`. An app showing both should
-/// unbind it from one of them.
+/// [`Action::OpenMenu`] has no default chord. The strip has no keyboard
+/// focus, so `Shift+F10` or `Menu` bound app-wide would also open any
+/// other context menu on screen. Bind it when the tab strip is the only
+/// one, or only while the editor has focus:
+///
+/// ```
+/// use iced::keyboard::key::Named;
+/// use iced_cube::keys::Chord;
+/// use iced_cube::navigation::document_tabs::{Action, default_keymap};
+///
+/// let keymap = default_keymap()
+///     .bind(Chord::named(Named::F10).shift(), Action::OpenMenu)
+///     .bind(Chord::named(Named::ContextMenu), Action::OpenMenu);
+/// ```
+///
+/// The segmented tabs also bind `Ctrl+Tab` and `Ctrl+Shift+Tab`. An app
+/// showing both should unbind them from one of them.
 pub fn default_keymap() -> Keymap<Action> {
     let keymap = Keymap::new()
         .bind(Chord::named(Named::Tab).ctrl(), Action::RecentNext)
@@ -741,10 +768,7 @@ pub fn default_keymap() -> Keymap<Action> {
         .fold(keymap, |keymap, (digit, position)| {
             keymap.bind(Chord::character(digit).command(), Action::Tab(position))
         });
-    keymap
-        .bind(Chord::character('9').command(), Action::LastTab)
-        .bind(Chord::named(Named::F10).shift(), Action::OpenMenu)
-        .bind(Chord::named(Named::ContextMenu), Action::OpenMenu)
+    keymap.bind(Chord::character('9').command(), Action::LastTab)
 }
 
 type OnEvent<'a, Id, Message> = dyn Fn(Event<Id>) -> Message + 'a;
@@ -754,7 +778,7 @@ pub struct DocumentTabs<'a, Id, Message> {
     state: &'a State<Id>,
     new_tab: bool,
     max_label_width: f32,
-    menu_keymap: Keymap<context_menu::Action>,
+    context_menu_keymap: Keymap<context_menu::Action>,
     overflow_keymap: Keymap<dropdown_menu::Action>,
     on_event: Option<Box<OnEvent<'a, Id, Message>>>,
 }
@@ -766,7 +790,7 @@ pub fn document_tabs<Id, Message>(state: &State<Id>) -> DocumentTabs<'_, Id, Mes
         state,
         new_tab: false,
         max_label_width: MAX_LABEL_WIDTH,
-        menu_keymap: context_menu::default_keymap(),
+        context_menu_keymap: context_menu::default_keymap(),
         overflow_keymap: dropdown_menu::default_keymap(),
         on_event: None,
     }
@@ -798,8 +822,8 @@ impl<'a, Id, Message> DocumentTabs<'a, Id, Message> {
     }
 
     /// Replaces the default keymap of the open tab context menu.
-    pub fn menu_keymap(mut self, keymap: Keymap<context_menu::Action>) -> Self {
-        self.menu_keymap = keymap;
+    pub fn context_menu_keymap(mut self, keymap: Keymap<context_menu::Action>) -> Self {
+        self.context_menu_keymap = keymap;
         self
     }
 
@@ -837,7 +861,7 @@ where
             state,
             new_tab,
             max_label_width,
-            menu_keymap,
+            context_menu_keymap,
             overflow_keymap,
             on_event,
         } = tabs;
@@ -867,7 +891,7 @@ where
                 };
                 let top = tab_view(document, hovered, max_label_width, on_close, true);
                 context_menu::keyed(state.menu(), document.id, widget::hover(base, top))
-                    .keymap(menu_keymap.clone())
+                    .keymap(context_menu_keymap.clone())
                     .on_event(move |event| on_event(Event::Menu(event)))
                     .into()
             })
@@ -884,22 +908,30 @@ where
             widget::space().into()
         };
 
+        let open = state.overflow().is_open();
         let toggle = on_event
             .as_ref()
             .map(|on_event| on_event(Event::Overflow(dropdown_menu::Event::Toggle)));
-        let mut overflow = dropdown_menu::dropdown_menu(
-            state.overflow(),
-            icon_button(crate::lucide!(ChevronDown))
-                .label("All tabs")
-                .tooltip(None)
-                .size(ButtonSize::Sm)
-                .pressed(state.overflow().is_open())
-                .on_press_maybe(toggle),
-        )
-        .align(Align::End)
-        .keymap(overflow_keymap);
-        if let Some(on_event) = on_event.clone() {
-            overflow = overflow.on_event(move |event| on_event(Event::Overflow(event)));
+        let trigger = icon_button(crate::lucide!(ChevronDown))
+            .label("All tabs")
+            .tooltip(None)
+            .size(ButtonSize::Sm)
+            .pressed(open)
+            .on_press_maybe(toggle);
+        let mut overflow = anchored(trigger)
+            .content(open.then(|| overflow_panel(state, on_event.as_deref())))
+            .placement(Placement::new(Side::Bottom, Align::End))
+            .fit_height(true)
+            .dismiss_keys([]);
+        if let Some(on_event) = on_event.clone().filter(|_| open) {
+            overflow = overflow
+                .on_dismiss(on_event(Event::Overflow(dropdown_menu::Event::Close)))
+                .on_key(move |key| {
+                    state
+                        .overflow()
+                        .key_event(&overflow_keymap, key)
+                        .map(|event| on_event(Event::Overflow(event)))
+                });
         }
 
         let ids: Vec<Id> = state.documents.iter().map(|document| document.id).collect();
@@ -972,6 +1004,105 @@ where
         .align_y(Vertical::Center)
         .style(move |theme| tab_style(&Tokens::of(theme), active, hovered))
         .into()
+}
+
+/// The open list of every tab, one row per document with the active one
+/// checked, scrolled to show the highlighted row or else the active one.
+fn overflow_panel<'a, Id, Message>(
+    state: &'a State<Id>,
+    on_event: Option<&OnEvent<'a, Id, Message>>,
+) -> Element<'a, Message>
+where
+    Id: Copy + PartialEq + 'a,
+    Message: Clone + 'a,
+{
+    let highlighted = state.overflow().highlighted();
+    let rows = state.documents.iter().map(|document| {
+        let status = match (on_event.is_some(), highlighted == Some(document.id)) {
+            (false, _) => RowStatus::Disabled,
+            (true, true) => RowStatus::Highlighted,
+            (true, false) => RowStatus::Idle,
+        };
+        overflow_row(document, state.is_active(document.id), status, on_event)
+    });
+    let reveal = highlighted
+        .and_then(|id| state.index_of(id))
+        .or_else(|| state.active_index());
+    menu::surface(scrolling(fitted(rows, OVERFLOW_WIDTH), reveal)).into()
+}
+
+/// One row of the list of every tab. The label ends in an ellipsis rather
+/// than wrapping.
+fn overflow_row<'a, Id, Message>(
+    document: &'a Document<Id>,
+    active: bool,
+    status: RowStatus,
+    on_event: Option<&OnEvent<'a, Id, Message>>,
+) -> Element<'a, Message>
+where
+    Id: Copy + 'a,
+    Message: Clone + 'a,
+{
+    let colours = move |theme: &Theme| menu::row_style(&Tokens::of(theme), status, false);
+    let opacity = opacity(status != RowStatus::Disabled);
+
+    let mark: Element<'a, Message> = if active {
+        themed(
+            crate::lucide!(Check),
+            menu::ICON_SIZE,
+            opacity,
+            move |theme| colours(theme).text,
+        )
+        .into()
+    } else {
+        widget::space().into()
+    };
+    let mut content = row![
+        container(mark)
+            .center_x(menu::ICON_SIZE)
+            .center_y(menu::ICON_SIZE)
+    ]
+    .spacing(space::SM)
+    .align_y(Alignment::Center);
+    if let Some(glyph) = document.icon {
+        content = content.push(themed(glyph, menu::ICON_SIZE, opacity, move |theme| {
+            colours(theme).icon
+        }));
+    }
+    content = content.push(
+        ellipsis(document.label.as_str())
+            .width(Length::Fill)
+            .colour(move |theme| colours(theme).text),
+    );
+    if document.modified {
+        content = content.push(
+            widget::text("Modified")
+                .size(text_size::XS)
+                .wrapping(widget::text::Wrapping::None)
+                .style(move |theme| widget::text::Style {
+                    color: Some(colours(theme).hint),
+                }),
+        );
+    }
+
+    let body = container(content)
+        .padding(menu::ROW_PADDING)
+        .width(Length::Fill)
+        .style(move |theme| menu::row_container_style(colours(theme)));
+    let Some(on_event) = on_event.filter(|_| status != RowStatus::Disabled) else {
+        return menu::inset(body);
+    };
+    let id = document.id;
+    menu::inset(
+        widget::mouse_area(body)
+            .on_enter(on_event(Event::Overflow(dropdown_menu::Event::Highlight(
+                id,
+            ))))
+            .on_press(on_event(Event::Overflow(dropdown_menu::Event::Activate(
+                id,
+            ))))
+            .interaction(mouse::Interaction::Pointer),
+    )
 }
 
 /// The trailing slot of a tab: the close button on the active or hovered
@@ -1159,6 +1290,8 @@ struct Memory {
     overflowing: bool,
     /// The active index and tab count the strip last scrolled into view.
     revealed: Option<(Option<usize>, usize)>,
+    /// The content and viewport widths the strip last scrolled for.
+    measured: Option<(f32, f32)>,
     press: Option<Press>,
     last_click: Option<mouse::Click>,
     /// A finger panning the strip: which one, and where it was last.
@@ -1203,6 +1336,32 @@ impl Memory {
         }
         if left < self.offset {
             self.offset = left;
+        }
+        self.offset = self.offset.clamp(0.0, self.max_offset());
+    }
+
+    /// Keeps the active tab, spanning `active`, in view after a layout.
+    ///
+    /// When the active tab or the tab count changes, the strip scrolls the
+    /// least distance. When only the sizes change, such as on the first
+    /// layout, a resize or once fonts load, the offset is worked out afresh
+    /// from the start of the strip, so it never depends on earlier sizes.
+    fn follow(
+        &mut self,
+        key: (Option<usize>, usize),
+        widths: (f32, f32),
+        active: Option<(f32, f32)>,
+    ) {
+        (self.content_width, self.viewport_width) = widths;
+        let moved = self.revealed != Some(key);
+        let resized = self.measured != Some(widths);
+        self.revealed = Some(key);
+        self.measured = Some(widths);
+        if !moved && resized {
+            self.offset = 0.0;
+        }
+        if let Some((left, width)) = active.filter(|_| moved || resized) {
+            self.reveal(left, left + width);
         }
         self.offset = self.offset.clamp(0.0, self.max_offset());
     }
@@ -1338,17 +1497,12 @@ impl<Message> Widget<Message, Theme, Renderer> for Strip<'_, Message> {
             .collect();
 
         let memory = tree.state.downcast_mut::<Memory>();
-        memory.content_width = content_size.width;
-        memory.viewport_width = viewport_width;
         memory.overflowing = overflowing;
-        let key = (self.active, self.count);
-        if memory.revealed != Some(key) {
-            memory.revealed = Some(key);
-            if let Some(&(left, tab_width)) = self.active.and_then(|index| spans.get(index)) {
-                memory.reveal(left, left + tab_width);
-            }
-        }
-        memory.offset = memory.offset.clamp(0.0, memory.max_offset());
+        memory.follow(
+            (self.active, self.count),
+            (content_size.width, viewport_width),
+            self.active.and_then(|index| spans.get(index).copied()),
+        );
 
         let overflow_x = width - overflow_size.width;
         layout::Node::with_children(
@@ -2237,15 +2391,37 @@ mod tests {
         assert_eq!(press(&keymap, "Mod+1"), Some(Action::Tab(1)));
         assert_eq!(press(&keymap, "Mod+8"), Some(Action::Tab(8)));
         assert_eq!(press(&keymap, "Mod+9"), Some(Action::LastTab));
-        assert_eq!(press(&keymap, "Shift+F10"), Some(Action::OpenMenu));
-        assert_eq!(press(&keymap, "Menu"), Some(Action::OpenMenu));
         assert_eq!(press(&keymap, "Tab"), None);
         assert_eq!(press(&keymap, "PageDown"), None);
         for action in <Action as keys::Action>::ALL {
-            assert!(!keymap.chords(action).is_empty(), "{action:?}");
+            let unbound = *action == Action::OpenMenu;
+            assert_eq!(keymap.chords(action).is_empty(), unbound, "{action:?}");
             assert!(keys::Action::description(*action).ends_with('.'));
         }
         assert_eq!(Keymap::<Action>::defaults(), keymap);
+    }
+
+    #[test]
+    fn opening_the_tab_menu_is_left_to_context_menus_by_default() {
+        let keymap = default_keymap();
+        for chord in ["Shift+F10", "Menu"] {
+            assert_eq!(press(&keymap, chord), None, "{chord}");
+            let context = context_menu::default_keymap();
+            assert_eq!(
+                press_menu(&context, chord),
+                Some(context_menu::Action::Open)
+            );
+        }
+        let bound = keymap.bind("Shift+F10".parse().unwrap(), Action::OpenMenu);
+        assert_eq!(press(&bound, "Shift+F10"), Some(Action::OpenMenu));
+    }
+
+    fn press_menu(
+        keymap: &Keymap<context_menu::Action>,
+        chord: &str,
+    ) -> Option<context_menu::Action> {
+        let chord: Chord = chord.parse().unwrap();
+        keymap.resolve(chord.key(), chord.modifiers())
     }
 
     #[test]
@@ -2347,6 +2523,53 @@ mod tests {
         assert_eq!(memory.offset, 0.0);
     }
 
+    /// The offset after laying the strip out at each viewport width in
+    /// turn, with the active tab at 450 to 550 of 600 pixels of tabs.
+    fn offset_after(widths: &[f32]) -> f32 {
+        let mut memory = Memory::default();
+        for width in widths {
+            memory.follow((Some(4), 6), (600.0, *width), Some((450.0, 100.0)));
+        }
+        memory.offset
+    }
+
+    #[test]
+    fn the_first_offset_does_not_depend_on_earlier_sizes() {
+        assert_eq!(offset_after(&[300.0]), 250.0, "active tab ends at the edge");
+        assert_eq!(offset_after(&[1000.0, 300.0]), 250.0);
+        assert_eq!(offset_after(&[0.0, 300.0]), 250.0);
+        assert_eq!(offset_after(&[200.0, 300.0]), 250.0);
+        assert_eq!(offset_after(&[200.0, 300.0, 300.0]), 250.0);
+    }
+
+    #[test]
+    fn a_new_active_tab_scrolls_the_least_distance_and_keeps_wheel_scrolling() {
+        let mut memory = Memory::default();
+        memory.follow((Some(4), 6), (600.0, 300.0), Some((450.0, 100.0)));
+        memory.follow((Some(3), 6), (600.0, 300.0), Some((350.0, 100.0)));
+        assert_eq!(memory.offset, 250.0, "already in view");
+        memory.follow((Some(0), 6), (600.0, 300.0), Some((0.0, 100.0)));
+        assert_eq!(memory.offset, 0.0);
+        let _ = memory.scroll_by(120.0);
+        memory.follow((Some(0), 6), (600.0, 300.0), Some((0.0, 100.0)));
+        assert_eq!(memory.offset, 120.0, "a relayout leaves the wheel offset");
+    }
+
+    #[test]
+    fn pointer_opens_place_the_menu_below_the_tab() {
+        let mut state = state();
+        let _ = state.update(Event::Menu(context_menu::Event::Open(
+            1,
+            Point::new(40.0, 12.0),
+        )));
+        assert!(state.menu().is_open_on(&1));
+        assert_eq!(
+            state.menu().position(),
+            Some(Point::new(0.0, HEIGHT + KEYBOARD_GAP))
+        );
+        assert_eq!(state.menu().menu().highlighted(), None);
+    }
+
     #[test]
     fn active_tab_joins_the_page_and_others_sit_on_the_strip() {
         for theme in [light(), dark()] {
@@ -2427,17 +2650,17 @@ mod tests {
         let tabs: DocumentTabs<'_, u8, ()> = document_tabs(&state);
         assert!(!tabs.new_tab);
         assert_eq!(tabs.max_label_width, MAX_LABEL_WIDTH);
-        assert_eq!(tabs.menu_keymap, context_menu::default_keymap());
+        assert_eq!(tabs.context_menu_keymap, context_menu::default_keymap());
         assert!(!tabs.is_enabled());
         let tabs: DocumentTabs<'_, u8, ()> = document_tabs(&state)
             .new_tab(true)
             .max_label_width(120.0)
-            .menu_keymap(Keymap::new())
+            .context_menu_keymap(Keymap::new())
             .overflow_keymap(Keymap::new())
             .on_event(|_| ());
         assert!(tabs.new_tab);
         assert_eq!(tabs.max_label_width, 120.0);
-        assert!(tabs.menu_keymap.is_empty());
+        assert!(tabs.context_menu_keymap.is_empty());
         assert!(tabs.overflow_keymap.is_empty());
         assert!(tabs.is_enabled());
     }
