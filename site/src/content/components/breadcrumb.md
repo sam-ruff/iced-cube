@@ -26,6 +26,10 @@ api:
     description: "Shows at most n crumbs: the first and the last n - 1, with an ellipsis for the rest. n is at least 2."
   - name: ".on_expand(message)"
     description: "Makes the ellipsis a button that sends the message, such as one that shows the whole trail."
+  - name: ".collapse_to_fit(bool)"
+    description: "Whether a trail too wide for one line hides more of its middle until it fits. Defaults to true. Turn it off to show every crumb, wrapping onto more lines."
+  - name: "breadcrumb::fit_limits(len, max)"
+    description: "The crumb limits a trail tries, longest first, when collapsing to fit."
   - name: "breadcrumb::slots(len, max)"
     description: "The crumbs and ellipsis a trail of len shows for a limit, for custom layouts."
   - name: "breadcrumb::default_keymap()"
@@ -36,6 +40,6 @@ api:
 
 The app holds the path and builds the trail from it on every view, giving each level above the current one a message that opens it. The breadcrumb only draws the trail, so the levels can be folders, settings sections or records.
 
-On a narrow screen the trail wraps onto a second line rather than squeezing its labels. For deep hierarchies, `.max_items` keeps the root and the levels nearest the current view, which are the ones people go back to most, and `.on_expand` lets them see the rest.
+On a narrow screen the trail stays on one line by hiding more of its middle behind the ellipsis, down to the root and the current view, and only wraps if even that does not fit. Labels are never squeezed. Once someone expands the trail, `.collapse_to_fit(false)` shows every crumb and lets it wrap instead. For deep hierarchies, `.max_items` keeps the root and the levels nearest the current view, which are the ones people go back to most, and `.on_expand` lets them see the rest.
 
 The keymap's actions return an index rather than an event, because the app owns the path: `action.target(len)` says which crumb to open, as the keyboard example shows.

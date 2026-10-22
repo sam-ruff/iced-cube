@@ -29,6 +29,8 @@
 pub mod application;
 pub mod data;
 pub mod feedback;
+#[cfg(feature = "breadcrumb")]
+mod fit;
 pub mod forms;
 pub mod icon;
 #[cfg(feature = "slider")]

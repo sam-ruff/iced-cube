@@ -4,7 +4,8 @@
 //! The last crumb is the current view and never responds to clicks. Crumbs
 //! before it are links when they have a message. A long trail collapses its
 //! middle into an ellipsis with [`max_items`](Breadcrumb::max_items); see
-//! [`slots`].
+//! [`slots`]. A trail too wide for one line hides more of its middle until
+//! it fits, unless [`collapse_to_fit`](Breadcrumb::collapse_to_fit) is off.
 //!
 //! Keyboard shortcuts resolve through a [`Keymap`] of [`Action`]s; see
 //! [`default_keymap`] and [`crate::keys`].
@@ -13,6 +14,7 @@ use iced::keyboard::key::Named;
 use iced::widget::{self, button::Status, container, row, text};
 use iced::{Alignment, Background, Border, Color, Element, Length, Padding, Shadow, Theme};
 
+use crate::fit::first_fit;
 use crate::icon::{Glyph, themed};
 use crate::keys::{self, Chord, Keymap};
 use crate::lucide;
@@ -104,6 +106,7 @@ pub struct Breadcrumb<'a, Message> {
     separator: Separator,
     max_items: Option<usize>,
     on_expand: Option<Message>,
+    collapse_to_fit: bool,
 }
 
 /// Creates a trail from the root to the current view, in that order.
@@ -115,7 +118,19 @@ pub fn breadcrumb<'a, Message>(
         separator: Separator::default(),
         max_items: None,
         on_expand: None,
+        collapse_to_fit: true,
     }
+}
+
+/// The crumb limits to try, longest first, when the trail must fit on one
+/// line: the requested limit (or every crumb), then one fewer at a time
+/// down to the first crumb and the current one.
+pub fn fit_limits(len: usize, max: Option<usize>) -> Vec<usize> {
+    let start = max.map_or(len, |max| max.max(2)).min(len);
+    if start <= 2 {
+        return vec![start];
+    }
+    (2..=start).rev().collect()
 }
 
 impl<Message> Breadcrumb<'_, Message> {
@@ -137,6 +152,15 @@ impl<Message> Breadcrumb<'_, Message> {
         self
     }
 
+    /// Whether a trail too wide for one line collapses more of its middle
+    /// until it fits, before it wraps. Defaults to `true`. Turn it off to
+    /// show every crumb on as many lines as it takes, such as after the
+    /// reader expands the trail.
+    pub fn collapse_to_fit(mut self, collapse: bool) -> Self {
+        self.collapse_to_fit = collapse;
+        self
+    }
+
     pub fn len(&self) -> usize {
         self.crumbs.len()
     }
@@ -153,38 +177,69 @@ impl<'a, Message: Clone + 'a> From<Breadcrumb<'a, Message>> for Element<'a, Mess
             separator,
             max_items,
             on_expand,
+            collapse_to_fit,
         } = breadcrumb;
         let len = crumbs.len();
-        let slots = slots(len, max_items);
-        let mut crumbs: Vec<_> = crumbs.into_iter().map(Some).collect();
-
-        let mut trail = row![].spacing(6).align_y(Alignment::Center);
-        let mut first = true;
-        for slot in slots {
-            let element = match slot {
-                Slot::Crumb(at) => {
-                    let Some(crumb) = crumbs.get_mut(at).and_then(Option::take) else {
-                        continue;
-                    };
-                    item(crumb, at + 1 == len)
-                }
-                Slot::Ellipsis => ellipsis(on_expand.clone()),
-            };
-            // A divider travels with the crumb after it, so a wrapped trail
-            // never ends a line on a separator.
-            if first {
-                trail = trail.push(element);
-            } else {
-                trail = trail.push(
-                    row![divider(separator), element]
-                        .spacing(6)
-                        .align_y(Alignment::Center),
-                );
-            }
-            first = false;
+        if !collapse_to_fit {
+            return trail(&crumbs, separator, max_items, &on_expand)
+                .wrap()
+                .into();
         }
-        trail.wrap().into()
+
+        // Each shorter trail is tried in turn; the shortest wraps if even
+        // it is too wide.
+        let limits = fit_limits(len, max_items);
+        let last = limits.len().saturating_sub(1);
+        let candidates = limits
+            .into_iter()
+            .enumerate()
+            .map(|(index, max)| {
+                let trail = trail(&crumbs, separator, Some(max), &on_expand);
+                if index == last {
+                    trail.wrap().into()
+                } else {
+                    trail.into()
+                }
+            })
+            .collect();
+        first_fit(candidates)
     }
+}
+
+/// One row of crumbs, showing at most `max` of them.
+fn trail<'a, Message: Clone + 'a>(
+    crumbs: &[Crumb<'a, Message>],
+    separator: Separator,
+    max: Option<usize>,
+    on_expand: &Option<Message>,
+) -> iced::widget::Row<'a, Message> {
+    let len = crumbs.len();
+    let mut trail = row![].spacing(6).align_y(Alignment::Center);
+    let mut first = true;
+    for slot in slots(len, max) {
+        let element = match slot {
+            Slot::Crumb(at) => {
+                let Some(crumb) = crumbs.get(at) else {
+                    continue;
+                };
+                item(crumb.clone(), at + 1 == len)
+            }
+            Slot::Ellipsis => ellipsis(on_expand.clone()),
+        };
+        // A divider travels with the crumb after it, so a wrapped trail
+        // never ends a line on a separator.
+        if first {
+            trail = trail.push(element);
+        } else {
+            trail = trail.push(
+                row![divider(separator), element]
+                    .spacing(6)
+                    .align_y(Alignment::Center),
+            );
+        }
+        first = false;
+    }
+    trail
 }
 
 fn item<'a, Message: Clone + 'a>(crumb: Crumb<'a, Message>, current: bool) -> Element<'a, Message> {
@@ -370,6 +425,23 @@ mod tests {
         assert_eq!(slots(3, None), (0..3).map(Slot::Crumb).collect::<Vec<_>>());
         assert_eq!(slots(3, Some(3)), slots(3, None));
         assert_eq!(slots(3, Some(10)), slots(3, None));
+    }
+
+    #[test]
+    fn fit_limits_shorten_one_crumb_at_a_time() {
+        assert_eq!(fit_limits(5, None), vec![5, 4, 3, 2]);
+        assert_eq!(fit_limits(5, Some(3)), vec![3, 2]);
+        assert_eq!(fit_limits(5, Some(9)), vec![5, 4, 3, 2]);
+        assert_eq!(fit_limits(2, None), vec![2]);
+        assert_eq!(fit_limits(1, None), vec![1]);
+        assert_eq!(fit_limits(0, None), vec![0]);
+    }
+
+    #[test]
+    fn collapsing_to_fit_is_on_by_default() {
+        let trail = breadcrumb::<u8>([crumb("Home")]);
+        assert!(trail.collapse_to_fit);
+        assert!(!trail.collapse_to_fit(false).collapse_to_fit);
     }
 
     #[test]
