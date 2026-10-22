@@ -6,7 +6,7 @@ use futures::executor::block_on;
 use futures::{SinkExt, StreamExt};
 use iced::keyboard::{Key, Modifiers, key::Named};
 use iced::widget::container;
-use iced::{Element, Point, Size, keyboard, mouse};
+use iced::{Element, Point, Size, keyboard, mouse, touch};
 use iced_cube::data::log_viewer::{
     self, Entry, Event, Level, LineId, MenuItem, Output, ROW_HEIGHT, State, entry, log_viewer,
 };
@@ -433,6 +433,48 @@ fn scrolling_up_stops_following() {
         delta: mouse::ScrollDelta::Pixels { x: 0.0, y: 200.0 },
     })]);
     assert!(has(&events(ui), "Follow(false)"));
+}
+
+#[test]
+fn a_finger_swipe_scrolls_a_following_log_without_pressing_a_line() {
+    let mut state = State::new();
+    state.extend((0..200).map(|n| entry(Level::Info, format!("line {n}"))));
+    let mut ui = sized(view(&state), 720.0);
+    let line = ui.find("line 195").expect("line").bounds().center();
+    let finger = touch::Finger(1);
+    ui.point_at(line);
+    let _ = ui.simulate([iced::Event::Touch(touch::Event::FingerPressed {
+        id: finger,
+        position: line,
+    })]);
+    let to = Point::new(line.x, line.y + 150.0);
+    ui.point_at(to);
+    let _ = ui.simulate([
+        iced::Event::Touch(touch::Event::FingerMoved {
+            id: finger,
+            position: to,
+        }),
+        iced::Event::Touch(touch::Event::FingerLifted {
+            id: finger,
+            position: to,
+        }),
+    ]);
+    assert!(
+        ui.find("line 184").is_ok(),
+        "the lines stay where the finger left them"
+    );
+    let emitted = events(ui);
+    assert!(has(&emitted, "Follow(false)"), "{emitted:?}");
+    assert!(
+        emitted
+            .iter()
+            .all(|event| !matches!(event, Event::Press(..))),
+        "a swipe is not a tap: {emitted:?}"
+    );
+    for event in emitted {
+        let _ = state.update(event);
+    }
+    assert!(!state.is_following());
 }
 
 #[test]

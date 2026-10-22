@@ -266,6 +266,12 @@ impl<'a, Message> Rows<'a, Message> {
         }
     }
 
+    /// Whether the list keeps to its end. It stops as soon as the user
+    /// scrolls away, before the app has answered the report.
+    fn follows(&self, state: &State) -> bool {
+        self.follow && !state.left_end
+    }
+
     /// Moves the offset for rows dropped from the front, the end being
     /// followed, or a row to reveal, then keeps it inside the content.
     /// Returns the row it revealed, if any.
@@ -275,7 +281,7 @@ impl<'a, Message> Rows<'a, Message> {
         let content = geometry.content();
         let token = self.reveal.map(|(_, token)| token);
         let mut revealed = None;
-        if self.follow {
+        if self.follows(state) {
             state.offset = (content - viewport).max(0.0);
         } else if token != state.revealed
             && let Some((index, _)) = self.reveal.filter(|(index, _)| *index < self.count)
@@ -400,12 +406,13 @@ impl<Message> Rows<'_, Message> {
             self.measure_tops(state);
             let after = self.geometry(state);
             let content = after.content();
-            let mut offset = if self.follow {
+            let follows = self.follows(state);
+            let mut offset = if follows {
                 content - viewport
             } else {
                 after.top(anchor) + within
             };
-            if let Some(index) = revealed.filter(|_| !self.follow) {
+            if let Some(index) = revealed.filter(|_| !follows) {
                 offset = reveal_span(offset, after.top(index), after.top(index + 1), viewport);
             }
             let offset = clamp_offset(offset, content, viewport);
@@ -481,6 +488,8 @@ struct State {
     touch: Option<(Finger, f32, f32)>,
     /// Rows dropped from the front, as of the last layout.
     origin: u64,
+    /// The user scrolled away from the end while the list followed it.
+    left_end: bool,
     /// The content height, as of the last layout.
     content: f32,
     /// Rows that fit in the view, and the count last reported.
@@ -581,6 +590,9 @@ impl<Message> Widget<Message, Theme, Renderer> for Rows<'_, Message> {
             dropped as f32 * self.row_height
         };
         state.origin = self.origin;
+        if !self.follow {
+            state.left_end = false;
+        }
         #[cfg(feature = "log-viewer")]
         self.prepare(state, width);
         let content = self.geometry(state).content();
@@ -759,13 +771,20 @@ impl<Message> Widget<Message, Theme, Renderer> for Rows<'_, Message> {
             shell.publish(on_page(state.page));
         }
         let content = state.content;
-        if scroll(state, event, cursor, rows, content, shell) {
+        let scrolled = scroll(state, event, cursor, rows, content, shell);
+        if scrolled.moved {
             let at_end = at_end(state.offset, content, rows.height);
+            if at_end {
+                state.left_end = false;
+            }
             if at_end != self.follow
                 && let Some(on_follow) = &self.on_follow
             {
+                state.left_end = !at_end;
                 shell.publish(on_follow(at_end));
             }
+        }
+        if scrolled.used {
             shell.capture_event();
             return;
         }
@@ -893,9 +912,33 @@ impl<Message> Widget<Message, Theme, Renderer> for Rows<'_, Message> {
     }
 }
 
-/// Handles the wheel, the scrollbar and touch drags over the rows. Returns
-/// whether the offset moved or the event was used up, so the rows must
-/// not see it.
+/// What [`scroll`] did with an event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+struct Scrolled {
+    /// The offset moved.
+    moved: bool,
+    /// The event was used up, so the rows must not see it.
+    used: bool,
+}
+
+impl Scrolled {
+    const IGNORED: Self = Self {
+        moved: false,
+        used: false,
+    };
+
+    fn used(moved: bool) -> Self {
+        Self { moved, used: true }
+    }
+
+    /// A finger drag moves the offset but still reaches the rows, so a
+    /// row under the finger can tell a swipe from a tap.
+    fn passed_on(moved: bool) -> Self {
+        Self { moved, used: false }
+    }
+}
+
+/// Handles the wheel, the scrollbar and touch drags over the rows.
 fn scroll<Message>(
     state: &mut State,
     event: &Event,
@@ -903,7 +946,7 @@ fn scroll<Message>(
     rows: Rectangle,
     content: f32,
     shell: &mut Shell<'_, Message>,
-) -> bool {
+) -> Scrolled {
     let track = track(rows);
     let mut scroll_to = |state: &mut State, offset: f32| {
         let offset = clamp_offset(offset, content, rows.height);
@@ -932,14 +975,18 @@ fn scroll<Message>(
                 ScrollDelta::Lines { y, .. } => y * LINE,
                 ScrollDelta::Pixels { y, .. } => *y,
             };
-            scroll_to(state, state.offset - dy)
+            if scroll_to(state, state.offset - dy) {
+                Scrolled::used(true)
+            } else {
+                Scrolled::IGNORED
+            }
         }
         Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
             let (Some((top, height)), Some(position)) = (thumb, cursor.position()) else {
-                return false;
+                return Scrolled::IGNORED;
             };
             if !track.expand(MARGIN).contains(position) {
-                return false;
+                return Scrolled::IGNORED;
             }
             let grab = position.y - track.y - top;
             let grab = if (0.0..=height).contains(&grab) {
@@ -949,37 +996,39 @@ fn scroll<Message>(
             };
             state.drag = Some(grab);
             let _ = scroll_to(state, dragged_to(grab, position.y, height));
-            true
+            Scrolled::used(true)
         }
         Event::Mouse(mouse::Event::CursorMoved { position }) => {
             let (Some(grab), Some((_, height))) = (state.drag, thumb) else {
-                return false;
+                return Scrolled::IGNORED;
             };
             let _ = scroll_to(state, dragged_to(grab, position.y, height));
-            true
+            Scrolled::used(true)
         }
         Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
-            state.drag.take().is_some()
+            if state.drag.take().is_some() {
+                Scrolled::used(true)
+            } else {
+                Scrolled::IGNORED
+            }
         }
         Event::Touch(touch::Event::FingerPressed { id, position }) => {
             if cursor.is_over(rows) {
                 state.touch = Some((*id, position.y, state.offset));
             }
-            false
+            Scrolled::IGNORED
         }
         Event::Touch(touch::Event::FingerMoved { id, position }) => {
-            if let Some((finger, start, offset)) = state.touch
-                && finger == *id
-            {
-                let _ = scroll_to(state, offset - (position.y - start));
-            }
-            false
+            let Some((_, start, offset)) = state.touch.filter(|(finger, ..)| finger == id) else {
+                return Scrolled::IGNORED;
+            };
+            Scrolled::passed_on(scroll_to(state, offset - (position.y - start)))
         }
         Event::Touch(touch::Event::FingerLifted { .. } | touch::Event::FingerLost { .. }) => {
             state.touch = None;
-            false
+            Scrolled::IGNORED
         }
-        _ => false,
+        _ => Scrolled::IGNORED,
     }
 }
 
