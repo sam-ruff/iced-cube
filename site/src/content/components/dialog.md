@@ -45,7 +45,7 @@ api:
   - name: ".on_cancel(message) / .on_confirm(message)"
     description: "Emitted by the buttons. Escape also cancels unless .dismiss_on_escape(false) is set."
   - name: ".confirm_on_enter(bool)"
-    description: "Whether Enter runs the destructive action. Defaults to false, so a stray Enter never destroys anything."
+    description: "Whether Enter runs the destructive action while no button is focused. Defaults to false, so a stray Enter never destroys anything; keyboard users Tab to the button and press Enter or Space instead."
   - name: "dialog::default_keymap()"
     description: "The default shortcuts as a Keymap<Action>. Bind, unbind or clear chords to change them."
   - name: "action.effect(dismiss_on_escape)"
@@ -60,12 +60,14 @@ Wrap the root of your view in `dialog`, so the scrim covers the whole window. Wh
 
 Use a dialog for a short task that needs attention before people go back to what they were doing. For a destructive confirmation, use `alert_dialog`: it has no close button and ignores clicks on the scrim, so the only ways out are Cancel, Escape or the destructive action. Enter does nothing in it by default, because a key press meant for something else should never delete anything; turn it on with `.confirm_on_enter(true)` when the action is easy to undo. Turn Escape off with `.dismiss_on_escape(false)` when even that is too easy.
 
+Keyboard users answer an alert dialog with Tab: nothing is focused when it opens, the first Tab rings Cancel, the next rings the destructive action, and Enter or Space presses the ringed button. Shift+Tab goes back, and a click anywhere clears the ring. To confirm with a single chord instead, bind one to `Action::Confirm` in the keymap and turn on `.confirm_on_enter(true)`.
+
 The dialog handles its own keys, so it needs no subscription. When it opens, it focuses its first text field and unfocuses anything underneath. Tab and Shift+Tab then move between the text fields inside it and wrap at either end, so focus never leaves the dialog. It captures every key press its content leaves, so app-wide shortcuts from `keys::subscription` cannot change tabs, sliders or menus behind the scrim. Let a chosen shortcut through with `.pass_through(...)`.
 
 Menus, comboboxes and command lists inside a dialog get keys and clicks first. Escape or a click on the scrim closes an open menu or list and leaves the dialog open; the next one closes the dialog. The [command palette](../command/) example puts a command list in a dialog.
 
 Some limits come from iced 0.14 itself:
 
-- Only text fields and text editors can take keyboard focus. Tab moves between those, but it skips buttons, and Space cannot press a button. Set `.on_confirm(...)` so Enter runs the main action, or give a field an `on_submit` of its own.
+- Only text fields, text editors and an alert dialog's own two buttons can take keyboard focus. Tab skips the buttons you pass to `.action(...)`, so Space cannot press them. Set `.on_confirm(...)` so Enter runs the main action, or give a field an `on_submit` of its own.
 - A focused text field takes the first Escape to lose focus, so it takes a second Escape to dismiss the dialog.
 - There is no screen reader support, so the dialog's title and description are not announced.

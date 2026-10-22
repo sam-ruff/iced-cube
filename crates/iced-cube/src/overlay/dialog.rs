@@ -41,7 +41,9 @@
 //! The dialog handles its own keys through a [`Keymap`], so an app needs no
 //! subscription for it: Escape dismisses, Enter sends the
 //! [`on_confirm`](Dialog::on_confirm) message, and Tab and Shift+Tab move
-//! focus between the text fields inside the dialog without leaving it.
+//! focus between the text fields inside the dialog without leaving it. In
+//! an [`AlertDialog`] they also reach its two buttons; see there for how
+//! keyboard users confirm.
 //!
 //! While it is open the dialog captures every key press, after the content
 //! inside it has had its turn, so app-wide shortcuts from
@@ -51,7 +53,7 @@
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::widget::operation::Focusable;
 use iced::advanced::widget::{Operation, Tree, Widget, tree};
-use iced::advanced::{Clipboard, Shell, overlay, renderer};
+use iced::advanced::{Clipboard, Renderer as _, Shell, overlay, renderer};
 use iced::keyboard::key::Named;
 use iced::widget::{self, center, column, container, mouse_area, opaque, row, stack, text};
 use iced::{
@@ -161,10 +163,10 @@ impl keys::Action for Action {
                 "Sends the dialog's confirm message. An alert dialog's destructive action only runs on Enter when it opts in."
             }
             Action::FocusNext => {
-                "Focuses the next text field in the dialog, wrapping from the last to the first."
+                "Focuses the next text field, or alert dialog button, wrapping from the last to the first."
             }
             Action::FocusPrevious => {
-                "Focuses the previous text field in the dialog, wrapping from the first to the last."
+                "Focuses the previous text field, or alert dialog button, wrapping from the first to the last."
             }
         }
     }
@@ -899,12 +901,18 @@ impl From<Direction> for Movement {
 struct Slot {
     inside: bool,
     focused: bool,
+    /// An alert dialog button, which Tab reaches but opening does not.
+    button: bool,
 }
 
 /// The index of the slot to focus. Only slots inside the dialog are
-/// candidates, and focus wraps at either end. Every other slot loses focus.
+/// candidates, and focus wraps at either end. Opening focuses the first
+/// one that is not a button. Every other slot loses focus.
 fn target(slots: &[Slot], movement: Movement) -> Option<usize> {
     let inside: Vec<usize> = (0..slots.len()).filter(|&i| slots[i].inside).collect();
+    if movement == Movement::First {
+        return inside.into_iter().find(|&i| !slots[i].button);
+    }
     let (first, last) = (inside.first().copied()?, inside.last().copied()?);
     let current = inside.iter().position(|&i| slots[i].focused);
     let count = inside.len();
@@ -954,13 +962,14 @@ impl Operation for Survey {
 
     fn focusable(
         &mut self,
-        _id: Option<&widget::Id>,
+        id: Option<&widget::Id>,
         _bounds: Rectangle,
         state: &mut dyn Focusable,
     ) {
         self.slots.push(Slot {
             inside: self.depth > 0,
             focused: state.is_focused(),
+            button: id == Some(&ALERT_BUTTON_ID),
         });
     }
 }
@@ -992,9 +1001,219 @@ impl Operation for Apply {
     }
 }
 
+/// The widget id an alert dialog's buttons report focus under, so the
+/// dialog leaves them unfocused when it opens.
+const ALERT_BUTTON_ID: widget::Id = widget::Id::new("iced-cube-dialog-alert-button");
+
+/// Width of the ring around a focused alert dialog button.
+const RING_WIDTH: f32 = 2.0;
+
+/// Lets Tab focus a button inside an alert dialog. While focused it draws a
+/// ring and Enter or Space presses it; any pointer press takes focus away.
+struct FocusButton<'a, Message> {
+    content: Element<'a, Message>,
+    on_press: Option<Message>,
+}
+
+#[derive(Debug, Default)]
+struct FocusState {
+    focused: bool,
+}
+
+impl Focusable for FocusState {
+    fn is_focused(&self) -> bool {
+        self.focused
+    }
+
+    fn focus(&mut self) {
+        self.focused = true;
+    }
+
+    fn unfocus(&mut self) {
+        self.focused = false;
+    }
+}
+
+/// Whether a key press activates a focused button.
+fn presses_button(event: &Event) -> bool {
+    let Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) = event else {
+        return false;
+    };
+    modifiers.is_empty()
+        && matches!(
+            key,
+            keyboard::Key::Named(Named::Enter) | keyboard::Key::Named(Named::Space)
+        )
+}
+
+fn focus_button<'a, Message: Clone + 'a>(
+    content: impl Into<Element<'a, Message>>,
+    on_press: Option<Message>,
+) -> Element<'a, Message> {
+    Element::new(FocusButton {
+        content: content.into(),
+        on_press,
+    })
+}
+
+impl<Message: Clone> Widget<Message, Theme, Renderer> for FocusButton<'_, Message> {
+    fn size(&self) -> Bounds<Length> {
+        self.content.as_widget().size()
+    }
+
+    fn size_hint(&self) -> Bounds<Length> {
+        self.content.as_widget().size_hint()
+    }
+
+    fn tag(&self) -> tree::Tag {
+        tree::Tag::of::<FocusState>()
+    }
+
+    fn state(&self) -> tree::State {
+        tree::State::new(FocusState::default())
+    }
+
+    fn children(&self) -> Vec<Tree> {
+        vec![Tree::new(&self.content)]
+    }
+
+    fn diff(&self, tree: &mut Tree) {
+        tree.diff_children(std::slice::from_ref(&self.content));
+    }
+
+    fn layout(
+        &mut self,
+        tree: &mut Tree,
+        renderer: &Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
+        self.content
+            .as_widget_mut()
+            .layout(&mut tree.children[0], renderer, limits)
+    }
+
+    fn draw(
+        &self,
+        tree: &Tree,
+        renderer: &mut Renderer,
+        theme: &Theme,
+        style: &renderer::Style,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+    ) {
+        self.content.as_widget().draw(
+            &tree.children[0],
+            renderer,
+            theme,
+            style,
+            layout,
+            cursor,
+            viewport,
+        );
+        if !tree.state.downcast_ref::<FocusState>().focused {
+            return;
+        }
+        let tokens = Tokens::of(theme);
+        // The ring sits just outside the button, clear of its own border.
+        let outset = RING_WIDTH + 1.0;
+        renderer.fill_quad(
+            renderer::Quad {
+                bounds: layout.bounds().expand(outset),
+                border: Border {
+                    color: tokens.ring,
+                    width: RING_WIDTH,
+                    radius: (radius::MD + outset).into(),
+                },
+                ..renderer::Quad::default()
+            },
+            Background::Color(Color::TRANSPARENT),
+        );
+    }
+
+    fn operate(
+        &mut self,
+        tree: &mut Tree,
+        layout: Layout<'_>,
+        renderer: &Renderer,
+        operation: &mut dyn Operation,
+    ) {
+        let state = tree.state.downcast_mut::<FocusState>();
+        operation.focusable(Some(&ALERT_BUTTON_ID), layout.bounds(), state);
+        self.content
+            .as_widget_mut()
+            .operate(&mut tree.children[0], layout, renderer, operation);
+    }
+
+    fn update(
+        &mut self,
+        tree: &mut Tree,
+        event: &Event,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        renderer: &Renderer,
+        clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, Message>,
+        viewport: &Rectangle,
+    ) {
+        let state = tree.state.downcast_mut::<FocusState>();
+        if state.focused && is_pointer_press(event) {
+            state.focused = false;
+            shell.request_redraw();
+        }
+        if state.focused && presses_button(event) {
+            if let Some(message) = &self.on_press {
+                shell.publish(message.clone());
+            }
+            shell.capture_event();
+            return;
+        }
+        self.content.as_widget_mut().update(
+            &mut tree.children[0],
+            event,
+            layout,
+            cursor,
+            renderer,
+            clipboard,
+            shell,
+            viewport,
+        );
+    }
+
+    fn mouse_interaction(
+        &self,
+        tree: &Tree,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+        renderer: &Renderer,
+    ) -> mouse::Interaction {
+        self.content.as_widget().mouse_interaction(
+            &tree.children[0],
+            layout,
+            cursor,
+            viewport,
+            renderer,
+        )
+    }
+}
+
+fn is_pointer_press(event: &Event) -> bool {
+    matches!(
+        event,
+        Event::Mouse(mouse::Event::ButtonPressed(_))
+            | Event::Touch(iced::touch::Event::FingerPressed { .. })
+    )
+}
+
 /// A confirmation that needs an explicit answer: a clicked scrim does
 /// nothing, there is no close button, and the footer holds Cancel and a
 /// destructive action.
+///
+/// Keyboard users reach both buttons with Tab and Shift+Tab, which ring
+/// the focused one, and press it with Enter or Space. Nothing is focused
+/// when the dialog opens, so a stray Enter does nothing unless
+/// [`confirm_on_enter`](Self::confirm_on_enter) is on; Escape cancels.
 pub struct AlertDialog<'a, Message> {
     base: Element<'a, Message>,
     open: bool,
@@ -1079,8 +1298,10 @@ impl<'a, Message> AlertDialog<'a, Message> {
         self
     }
 
-    /// Whether Enter ([`Action::Confirm`]) runs the destructive action.
-    /// Defaults to `false`, so a stray Enter never destroys anything.
+    /// Whether Enter ([`Action::Confirm`]) runs the destructive action
+    /// while no button is focused. Defaults to `false`, so a stray Enter
+    /// never destroys anything; keyboard users Tab to the button and press
+    /// Enter or Space instead.
     pub fn confirm_on_enter(mut self, confirm: bool) -> Self {
         self.confirm_on_enter = confirm;
         self
@@ -1110,16 +1331,18 @@ impl<'a, Message: Clone + 'a> From<AlertDialog<'a, Message>> for Dialog<'a, Mess
             .open(alert.open)
             .title(alert.title)
             .description(alert.description)
-            .action(
+            .action(focus_button(
                 button::button(alert.cancel)
                     .variant(button::Variant::Outline)
                     .on_press_maybe(alert.on_cancel.clone()),
-            )
-            .action(
+                alert.on_cancel.clone(),
+            ))
+            .action(focus_button(
                 button::button(alert.confirm)
                     .variant(button::Variant::Destructive)
                     .on_press_maybe(alert.on_confirm.clone()),
-            )
+                alert.on_confirm.clone(),
+            ))
             .dismiss_on_escape(alert.dismiss_on_escape)
             .dismiss_on_scrim(false)
             .close_button(false)
@@ -1149,7 +1372,11 @@ mod tests {
     fn slots(layout: &[(bool, bool)]) -> Vec<Slot> {
         layout
             .iter()
-            .map(|&(inside, focused)| Slot { inside, focused })
+            .map(|&(inside, focused)| Slot {
+                inside,
+                focused,
+                button: false,
+            })
             .collect()
     }
 
@@ -1301,6 +1528,45 @@ mod tests {
     fn first_focuses_the_first_field_inside() {
         let layout = slots(&[(false, true), (true, false), (true, false)]);
         assert_eq!(target(&layout, Movement::First), Some(1));
+    }
+
+    #[test]
+    fn opening_skips_alert_buttons_but_tab_reaches_them() {
+        let mut layout = slots(&[(true, false), (true, false)]);
+        for slot in &mut layout {
+            slot.button = true;
+        }
+        assert_eq!(target(&layout, Movement::First), None);
+        assert_eq!(target(&layout, Movement::Next), Some(0));
+        assert_eq!(target(&layout, Movement::Previous), Some(1));
+
+        layout[1].button = false;
+        assert_eq!(target(&layout, Movement::First), Some(1));
+    }
+
+    #[test]
+    fn enter_and_space_press_a_focused_button_but_not_with_modifiers() {
+        let key = |named: Named, modifiers: keyboard::Modifiers| {
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                key: keyboard::Key::Named(named),
+                modified_key: keyboard::Key::Named(named),
+                physical_key: keyboard::key::Physical::Unidentified(
+                    keyboard::key::NativeCode::Unidentified,
+                ),
+                location: keyboard::Location::Standard,
+                modifiers,
+                text: None,
+                repeat: false,
+            })
+        };
+        let none = keyboard::Modifiers::empty();
+        assert!(presses_button(&key(Named::Enter, none)));
+        assert!(presses_button(&key(Named::Space, none)));
+        assert!(!presses_button(&key(
+            Named::Enter,
+            keyboard::Modifiers::CTRL
+        )));
+        assert!(!presses_button(&key(Named::Tab, none)));
     }
 
     #[test]
