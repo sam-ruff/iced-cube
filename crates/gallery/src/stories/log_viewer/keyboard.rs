@@ -81,8 +81,8 @@ impl Example {
         column![
             text(
                 "Click a line, then use the arrows or J and K. Space and Shift+arrows select, \
-                 Ctrl+C copies, Ctrl+F searches and F3 steps through matches. Right-click or \
-                 Shift+F10 opens a line's menu."
+                 Ctrl+C copies, Ctrl+F searches and F3 steps through matches. Right-click, \
+                 press and hold, or Shift+F10 opens a line's menu."
             )
             .size(text_size::SM),
             log_viewer(&self.logs)

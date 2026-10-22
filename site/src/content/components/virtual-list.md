@@ -36,7 +36,7 @@ api:
   - name: ".keymap(keymap)"
     description: "Replaces the default keymap the focused list resolves keys with."
   - name: ".context_menu(&menu, on_event) / .context_menu_keymap(keymap)"
-    description: "Gives every row a context menu keyed by its RowId, opened with a right-click, a long press or Shift+F10 on the highlighted row, and replaces the menu's keymap."
+    description: "Gives every row a context menu keyed by its RowId, opened with a right-click, a long press or Shift+F10 on the highlighted row, and replaces the menu's keymap. The row it opened on carries the ring while it is open."
   - name: "virtual_list::default_keymap() / action.event(&state)"
     description: "The default shortcuts, and the Event a resolved Action sends. State::key_event does both."
   - name: "virtual_list::row_style(tokens, Status) / frame_style(tokens)"

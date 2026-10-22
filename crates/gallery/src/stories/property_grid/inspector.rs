@@ -109,7 +109,7 @@ impl Default for Example {
         Self {
             shape,
             menu: property_grid::menu(),
-            last: "Click a value to edit it, or right-click or press and hold a row.".into(),
+            last: "Click a value; right-click or press and hold a row.".into(),
         }
     }
 }

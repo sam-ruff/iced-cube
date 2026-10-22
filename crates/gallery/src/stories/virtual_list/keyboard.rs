@@ -100,7 +100,7 @@ impl Example {
             text(
                 "Click the list, then use the arrow keys or J and K. Page Up and Page Down \
                  move a screenful, Shift+arrows extend the selection, Space selects and \
-                 Enter opens. Right-click or Shift+F10 opens a row's menu."
+                 Enter opens. Right-click, press and hold, or Shift+F10 opens a row's menu."
             )
             .size(text_size::SM),
             virtual_list(&self.chapters, |_, title: &String| {

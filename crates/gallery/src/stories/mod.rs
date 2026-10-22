@@ -712,7 +712,7 @@ crate::stories! {
     }
     PropertyGridInspector => property_grid::inspector {
         id: "property-grid/inspector", component: "property-grid", title: "Shape inspector",
-        description: "The properties of a selected shape under collapsible categories: numbers with units, colours, a choice, switches and checkboxes, a read-only id and an opacity slider the app draws itself. A dot and a bold name mark values that differ from their default, with a button to reset them. Right-click a row, or press Shift+F10, to copy or reset its value.",
+        description: "The properties of a selected shape under collapsible categories: numbers with units, colours, a choice, switches and checkboxes, a read-only id and an opacity slider the app draws itself. A dot and a bold name mark values that differ from their default, with a button to reset them. Right-click or press and hold a row, or press Shift+F10, to copy or reset its value.",
         file: "property_grid/inspector.rs", height: 420, task: true,
     }
     PropertyGridFilterSort => property_grid::filter_sort {

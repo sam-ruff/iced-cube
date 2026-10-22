@@ -42,7 +42,7 @@ impl Default for Example {
         Self {
             tabs,
             next: 6,
-            status: "Right-click a tab for more.".into(),
+            status: "Right-click or press and hold a tab for more.".into(),
         }
     }
 }

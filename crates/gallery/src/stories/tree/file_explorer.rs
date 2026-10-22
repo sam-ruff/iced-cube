@@ -64,7 +64,7 @@ impl Default for Example {
         Self {
             files,
             menu,
-            status: "Double-click to open, right-click for more.".into(),
+            status: "Double-click opens; right-click or press and hold.".into(),
         }
     }
 }
