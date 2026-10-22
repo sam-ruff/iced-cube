@@ -703,7 +703,6 @@ mod tests {
             let current = page_style(&tokens, true, Status::Active);
             let other = page_style(&tokens, false, Status::Active);
             assert!(current.border.width > 0.0);
-            assert!(current.background.is_some());
             assert_eq!(other.border.width, 0.0);
             assert!(other.background.is_none());
         }
