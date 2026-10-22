@@ -488,13 +488,17 @@ fn gap<'a, Message: 'a>(side: f32) -> Element<'a, Message> {
 
 /// The style of a page button: outlined for the current page, ghost for
 /// the rest and for the arrows. A disabled arrow fades like any button.
+/// Selecting the current page does nothing, so it keeps its outlined
+/// look under the pointer instead of turning into a hovered page.
 pub fn page_style(tokens: &Tokens, current: bool, status: Status) -> widget::button::Style {
-    let variant = if current {
-        button::Variant::Outline
-    } else {
-        button::Variant::Ghost
+    if !current {
+        return button::style(tokens, button::Variant::Ghost, status);
+    }
+    let status = match status {
+        Status::Hovered | Status::Pressed => Status::Active,
+        status => status,
     };
-    button::style(tokens, variant, status)
+    button::style(tokens, button::Variant::Outline, status)
 }
 
 #[cfg(test)]
@@ -708,12 +712,26 @@ mod tests {
     #[test]
     fn page_buttons_respond_to_hover_and_fade_when_disabled() {
         let tokens = Tokens::of(&light());
+        let rest = page_style(&tokens, false, Status::Active);
+        let hovered = page_style(&tokens, false, Status::Hovered);
+        assert_ne!(rest.background, hovered.background);
         for current in [false, true] {
             let rest = page_style(&tokens, current, Status::Active);
-            let hovered = page_style(&tokens, current, Status::Hovered);
             let disabled = page_style(&tokens, current, Status::Disabled);
-            assert_ne!(rest.background, hovered.background, "{current}");
             assert!(disabled.text_color.a < rest.text_color.a, "{current}");
+        }
+    }
+
+    #[test]
+    fn the_current_page_keeps_its_outline_under_the_pointer() {
+        for theme in [light(), dark()] {
+            let tokens = Tokens::of(&theme);
+            let rest = page_style(&tokens, true, Status::Active);
+            for status in [Status::Hovered, Status::Pressed] {
+                let hovered = page_style(&tokens, true, status);
+                assert_eq!(hovered, rest, "{status:?}");
+                assert_ne!(hovered, page_style(&tokens, false, status), "{status:?}");
+            }
         }
     }
 
