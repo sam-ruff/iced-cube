@@ -7,6 +7,7 @@ use iced::widget::{column, container, text};
 use iced::{Element, Point, Size, keyboard, mouse};
 use iced_cube::data::json_viewer::{self, Event, MenuItem, NodeId, Output, State, json_viewer};
 use iced_cube::overlay::context_menu;
+use iced_test::selector::Candidate;
 use iced_test::simulator::{self, Simulator};
 use serde_json::{Value, json};
 
@@ -282,7 +283,7 @@ fn the_open_menu_lists_its_entries() {
 fn the_search_box_searches_and_steps_through_matches() {
     let mut state = user();
     let mut ui = simulator::simulator(json_viewer(&state).search(true).on_event(Message::Viewer));
-    ui.click("Search keys and values...").expect("search box");
+    ui.click("Search").expect("search box");
     ui.typewrite("ad");
     let _ = apply(events(ui), &mut state);
     assert_eq!(state.query(), "ad");
@@ -298,6 +299,117 @@ fn the_search_box_searches_and_steps_through_matches() {
     let _ = ui.tap_key(Named::Enter);
     let _ = apply(events(ui), &mut state);
     assert_eq!(state.current_match(), Some(state.matches()[1]));
+}
+
+fn searching(state: &State) -> Simulator<'_, Message> {
+    sized(
+        json_viewer(state)
+            .search(true)
+            .on_event(Message::Viewer)
+            .into(),
+    )
+}
+
+/// Whether the search box has focus.
+fn search_focused(ui: &mut Simulator<'_, Message>) -> bool {
+    ui.find(|candidate: Candidate<'_>| match candidate {
+        Candidate::Focusable { id, state, .. }
+            if state.is_focused() && id == Some(&json_viewer::SEARCH) =>
+        {
+            Some(())
+        }
+        _ => None,
+    })
+    .is_ok()
+}
+
+#[test]
+fn escape_in_the_search_box_clears_it_then_leaves_it() {
+    let mut state = user();
+    let _ = state.update(Event::Search("ad".into()));
+    let mut ui = searching(&state);
+    ui.click("ad").expect("search box with its text");
+    let _ = ui.tap_key(Named::Escape);
+    assert!(search_focused(&mut ui), "the first Escape keeps focus");
+    let emitted = events(ui);
+    assert!(
+        emitted.contains(&Event::Search(String::new())),
+        "{emitted:?}"
+    );
+    let _ = apply(emitted, &mut state);
+    assert_eq!(state.query(), "");
+
+    let mut ui = searching(&state);
+    ui.click("Search").expect("empty search box");
+    assert!(search_focused(&mut ui));
+    let _ = ui.tap_key(Named::Escape);
+    assert!(!search_focused(&mut ui), "the second Escape leaves the box");
+    let emitted = events(ui);
+    assert!(
+        !emitted
+            .iter()
+            .any(|event| matches!(event, Event::Search(_))),
+        "{emitted:?}"
+    );
+}
+
+#[test]
+fn the_search_box_keeps_its_width_when_the_count_appears() {
+    let mut state = user();
+    let before = searching(&state)
+        .find(json_viewer::SEARCH)
+        .expect("search box")
+        .bounds();
+    let _ = state.update(Event::Search("ad".into()));
+    let mut ui = searching(&state);
+    let after = ui.find(json_viewer::SEARCH).expect("search box").bounds();
+    assert!(ui.find("1 of 3").is_ok());
+    assert_eq!(before.width, after.width);
+    assert!(
+        after.height <= 32.0,
+        "the small input size, got {}",
+        after.height
+    );
+}
+
+#[test]
+fn the_search_box_fits_a_phone() {
+    const PHONE: f32 = 328.0;
+    let state = user();
+    let element: Element<'_, Message> =
+        container(json_viewer(&state).search(true).on_event(Message::Viewer))
+            .width(PHONE)
+            .into();
+    let mut ui = Simulator::with_size(iced::Settings::default(), Size::new(PHONE, 400.0), element);
+    let field = ui.find(json_viewer::SEARCH).expect("search box").bounds();
+    let placeholder = ui.find("Search").expect("placeholder").bounds();
+    assert!(field.width >= 120.0, "readable, got {}", field.width);
+    assert!(
+        placeholder.x + placeholder.width <= field.x + field.width,
+        "the placeholder fits: {placeholder:?} in {field:?}"
+    );
+    assert!(field.x + field.width <= PHONE);
+}
+
+#[test]
+fn enter_toggles_and_space_is_left_free() {
+    let mut state = user();
+    let tags = node(&state, "$.tags");
+    let _ = state.update(Event::Press(tags));
+    let mut ui = simulator::simulator(view(&state));
+    ui.click("tags").expect("row");
+    let _ = ui.tap_key(Named::Enter);
+    let _ = ui.tap_key(Named::Space);
+    let emitted = events(ui);
+    assert_eq!(
+        emitted,
+        [
+            Event::Focus(true),
+            Event::Press(tags),
+            Event::ToggleHighlighted
+        ],
+        "only Enter acts"
+    );
 }
 
 #[test]

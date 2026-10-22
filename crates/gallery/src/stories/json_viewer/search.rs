@@ -1,4 +1,4 @@
-use iced::widget::{self, column};
+use iced::widget::column;
 use iced::{Element, Length, Task};
 use iced_cube::data::json_viewer::{self, Event, Output, State, json_viewer};
 use serde_json::json;
@@ -38,7 +38,7 @@ impl Example {
         let Message::Viewer(event) = message;
         match self.team.update(event) {
             Some(Output::CopyValue(text) | Output::CopyPath(text)) => bridge::copy(text),
-            Some(Output::FocusSearch) => widget::operation::focus(json_viewer::SEARCH),
+            Some(Output::FocusSearch) => json_viewer::focus_search(&self.team),
             None => Task::none(),
         }
     }

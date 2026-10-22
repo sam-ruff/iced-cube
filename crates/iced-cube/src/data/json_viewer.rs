@@ -28,11 +28,11 @@ use std::rc::Rc;
 use iced::keyboard::key::Named;
 use iced::keyboard::{Key, Modifiers};
 use iced::widget::{self, Space, column, container, mouse_area, row, text};
-use iced::{Alignment, Border, Color, Element, Length, Theme, mouse};
+use iced::{Alignment, Border, Color, Element, Font, Length, Task, Theme, mouse};
 use serde_json::Value;
 
 use crate::data::ellipsis::ellipsis;
-use crate::data::interaction::{Look, RowMenu, pressable, row_menu, scope};
+use crate::data::interaction::{Look, RowMenu, pressable, row_menu, scope, search_count};
 use crate::data::rows::rows;
 use crate::feedback::alert::{self, alert};
 use crate::icon::{opacity, themed};
@@ -42,8 +42,8 @@ use crate::overlay::dropdown_menu::{item, separator};
 use crate::overlay::menu::{ICON_SIZE, ROW_PADDING};
 use crate::primitives::button::Size;
 use crate::primitives::icon_button::icon_button;
-use crate::primitives::input::input;
-use crate::theme::{Tokens, fade, mix, radius, space, text_size};
+use crate::primitives::input::{self, input};
+use crate::theme::{self, Tokens, fade, mix, radius, space, text_size};
 
 /// Height of every row, as in a menu.
 pub const ROW_HEIGHT: f32 = 32.0;
@@ -51,7 +51,7 @@ pub const ROW_HEIGHT: f32 = 32.0;
 pub const INDENT: f32 = 20.0;
 /// The widest a key gets before it ends in an ellipsis, by default.
 pub const KEY_WIDTH: f32 = 180.0;
-/// The id of the search box, unless [`JsonViewer::search_id`] sets another.
+/// The id of the search box, unless [`State::with_search_id`] sets another.
 pub const SEARCH: widget::Id = widget::Id::new("json-viewer-search");
 
 /// A node in the document, numbered in document order.
@@ -215,8 +215,7 @@ pub enum Output {
     CopyValue(String),
     /// A path such as `$.users[2].name`, to write to the clipboard.
     CopyPath(String),
-    /// Focus the search box, such as with
-    /// `iced::widget::operation::focus(json_viewer::SEARCH)`.
+    /// Focus the search box, with [`focus_search`].
     FocusSearch,
 }
 
@@ -237,6 +236,7 @@ pub struct State {
     current: Option<usize>,
     filter: bool,
     error: Option<ParseError>,
+    search_id: widget::Id,
 }
 
 impl Default for State {
@@ -264,6 +264,7 @@ impl State {
             current: None,
             filter: false,
             error: None,
+            search_id: SEARCH,
         }
     }
 
@@ -297,6 +298,18 @@ impl State {
     pub fn with_filter(mut self, filter: bool) -> Self {
         self.filter = filter;
         self
+    }
+
+    /// The search box's widget id. Defaults to [`SEARCH`]; give each viewer
+    /// its own when a window has several.
+    pub fn with_search_id(mut self, id: impl Into<widget::Id>) -> Self {
+        self.search_id = id.into();
+        self
+    }
+
+    /// The search box's widget id, which [`focus_search`] focuses.
+    pub fn search_id(&self) -> &widget::Id {
+        &self.search_id
     }
 
     /// The whole document.
@@ -844,7 +857,8 @@ pub enum Action {
     CollapseAll,
     CopyValue,
     CopyPath,
-    Search,
+    FocusSearch,
+    ClearSearch,
     NextMatch,
     PreviousMatch,
 }
@@ -870,7 +884,10 @@ impl Action {
             Action::CollapseAll => Some(Event::CollapseAll),
             Action::CopyValue => highlighted.map(Event::CopyValue),
             Action::CopyPath => highlighted.map(Event::CopyPath),
-            Action::Search => Some(Event::FocusSearch),
+            Action::FocusSearch => Some(Event::FocusSearch),
+            Action::ClearSearch => {
+                (!state.query().is_empty()).then(|| Event::Search(String::new()))
+            }
             Action::NextMatch => searching.then_some(Event::NextMatch),
             Action::PreviousMatch => searching.then_some(Event::PreviousMatch),
         }
@@ -891,7 +908,8 @@ impl keys::Action for Action {
         Action::CollapseAll,
         Action::CopyValue,
         Action::CopyPath,
-        Action::Search,
+        Action::FocusSearch,
+        Action::ClearSearch,
         Action::NextMatch,
         Action::PreviousMatch,
     ];
@@ -914,7 +932,8 @@ impl keys::Action for Action {
             Action::CollapseAll => "CollapseAll",
             Action::CopyValue => "CopyValue",
             Action::CopyPath => "CopyPath",
-            Action::Search => "Search",
+            Action::FocusSearch => "FocusSearch",
+            Action::ClearSearch => "ClearSearch",
             Action::NextMatch => "NextMatch",
             Action::PreviousMatch => "PreviousMatch",
         }
@@ -938,7 +957,8 @@ impl keys::Action for Action {
             Action::CollapseAll => "Collapses every object and array.",
             Action::CopyValue => "Copies the highlighted value as pretty-printed JSON.",
             Action::CopyPath => "Copies the path of the highlighted value.",
-            Action::Search => "Moves to the search box.",
+            Action::FocusSearch => "Moves to the search box.",
+            Action::ClearSearch => "Clears the search.",
             Action::NextMatch => "Highlights the next search match.",
             Action::PreviousMatch => "Highlights the previous search match.",
         }
@@ -955,19 +975,23 @@ impl keys::Action for Action {
 /// | `End` | [`Action::Last`] |
 /// | `ArrowRight` | [`Action::Expand`] |
 /// | `ArrowLeft` | [`Action::Collapse`] |
-/// | `Enter`, `Space` | [`Action::Toggle`] |
+/// | `Enter` | [`Action::Toggle`] |
 /// | `*` | [`Action::ExpandSiblings`] |
 /// | `Shift+ArrowRight` | [`Action::ExpandAll`] |
 /// | `Shift+ArrowLeft` | [`Action::CollapseAll`] |
 /// | `Mod+C` (Ctrl, or Cmd on macOS) | [`Action::CopyValue`] |
 /// | `Mod+Shift+C` | [`Action::CopyPath`] |
-/// | `Mod+F` | [`Action::Search`] |
+/// | `Mod+F` | [`Action::FocusSearch`] |
+/// | `Escape` | [`Action::ClearSearch`] |
 /// | `F3` | [`Action::NextMatch`] |
 /// | `Shift+F3` | [`Action::PreviousMatch`] |
 ///
-/// The viewer resolves these itself, only while it has focus, so they
-/// never clash with other components. Pass a changed keymap with
-/// [`JsonViewer::keymap`].
+/// Enter does what a double click does, as in the tree, where it activates
+/// a node: here it opens or closes an object or array. Space is left free,
+/// since the viewer has nothing to select. Escape in the search box clears
+/// it, and a second Escape leaves it. The viewer resolves these itself,
+/// only while it has focus, so they never clash with other components.
+/// Pass a changed keymap with [`JsonViewer::keymap`].
 pub fn default_keymap() -> Keymap<Action> {
     Keymap::new()
         .bind(Chord::named(Named::ArrowDown), Action::Next)
@@ -977,13 +1001,13 @@ pub fn default_keymap() -> Keymap<Action> {
         .bind(Chord::named(Named::ArrowRight), Action::Expand)
         .bind(Chord::named(Named::ArrowLeft), Action::Collapse)
         .bind(Chord::named(Named::Enter), Action::Toggle)
-        .bind(Chord::named(Named::Space), Action::Toggle)
         .bind(Chord::character('*'), Action::ExpandSiblings)
         .bind(Chord::named(Named::ArrowRight).shift(), Action::ExpandAll)
         .bind(Chord::named(Named::ArrowLeft).shift(), Action::CollapseAll)
         .bind(Chord::character('c').command(), Action::CopyValue)
         .bind(Chord::character('c').command().shift(), Action::CopyPath)
-        .bind(Chord::character('f').command(), Action::Search)
+        .bind(Chord::character('f').command(), Action::FocusSearch)
+        .bind(Chord::named(Named::Escape), Action::ClearSearch)
         .bind(Chord::named(Named::F3), Action::NextMatch)
         .bind(Chord::named(Named::F3).shift(), Action::PreviousMatch)
 }
@@ -1042,9 +1066,10 @@ pub struct Syntax {
 }
 
 /// Resolves the syntax colours from the theme: strings take the success
-/// colour, numbers the warning colour and booleans the destructive colour.
-/// In light themes they are darkened towards the text so they stay
-/// readable on a white page.
+/// colour, numbers the warning colour and booleans the primary colour,
+/// drawn semibold so they stand apart from keys. In light themes strings
+/// and numbers are darkened towards the text so they stay readable on a
+/// white page.
 pub fn syntax(tokens: &Tokens) -> Syntax {
     let readable = |colour: Color| {
         if tokens.is_dark {
@@ -1058,7 +1083,7 @@ pub fn syntax(tokens: &Tokens) -> Syntax {
         punctuation: tokens.muted_foreground,
         string: readable(tokens.success),
         number: readable(tokens.warning),
-        boolean: readable(tokens.destructive),
+        boolean: tokens.primary,
         null: tokens.muted_foreground,
     }
 }
@@ -1072,6 +1097,15 @@ pub fn value_colour(tokens: &Tokens, kind: Kind) -> Color {
         Kind::Number => syntax.number,
         Kind::Bool => syntax.boolean,
         Kind::Null => syntax.null,
+    }
+}
+
+/// The font of a value of this kind: semibold for booleans, so they stand
+/// apart from keys when the primary colour is close to the text colour.
+pub fn value_font(kind: Kind) -> Font {
+    match kind {
+        Kind::Bool => theme::semibold(),
+        _ => theme::font(),
     }
 }
 
@@ -1097,9 +1131,21 @@ pub struct RowStyle {
     pub ring: Option<Color>,
 }
 
-/// Resolves a row's colours. The highlighted row takes the accent, as a
-/// highlighted menu row does, and search matches a tint of the warning
-/// colour, stronger on the current one.
+/// The border around the rows, as the property grid and data table have.
+pub fn frame_style(tokens: &Tokens) -> container::Style {
+    container::Style {
+        border: Border {
+            color: tokens.border,
+            width: 1.0,
+            radius: radius::MD.into(),
+        },
+        ..container::Style::default()
+    }
+}
+
+/// Resolves a row's colours. The viewer selects nothing, so the highlighted
+/// row only carries a ring, and only while the viewer has focus. Search
+/// matches take a tint of the warning colour, stronger on the current one.
 pub fn row_style(tokens: &Tokens, status: Status) -> RowStyle {
     if status.disabled {
         return RowStyle {
@@ -1107,9 +1153,7 @@ pub fn row_style(tokens: &Tokens, status: Status) -> RowStyle {
             ring: None,
         };
     }
-    let background = if status.highlighted {
-        Some(tokens.accent)
-    } else if status.current {
+    let background = if status.current {
         Some(fade(tokens.warning, 0.35))
     } else if status.matched {
         Some(fade(tokens.warning, 0.15))
@@ -1133,7 +1177,7 @@ pub struct JsonViewer<'a, Message> {
     state: &'a State,
     search: bool,
     placeholder: String,
-    search_id: widget::Id,
+    frame: bool,
     key_width: f32,
     width: Length,
     height: Length,
@@ -1149,8 +1193,8 @@ pub fn json_viewer<Message>(state: &State) -> JsonViewer<'_, Message> {
     JsonViewer {
         state,
         search: false,
-        placeholder: "Search keys and values...".to_owned(),
-        search_id: SEARCH,
+        placeholder: "Search".to_owned(),
+        frame: true,
         key_width: KEY_WIDTH,
         width: Length::Fill,
         height: Length::Shrink,
@@ -1167,6 +1211,7 @@ impl<Message> fmt::Debug for JsonViewer<'_, Message> {
             .field("state", self.state)
             .field("search", &self.search)
             .field("placeholder", &self.placeholder)
+            .field("frame", &self.frame)
             .field("key_width", &self.key_width)
             .field("width", &self.width)
             .field("height", &self.height)
@@ -1184,16 +1229,17 @@ impl<'a, Message> JsonViewer<'a, Message> {
         self
     }
 
-    /// The search box placeholder.
+    /// The search box placeholder. Defaults to "Search".
     pub fn placeholder(mut self, placeholder: impl Into<String>) -> Self {
         self.placeholder = placeholder.into();
         self
     }
 
-    /// The search box's widget id, for focusing it. Defaults to [`SEARCH`];
-    /// give each viewer its own when a window has several.
-    pub fn search_id(mut self, id: impl Into<widget::Id>) -> Self {
-        self.search_id = id.into();
+    /// Draws a 1px rounded border around the rows, as the property grid
+    /// and data table have. On by default; turn it off when the viewer
+    /// already sits in a card or panel.
+    pub fn frame(mut self, frame: bool) -> Self {
+        self.frame = frame;
         self
     }
 
@@ -1273,7 +1319,7 @@ where
             state,
             search,
             placeholder,
-            search_id,
+            frame,
             key_width,
             width,
             height,
@@ -1338,9 +1384,24 @@ where
                 .height(height)
                 .into()
         };
+        let body: Element<'a, Message> = if frame {
+            container(body)
+                .padding(1)
+                .width(Length::Fill)
+                .height(if matches!(height, Length::Fixed(_)) {
+                    Length::Shrink
+                } else {
+                    height
+                })
+                .clip(true)
+                .style(|theme| frame_style(&Tokens::of(theme)))
+                .into()
+        } else {
+            body
+        };
         let mut parts = column![].spacing(space::SM).width(width);
         if search {
-            parts = parts.push(toolbar(state, &placeholder, search_id, on_event.clone()));
+            parts = parts.push(toolbar(state, &placeholder, on_event.clone()));
         }
         let parts = parts.push(body);
 
@@ -1348,7 +1409,9 @@ where
             return parts.into();
         };
         let on_focus = on_event.clone();
+        let clear = (!state.query().is_empty()).then(|| on_event(Event::Search(String::new())));
         scope(parts)
+            .escape(state.search_id().clone(), clear)
             .on_focus(move |focused| on_focus(Event::Focus(focused)))
             .on_key(move |key| {
                 let opened = menu
@@ -1359,6 +1422,12 @@ where
             })
             .into()
     }
+}
+
+/// Focuses the search box of `state`'s viewer, in answer to
+/// [`Output::FocusSearch`].
+pub fn focus_search<Message>(state: &State) -> Task<Message> {
+    widget::operation::focus(state.search_id().clone())
 }
 
 /// The text beside the search box: which match is current, of how many.
@@ -1377,9 +1446,9 @@ pub fn match_label(state: &State) -> String {
 fn toolbar<'a, Message: Clone + 'a>(
     state: &'a State,
     placeholder: &str,
-    id: widget::Id,
     on_event: Option<Rc<OnEvent<'a, Message>>>,
 ) -> Element<'a, Message> {
+    let id = state.search_id().clone();
     let send = |event: Event| on_event.as_ref().map(|on_event| on_event(event));
     let searching = !state.matches().is_empty();
     let field = {
@@ -1389,16 +1458,12 @@ fn toolbar<'a, Message: Clone + 'a>(
         input(placeholder, state.query())
             .id(id)
             .icon(crate::lucide!(Search))
+            .size(input::Size::Sm)
             .width(Length::Fill)
             .on_input_maybe(on_input)
             .on_submit_maybe(send(Event::NextMatch).filter(|_| searching))
     };
-    let count = text(match_label(state))
-        .size(text_size::XS)
-        .wrapping(text::Wrapping::None)
-        .style(|theme: &Theme| text::Style {
-            color: Some(Tokens::of(theme).muted_foreground),
-        });
+    let count = search_count(match_label(state));
     row![
         field,
         count,
@@ -1535,6 +1600,7 @@ fn row_view<'a, Message: Clone + 'a>(
             row![muted(summary, enabled), Space::new().width(Length::Fill)].into()
         }
         _ => ellipsis(item.text.as_str())
+            .font(value_font(kind))
             .colour(move |theme| {
                 let tokens = Tokens::of(theme);
                 if enabled {
@@ -1967,13 +2033,14 @@ mod tests {
         assert_eq!(press("ArrowRight"), Some(Action::Expand));
         assert_eq!(press("ArrowLeft"), Some(Action::Collapse));
         assert_eq!(press("Enter"), Some(Action::Toggle));
-        assert_eq!(press("Space"), Some(Action::Toggle));
+        assert_eq!(press("Space"), None, "left free, as nothing is selected");
         assert_eq!(press("*"), Some(Action::ExpandSiblings));
         assert_eq!(press("Shift+ArrowRight"), Some(Action::ExpandAll));
         assert_eq!(press("Shift+ArrowLeft"), Some(Action::CollapseAll));
         assert_eq!(press("Mod+C"), Some(Action::CopyValue));
         assert_eq!(press("Mod+Shift+C"), Some(Action::CopyPath));
-        assert_eq!(press("Mod+F"), Some(Action::Search));
+        assert_eq!(press("Mod+F"), Some(Action::FocusSearch));
+        assert_eq!(press("Escape"), Some(Action::ClearSearch));
         assert_eq!(press("F3"), Some(Action::NextMatch));
         assert_eq!(press("Shift+F3"), Some(Action::PreviousMatch));
         for action in <Action as keys::Action>::ALL {
@@ -2049,7 +2116,8 @@ mod tests {
         assert_eq!(Action::Expand.event(&state), None, "nothing highlighted");
         assert_eq!(Action::CopyValue.event(&state), None);
         assert_eq!(Action::NextMatch.event(&state), None, "no search");
-        assert_eq!(Action::Search.event(&state), Some(Event::FocusSearch));
+        assert_eq!(Action::FocusSearch.event(&state), Some(Event::FocusSearch));
+        assert_eq!(Action::ClearSearch.event(&state), None, "no search");
         assert_eq!(Action::ExpandAll.event(&state), Some(Event::ExpandAll));
         assert_eq!(Action::CollapseAll.event(&state), Some(Event::CollapseAll));
         let _ = state.update(Event::First);
@@ -2064,6 +2132,10 @@ mod tests {
         let tags = id(&state, "$.tags");
         assert_eq!(Action::CopyPath.event(&state), Some(Event::CopyPath(tags)));
         let _ = state.update(Event::Search("o".into()));
+        assert_eq!(
+            Action::ClearSearch.event(&state),
+            Some(Event::Search(String::new()))
+        );
         assert_eq!(Action::NextMatch.event(&state), Some(Event::NextMatch));
         assert_eq!(
             Action::PreviousMatch.event(&state),
@@ -2094,9 +2166,10 @@ mod tests {
             assert_eq!(syntax.key, tokens.foreground);
             assert_eq!(syntax.punctuation, tokens.muted_foreground);
             assert_eq!(syntax.null, tokens.muted_foreground);
+            assert_ne!(syntax.string, tokens.foreground);
+            assert_ne!(syntax.number, tokens.foreground);
             let colours = [syntax.string, syntax.number, syntax.boolean];
             for (index, colour) in colours.iter().enumerate() {
-                assert_ne!(*colour, tokens.foreground);
                 assert!(colours.iter().skip(index + 1).all(|other| other != colour));
             }
             if tokens.is_dark {
@@ -2110,6 +2183,51 @@ mod tests {
             assert_eq!(value_colour(&tokens, Kind::Object), syntax.punctuation);
             assert_eq!(value_colour(&tokens, Kind::Array), syntax.punctuation);
             assert_eq!(value_colour(&tokens, Kind::String), syntax.string);
+        }
+    }
+
+    /// The WCAG contrast ratio of two opaque colours.
+    fn contrast(a: Color, b: Color) -> f32 {
+        let channel = |c: f32| {
+            if c <= 0.039_28 {
+                c / 12.92
+            } else {
+                ((c + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        let luminance =
+            |c: Color| 0.2126 * channel(c.r) + 0.7152 * channel(c.g) + 0.0722 * channel(c.b);
+        let (x, y) = (luminance(a), luminance(b));
+        (x.max(y) + 0.05) / (x.min(y) + 0.05)
+    }
+
+    #[test]
+    fn booleans_are_calm_and_readable_in_both_themes() {
+        for theme in [light(), dark()] {
+            let tokens = Tokens::of(&theme);
+            let boolean = value_colour(&tokens, Kind::Bool);
+            assert_eq!(boolean, tokens.primary);
+            assert_ne!(boolean, tokens.destructive, "true is not an error");
+            assert_ne!(boolean, mix(tokens.destructive, tokens.foreground, 0.25));
+            let ratio = contrast(boolean, tokens.background);
+            assert!(ratio >= 4.5, "dark: {}, ratio {ratio}", tokens.is_dark);
+            for kind in [Kind::String, Kind::Number] {
+                let ratio = contrast(value_colour(&tokens, kind), tokens.background);
+                assert!(ratio >= 3.0, "{kind:?} dark: {}, {ratio}", tokens.is_dark);
+            }
+        }
+        assert_eq!(value_font(Kind::Bool), theme::semibold());
+        assert_eq!(value_font(Kind::String), theme::font());
+    }
+
+    #[test]
+    fn the_frame_is_a_rounded_border() {
+        for theme in [light(), dark()] {
+            let tokens = Tokens::of(&theme);
+            let style = frame_style(&tokens);
+            assert_eq!(style.border.color, tokens.border);
+            assert_eq!(style.border.width, 1.0);
+            assert!(style.background.is_none());
         }
     }
 
@@ -2165,7 +2283,7 @@ mod tests {
                     ..Status::default()
                 },
             );
-            assert_eq!(highlighted.background, Some(tokens.accent));
+            assert_eq!(highlighted.background, matched.background, "no fill");
             assert_eq!(highlighted.ring, None, "the ring needs focus");
             let focused = row_style(
                 &tokens,
@@ -2175,7 +2293,22 @@ mod tests {
                     ..Status::default()
                 },
             );
+            assert_eq!(focused.background, None);
             assert_eq!(focused.ring, Some(tokens.ring));
+            let current_focused = row_style(
+                &tokens,
+                Status {
+                    highlighted: true,
+                    focused: true,
+                    matched: true,
+                    current: true,
+                    ..Status::default()
+                },
+            );
+            assert_eq!(
+                current_focused.background, current.background,
+                "the current match keeps its tint under the ring"
+            );
 
             let disabled = row_style(
                 &tokens,
@@ -2203,21 +2336,26 @@ mod tests {
         let state = sample();
         let view: JsonViewer<'_, ()> = json_viewer(&state);
         assert!(!view.search && !view.is_enabled());
+        assert!(view.frame);
+        assert_eq!(view.placeholder, "Search");
         assert_eq!((view.width, view.height), (Length::Fill, Length::Shrink));
         assert_eq!(view.key_width, KEY_WIDTH);
         assert_eq!(view.keymap, default_keymap());
         let view = view
             .search(true)
             .placeholder("Find")
-            .search_id("other")
+            .frame(false)
             .key_width(120.0)
             .width(300)
             .height(200)
             .keymap(Keymap::new())
             .context_menu_keymap(Keymap::new())
             .on_event(|_| ());
-        assert!(view.search && view.is_enabled());
+        assert!(view.search && view.is_enabled() && !view.frame);
         assert_eq!(view.placeholder, "Find");
+        assert_eq!(state.search_id(), &SEARCH);
+        let other = sample().with_search_id("other");
+        assert_eq!(other.search_id(), &widget::Id::new("other"));
         assert_eq!(view.key_width, 120.0);
         assert_eq!(view.width, Length::Fixed(300.0));
         assert!(view.keymap.is_empty() && view.menu_keymap.is_empty());

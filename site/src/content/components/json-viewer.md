@@ -15,8 +15,10 @@ api:
     description: "Holds a serde_json::Value with everything collapsed. The members of an object or array are the top rows; any other value is a single row."
   - name: "State::parse(text)"
     description: "Parses JSON text. Invalid text gives a viewer that shows the error, with its line and column, in place of the rows; state.error() returns it."
-  - name: ".with_depth(n) / .with_filter(bool)"
-    description: "Starts with every object and array fewer than n levels deep expanded, and with the search filter on."
+  - name: ".with_depth(n) / .with_filter(bool) / .with_search_id(id)"
+    description: "Starts with every object and array fewer than n levels deep expanded, and with the search filter on. The search box's id defaults to json_viewer::SEARCH; give each viewer its own when a window has several."
+  - name: "json_viewer::focus_search(&state)"
+    description: "A task that focuses the search box, the answer to Output::FocusSearch."
   - name: "state.update(Event)"
     description: "Handles presses, expanding and collapsing (one node, a subtree, everything or to a depth), keyboard navigation, search and copying. Returns Output::CopyValue(json), CopyPath(path) or FocusSearch."
   - name: "Event::Search(text) / NextMatch / PreviousMatch / Filter(bool)"
@@ -29,8 +31,10 @@ api:
     description: "The rows on screen in order, the node the keyboard acts on, every match and the one the search moved to last."
   - name: "json_viewer(&state)"
     description: "Renders the rows. Without .on_event it renders disabled."
-  - name: ".search(bool) / .placeholder(text) / .search_id(id)"
-    description: "Shows a search box above the rows with the match count, previous and next buttons and a filter toggle. Its id defaults to json_viewer::SEARCH."
+  - name: ".search(bool) / .placeholder(text)"
+    description: "Shows a search box above the rows with the match count, previous and next buttons and a filter toggle. The placeholder defaults to \"Search\"."
+  - name: ".frame(bool)"
+    description: "Draws a 1px rounded border around the rows, as the property grid and data table have. On by default; turn it off when the viewer already sits in a card or panel."
   - name: ".height(length) / .width(length) / .key_width(px)"
     description: "A fixed or filling height scrolls the rows, and only the rows in view are built. Keys longer than key_width end in an ellipsis."
   - name: ".context_menu(&menu, f)"
@@ -40,15 +44,17 @@ api:
   - name: "json_viewer::default_keymap() / action.event(&state)"
     description: "The default shortcuts, and the Event a resolved Action sends. State::key_event does both."
   - name: "json_viewer::syntax(tokens) / value_colour(tokens, kind) / row_style(tokens, Status)"
-    description: "The colours of keys and of each kind of value, taken from the theme's success, warning and destructive tokens, and the row colours for the highlight and search matches."
+    description: "The colours of keys and of each kind of value, taken from the theme's success, warning and primary tokens, and the row colours for the keyboard ring and search matches."
 ---
 
 The JSON viewer shows structured data such as an API response, a configuration file or an event payload. The app owns a `json_viewer::State` built from a `serde_json::Value`, or from text with `State::parse`, and routes the viewer's events into it.
 
-Objects and arrays show how many members they hold, as `{3}` or `[12]`, and expand with their chevron, a double click or the keyboard. Strings, numbers, booleans and `null` each have their own colour, taken from the theme's tokens so they follow light, dark and custom themes. A long key or value ends in an ellipsis on one line rather than wrapping; copy it to read it in full.
+Objects and arrays show how many members they hold, as `{3}` or `[12]`, and expand with their chevron, a double click or the keyboard. Strings, numbers, booleans and `null` each have their own colour, taken from the theme's tokens so they follow light, dark and custom themes. Booleans use the primary colour in semibold rather than a status colour, so `ok: true` never reads as an error. A long key or value ends in an ellipsis on one line rather than wrapping; copy it to read it in full.
+
+The rows sit in a 1px rounded frame, like the property grid's; turn it off with `.frame(false)` when the viewer is already inside a card. The viewer selects nothing, so the row the keyboard acts on carries only a ring, shown while the viewer has focus, as in the tree.
 
 The highlighted row shows two buttons: one copies its value as pretty-printed JSON and the other its path, such as `$.users[2].name`. The viewer never writes to the clipboard itself. It returns `Output::CopyValue` or `Output::CopyPath`, and the app writes the text, for example with `iced::clipboard::write`. The same outputs come from the context menu and from Ctrl+C and Ctrl+Shift+C.
 
-Searching looks in keys and values, ignoring case. Every match is tinted, the parents of each one open, and the first match is highlighted. Enter in the search box, the arrow buttons or F3 move between matches, and the filter toggle hides everything that is not a match or a parent of one. Ctrl+F returns `Output::FocusSearch`; focus the box with `iced::widget::operation::focus(json_viewer::SEARCH)`.
+Searching looks in keys and values, ignoring case. Every match is tinted, the parents of each one open, and the first match is highlighted. Enter in the search box, the arrow buttons or F3 move between matches, and the filter toggle hides everything that is not a match or a parent of one. The count beside the box reads "3 of 12" or "No matches", in a slot of its own so the box keeps its width. Ctrl+F returns `Output::FocusSearch`; answer it with `json_viewer::focus_search(&state)`. Escape in the box clears the search, and a second Escape leaves the box.
 
-The viewer resolves its keys itself, and only while it has focus, which it takes when pressed and gives up on a press elsewhere. Only the rows in view are built, so a document of tens of thousands of nodes scrolls and expands as quickly as a small one.
+The viewer resolves its keys itself, and only while it has focus, which it takes when pressed and gives up on a press elsewhere. The arrows move and open or close rows as in the tree. Enter does what a double click does: in the tree it activates a node, and here it opens or closes an object or array. Space is left free, since the viewer has nothing to select. Only the rows in view are built, so a document of tens of thousands of nodes scrolls and expands as quickly as a small one.

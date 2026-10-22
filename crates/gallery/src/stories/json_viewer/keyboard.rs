@@ -1,4 +1,4 @@
-use iced::widget::{self, column, text};
+use iced::widget::{column, text};
 use iced::{Element, Length, Task};
 use iced_cube::data::json_viewer::{self, Action, Event, Output, State, json_viewer};
 use iced_cube::keys::{Chord, Keymap};
@@ -56,7 +56,7 @@ impl Example {
                 self.last = format!("Copied {path}");
                 bridge::copy(path)
             }
-            Some(Output::FocusSearch) => widget::operation::focus(json_viewer::SEARCH),
+            Some(Output::FocusSearch) => json_viewer::focus_search(&self.package),
             None => Task::none(),
         }
     }
@@ -64,15 +64,15 @@ impl Example {
     pub fn view(&self) -> Element<'_, Message> {
         column![
             text(
-                "Click a row, then use the arrows or J and K. Shift+Right expands \
-                 everything, Ctrl+C copies the value, Ctrl+Shift+C its path and Ctrl+F \
-                 searches."
+                "Click a row, then use the arrows or J and K. Enter opens or closes, \
+                 Ctrl+C copies the value, Ctrl+Shift+C its path, Ctrl+F searches and \
+                 Escape clears the search."
             )
             .size(text_size::SM),
             json_viewer(&self.package)
                 .search(true)
                 .keymap(self.keymap.clone())
-                .height(256)
+                .height(248)
                 .on_event(Message::Viewer),
             text(&self.last).size(text_size::SM),
         ]

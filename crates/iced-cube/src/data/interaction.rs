@@ -1,4 +1,4 @@
-//! What the tree and the data table share: a [`Scope`] that takes focus
+//! What the data views share: a [`Scope`] that takes focus
 //! when pressed and resolves keys only while it has it, a [`Pressable`] row
 //! that reports clicks with the modifiers held, and a [`RowMenu`] that
 //! gives every row the same context menu.
@@ -6,6 +6,7 @@
 #[cfg(any(
     feature = "data-table",
     feature = "json-viewer",
+    feature = "property-grid",
     feature = "tree",
     feature = "virtual-list"
 ))]
@@ -20,6 +21,7 @@ use iced::advanced::widget::{Operation, Tree, Widget, tree};
 use iced::advanced::{Clipboard, Renderer as _, Shell};
 use iced::keyboard::{self, Modifiers};
 use iced::touch::{self, Finger};
+use iced::widget;
 use iced::{
     Background, Border, Color, Element, Event, Length, Point, Rectangle, Renderer, Shadow, Size,
     Theme, Vector, mouse,
@@ -29,6 +31,7 @@ use crate::keys;
 #[cfg(any(
     feature = "data-table",
     feature = "json-viewer",
+    feature = "property-grid",
     feature = "tree",
     feature = "virtual-list"
 ))]
@@ -36,6 +39,7 @@ use crate::keys::Keymap;
 #[cfg(any(
     feature = "data-table",
     feature = "json-viewer",
+    feature = "property-grid",
     feature = "tree",
     feature = "virtual-list"
 ))]
@@ -51,6 +55,7 @@ pub(crate) struct Scope<'a, Message> {
     content: Element<'a, Message>,
     on_key: Option<OnKey<'a, Message>>,
     on_focus: Option<OnFocus<'a, Message>>,
+    escapes: Vec<(widget::Id, Box<dyn Fn() -> Message + 'a>)>,
 }
 
 pub(crate) fn scope<'a, Message>(content: impl Into<Element<'a, Message>>) -> Scope<'a, Message> {
@@ -58,6 +63,7 @@ pub(crate) fn scope<'a, Message>(content: impl Into<Element<'a, Message>>) -> Sc
         content: content.into(),
         on_key: None,
         on_focus: None,
+        escapes: Vec::new(),
     }
 }
 
@@ -71,6 +77,53 @@ impl<'a, Message> Scope<'a, Message> {
         self.on_focus = Some(Box::new(on_focus));
         self
     }
+
+    /// Sends `message` for Escape while the text field `id` has focus,
+    /// before the field can take the key and lose focus. Without a message
+    /// Escape reaches the field as usual.
+    #[cfg(any(feature = "json-viewer", feature = "property-grid"))]
+    pub(crate) fn escape(mut self, id: widget::Id, message: Option<Message>) -> Self
+    where
+        Message: Clone + 'a,
+    {
+        if let Some(message) = message {
+            self.escapes.push((id, Box::new(move || message.clone())));
+        }
+        self
+    }
+}
+
+/// Finds whether the field with an id has focus.
+struct Probe<'a> {
+    target: &'a widget::Id,
+    focused: bool,
+}
+
+impl Operation for Probe<'_> {
+    fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation)) {
+        operate(self);
+    }
+
+    fn focusable(
+        &mut self,
+        id: Option<&widget::Id>,
+        _bounds: Rectangle,
+        state: &mut dyn Focusable,
+    ) {
+        if id == Some(self.target) && state.is_focused() {
+            self.focused = true;
+        }
+    }
+}
+
+fn is_escape(event: &Event) -> bool {
+    matches!(
+        event,
+        Event::Keyboard(keyboard::Event::KeyPressed {
+            key: keyboard::Key::Named(keyboard::key::Named::Escape),
+            ..
+        })
+    )
 }
 
 /// Whether a scope has focus, and what it last told the app.
@@ -213,6 +266,25 @@ impl<Message> Widget<Message, Theme, Renderer> for Scope<'_, Message> {
                 shell.publish(on_focus(focus.focused));
             }
         }
+        if is_escape(event) {
+            for (id, message) in &self.escapes {
+                let mut probe = Probe {
+                    target: id,
+                    focused: false,
+                };
+                self.content.as_widget_mut().operate(
+                    &mut children[0],
+                    layout,
+                    renderer,
+                    &mut probe,
+                );
+                if probe.focused {
+                    shell.publish(message());
+                    shell.capture_event();
+                    return;
+                }
+            }
+        }
 
         self.content.as_widget_mut().update(
             &mut children[0],
@@ -281,6 +353,7 @@ impl<'a, Message: 'a> From<Scope<'a, Message>> for Element<'a, Message> {
 #[cfg(any(
     feature = "data-table",
     feature = "json-viewer",
+    feature = "property-grid",
     feature = "tree",
     feature = "virtual-list"
 ))]
@@ -288,6 +361,7 @@ type Wrap<'a, Key, Message> = dyn Fn(Key, Element<'a, Message>) -> Element<'a, M
 #[cfg(any(
     feature = "data-table",
     feature = "json-viewer",
+    feature = "property-grid",
     feature = "tree",
     feature = "virtual-list"
 ))]
@@ -299,6 +373,7 @@ type Open<'a, Key, Message> = dyn Fn(Key) -> Message + 'a;
 #[cfg(any(
     feature = "data-table",
     feature = "json-viewer",
+    feature = "property-grid",
     feature = "tree",
     feature = "virtual-list"
 ))]
@@ -312,6 +387,7 @@ pub(crate) struct RowMenu<'a, Key, Message> {
 #[cfg(any(
     feature = "data-table",
     feature = "json-viewer",
+    feature = "property-grid",
     feature = "tree",
     feature = "virtual-list"
 ))]
@@ -336,6 +412,7 @@ impl<'a, Key, Message> RowMenu<'a, Key, Message> {
 #[cfg(any(
     feature = "data-table",
     feature = "json-viewer",
+    feature = "property-grid",
     feature = "tree",
     feature = "virtual-list"
 ))]
@@ -426,31 +503,6 @@ impl<Message> SearchKeys<'_, Message> {
             keyboard::key::Named::Escape => self.clear.as_ref(),
             keyboard::key::Named::Enter if press.modifiers.shift() => self.previous.as_ref(),
             _ => None,
-        }
-    }
-}
-
-/// Finds whether the focusable with an id has focus.
-#[cfg(feature = "log-viewer")]
-struct Probe<'a> {
-    target: &'a iced::widget::Id,
-    focused: bool,
-}
-
-#[cfg(feature = "log-viewer")]
-impl Operation for Probe<'_> {
-    fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation)) {
-        operate(self);
-    }
-
-    fn focusable(
-        &mut self,
-        id: Option<&iced::widget::Id>,
-        _bounds: Rectangle,
-        state: &mut dyn Focusable,
-    ) {
-        if id == Some(self.target) && state.is_focused() {
-            self.focused = true;
         }
     }
 }
@@ -597,6 +649,28 @@ impl<'a, Message: Clone + 'a> From<SearchKeys<'a, Message>> for Element<'a, Mess
     fn from(keys: SearchKeys<'a, Message>) -> Self {
         Element::new(keys)
     }
+}
+
+/// The room kept beside a search box for its count, such as "3 of 12", so
+/// the box keeps its width when the count appears.
+#[cfg(any(feature = "json-viewer", feature = "property-grid"))]
+pub(crate) const COUNT_WIDTH: f32 = 64.0;
+
+/// A search box's count in its fixed slot, ending in an ellipsis when it
+/// does not fit.
+#[cfg(any(feature = "json-viewer", feature = "property-grid"))]
+pub(crate) fn search_count<'a, Message: 'a>(label: String) -> Element<'a, Message> {
+    use crate::data::ellipsis::ellipsis;
+    use crate::theme::{Tokens, text_size};
+
+    iced::widget::container(
+        ellipsis(label)
+            .size(text_size::XS, 16.0)
+            .align_x(iced::widget::text::Alignment::Center)
+            .colour(|theme| Tokens::of(theme).muted_foreground),
+    )
+    .width(COUNT_WIDTH)
+    .into()
 }
 
 /// How far, in logical pixels, a finger may drift before a tap on a row
