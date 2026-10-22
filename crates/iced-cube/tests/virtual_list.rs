@@ -8,12 +8,15 @@ use futures::{SinkExt, StreamExt};
 use iced::keyboard::{Key, Modifiers, key::Named};
 use iced::widget::{container, text};
 use iced::{Element, Point, Size, keyboard, mouse};
-use iced_cube::data::virtual_list::{self, Event, Mode, Output, State, virtual_list};
+use iced_cube::data::virtual_list::{self, Event, Mode, Output, RowId, State, virtual_list};
+use iced_cube::overlay::context_menu;
+use iced_cube::overlay::dropdown_menu::item;
 use iced_test::simulator::Simulator;
 
 #[derive(Debug, Clone)]
 enum Message {
     List(Event<u32>),
+    Menu(context_menu::Event<u8, RowId>),
 }
 
 fn numbers(count: u32) -> State<u32> {
@@ -33,10 +36,61 @@ fn sized(element: Element<'_, Message>) -> Simulator<'_, Message> {
 
 fn events(ui: Simulator<'_, Message>) -> Vec<Event<u32>> {
     ui.into_messages()
-        .map(|message| match message {
-            Message::List(event) => event,
+        .filter_map(|message| match message {
+            Message::List(event) => Some(event),
+            Message::Menu(_) => None,
         })
         .collect()
+}
+
+fn with_menu<'a>(
+    state: &'a State<u32>,
+    menu: &'a context_menu::State<u8, RowId>,
+) -> Element<'a, Message> {
+    virtual_list(state, |_, n: &u32| text(format!("Row {n}")).into())
+        .height(300)
+        .context_menu(menu, Message::Menu)
+        .on_event(Message::List)
+        .into()
+}
+
+#[test]
+fn a_right_click_opens_the_context_menu_on_that_row() {
+    let state = numbers(20).with_limit(18);
+    let menu = context_menu::State::new([item(1, "Open")]);
+    let mut ui = sized(with_menu(&state, &menu));
+    let row = ui.find("Row 4").expect("row").bounds();
+    ui.point_at(row.center());
+    let _ = ui.simulate([
+        iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right)),
+        iced::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Right)),
+    ]);
+    let opened: Vec<RowId> = ui
+        .into_messages()
+        .filter_map(|message| match message {
+            Message::Menu(context_menu::Event::Open(id, _)) => Some(id),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(opened, [4], "keyed by row id, not index");
+    assert_eq!(state.index(4), Some(2));
+}
+
+#[test]
+fn shift_f10_opens_the_menu_on_the_highlighted_row() {
+    let mut state = numbers(10);
+    let _ = state.update(Event::Press(3, Modifiers::empty()));
+    let menu = context_menu::State::new([item(1, "Open")]);
+    let mut ui = sized(with_menu(&state, &menu));
+    ui.click("Row 3").expect("row");
+    let _ = ui.simulate([press_key(Key::Named(Named::F10), Modifiers::SHIFT)]);
+    let opened = ui.into_messages().any(|message| {
+        matches!(
+            message,
+            Message::Menu(context_menu::Event::OpenFromKeyboard(3))
+        )
+    });
+    assert!(opened);
 }
 
 fn press_key(key: Key, modifiers: Modifiers) -> iced::Event {

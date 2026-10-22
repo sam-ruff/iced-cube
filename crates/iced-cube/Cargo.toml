@@ -126,8 +126,8 @@ property-grid = [
     "switch",
     "tooltip",
 ]
-virtual-list = ["iced/advanced", "scroll-area"]
-log-viewer = ["virtual-list", "button", "icon-button", "input"]
+virtual-list = ["iced/advanced", "context-menu", "scroll-area"]
+log-viewer = ["virtual-list", "button", "context-menu", "icon-button", "input", "toggle-group"]
 
 [dependencies]
 iced = { version = "0.14.0", default-features = false, features = ["svg"] }

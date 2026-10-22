@@ -3,7 +3,12 @@
 //! that reports clicks with the modifiers held, and a [`RowMenu`] that
 //! gives every row the same context menu.
 
-#[cfg(any(feature = "data-table", feature = "json-viewer", feature = "tree"))]
+#[cfg(any(
+    feature = "data-table",
+    feature = "json-viewer",
+    feature = "tree",
+    feature = "virtual-list"
+))]
 use std::rc::Rc;
 
 use iced::advanced::layout::{self, Layout};
@@ -21,9 +26,19 @@ use iced::{
 };
 
 use crate::keys;
-#[cfg(any(feature = "data-table", feature = "json-viewer", feature = "tree"))]
+#[cfg(any(
+    feature = "data-table",
+    feature = "json-viewer",
+    feature = "tree",
+    feature = "virtual-list"
+))]
 use crate::keys::Keymap;
-#[cfg(any(feature = "data-table", feature = "json-viewer", feature = "tree"))]
+#[cfg(any(
+    feature = "data-table",
+    feature = "json-viewer",
+    feature = "tree",
+    feature = "virtual-list"
+))]
 use crate::overlay::context_menu;
 
 type OnKey<'a, Message> = Box<dyn Fn(&keys::Event) -> Option<Message> + 'a>;
@@ -263,15 +278,30 @@ impl<'a, Message: 'a> From<Scope<'a, Message>> for Element<'a, Message> {
     }
 }
 
-#[cfg(any(feature = "data-table", feature = "json-viewer", feature = "tree"))]
+#[cfg(any(
+    feature = "data-table",
+    feature = "json-viewer",
+    feature = "tree",
+    feature = "virtual-list"
+))]
 type Wrap<'a, Key, Message> = dyn Fn(Key, Element<'a, Message>) -> Element<'a, Message> + 'a;
-#[cfg(any(feature = "data-table", feature = "json-viewer", feature = "tree"))]
+#[cfg(any(
+    feature = "data-table",
+    feature = "json-viewer",
+    feature = "tree",
+    feature = "virtual-list"
+))]
 type MenuKey<'a, Key, Message> = dyn Fn(&keys::Event, Key) -> Option<Message> + 'a;
 #[cfg(feature = "data-table")]
 type Open<'a, Key, Message> = dyn Fn(Key) -> Message + 'a;
 
 /// One context menu shared by every row, told apart by the row's key.
-#[cfg(any(feature = "data-table", feature = "json-viewer", feature = "tree"))]
+#[cfg(any(
+    feature = "data-table",
+    feature = "json-viewer",
+    feature = "tree",
+    feature = "virtual-list"
+))]
 pub(crate) struct RowMenu<'a, Key, Message> {
     wrap: Box<Wrap<'a, Key, Message>>,
     key: Box<MenuKey<'a, Key, Message>>,
@@ -279,7 +309,12 @@ pub(crate) struct RowMenu<'a, Key, Message> {
     open: Box<Open<'a, Key, Message>>,
 }
 
-#[cfg(any(feature = "data-table", feature = "json-viewer", feature = "tree"))]
+#[cfg(any(
+    feature = "data-table",
+    feature = "json-viewer",
+    feature = "tree",
+    feature = "virtual-list"
+))]
 impl<'a, Key, Message> RowMenu<'a, Key, Message> {
     /// Makes a row an area of the menu.
     pub(crate) fn wrap(&self, key: Key, row: Element<'a, Message>) -> Element<'a, Message> {
@@ -298,7 +333,12 @@ impl<'a, Key, Message> RowMenu<'a, Key, Message> {
     }
 }
 
-#[cfg(any(feature = "data-table", feature = "json-viewer", feature = "tree"))]
+#[cfg(any(
+    feature = "data-table",
+    feature = "json-viewer",
+    feature = "tree",
+    feature = "virtual-list"
+))]
 pub(crate) fn row_menu<'a, Id, Key, Message>(
     state: &'a context_menu::State<Id, Key>,
     keymap: Keymap<context_menu::Action>,
@@ -333,6 +373,229 @@ where
         key: Box::new(key),
         #[cfg(feature = "data-table")]
         open: Box::new(move |key| on_event(context_menu::Event::OpenFromKeyboard(key))),
+    }
+}
+
+/// Wraps a search field so the keys a field would otherwise swallow follow
+/// the shared search convention while it has focus: Escape clears the
+/// text, leaving the field for a second Escape, and Shift+Enter steps back
+/// a match. Enter stays with the field's own submit.
+#[cfg(feature = "log-viewer")]
+pub(crate) struct SearchKeys<'a, Message> {
+    content: Element<'a, Message>,
+    id: iced::widget::Id,
+    clear: Option<Message>,
+    previous: Option<Message>,
+}
+
+#[cfg(feature = "log-viewer")]
+pub(crate) fn search_keys<'a, Message>(
+    content: impl Into<Element<'a, Message>>,
+    id: iced::widget::Id,
+) -> SearchKeys<'a, Message> {
+    SearchKeys {
+        content: content.into(),
+        id,
+        clear: None,
+        previous: None,
+    }
+}
+
+#[cfg(feature = "log-viewer")]
+impl<Message> SearchKeys<'_, Message> {
+    /// Sent for Escape while the field has focus. `None` leaves Escape to
+    /// the field, which then loses focus.
+    pub(crate) fn on_clear(mut self, message: Option<Message>) -> Self {
+        self.clear = message;
+        self
+    }
+
+    /// Sent for Shift+Enter while the field has focus.
+    pub(crate) fn on_previous(mut self, message: Option<Message>) -> Self {
+        self.previous = message;
+        self
+    }
+
+    /// The message a key press stands for while the field has focus.
+    fn message(&self, event: &Event) -> Option<&Message> {
+        let press = key_press(event)?;
+        let keyboard::Key::Named(named) = press.key else {
+            return None;
+        };
+        match named {
+            keyboard::key::Named::Escape => self.clear.as_ref(),
+            keyboard::key::Named::Enter if press.modifiers.shift() => self.previous.as_ref(),
+            _ => None,
+        }
+    }
+}
+
+/// Finds whether the focusable with an id has focus.
+#[cfg(feature = "log-viewer")]
+struct Probe<'a> {
+    target: &'a iced::widget::Id,
+    focused: bool,
+}
+
+#[cfg(feature = "log-viewer")]
+impl Operation for Probe<'_> {
+    fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation)) {
+        operate(self);
+    }
+
+    fn focusable(
+        &mut self,
+        id: Option<&iced::widget::Id>,
+        _bounds: Rectangle,
+        state: &mut dyn Focusable,
+    ) {
+        if id == Some(self.target) && state.is_focused() {
+            self.focused = true;
+        }
+    }
+}
+
+#[cfg(feature = "log-viewer")]
+impl<Message: Clone> Widget<Message, Theme, Renderer> for SearchKeys<'_, Message> {
+    fn children(&self) -> Vec<Tree> {
+        vec![Tree::new(&self.content)]
+    }
+
+    fn diff(&self, tree: &mut Tree) {
+        tree.diff_children(std::slice::from_ref(&self.content));
+    }
+
+    fn size(&self) -> Size<Length> {
+        self.content.as_widget().size()
+    }
+
+    fn size_hint(&self) -> Size<Length> {
+        self.content.as_widget().size_hint()
+    }
+
+    fn layout(
+        &mut self,
+        tree: &mut Tree,
+        renderer: &Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
+        self.content
+            .as_widget_mut()
+            .layout(&mut tree.children[0], renderer, limits)
+    }
+
+    fn draw(
+        &self,
+        tree: &Tree,
+        renderer: &mut Renderer,
+        theme: &Theme,
+        style: &renderer::Style,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+    ) {
+        self.content.as_widget().draw(
+            &tree.children[0],
+            renderer,
+            theme,
+            style,
+            layout,
+            cursor,
+            viewport,
+        );
+    }
+
+    fn operate(
+        &mut self,
+        tree: &mut Tree,
+        layout: Layout<'_>,
+        renderer: &Renderer,
+        operation: &mut dyn Operation,
+    ) {
+        self.content
+            .as_widget_mut()
+            .operate(&mut tree.children[0], layout, renderer, operation);
+    }
+
+    fn update(
+        &mut self,
+        tree: &mut Tree,
+        event: &Event,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        renderer: &Renderer,
+        clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, Message>,
+        viewport: &Rectangle,
+    ) {
+        if let Some(message) = self.message(event).cloned() {
+            let mut probe = Probe {
+                target: &self.id,
+                focused: false,
+            };
+            self.content.as_widget_mut().operate(
+                &mut tree.children[0],
+                layout,
+                renderer,
+                &mut probe,
+            );
+            if probe.focused {
+                shell.publish(message);
+                shell.capture_event();
+                return;
+            }
+        }
+        self.content.as_widget_mut().update(
+            &mut tree.children[0],
+            event,
+            layout,
+            cursor,
+            renderer,
+            clipboard,
+            shell,
+            viewport,
+        );
+    }
+
+    fn mouse_interaction(
+        &self,
+        tree: &Tree,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+        renderer: &Renderer,
+    ) -> mouse::Interaction {
+        self.content.as_widget().mouse_interaction(
+            &tree.children[0],
+            layout,
+            cursor,
+            viewport,
+            renderer,
+        )
+    }
+
+    fn overlay<'b>(
+        &'b mut self,
+        tree: &'b mut Tree,
+        layout: Layout<'b>,
+        renderer: &Renderer,
+        viewport: &Rectangle,
+        translation: Vector,
+    ) -> Option<overlay::Element<'b, Message, Theme, Renderer>> {
+        self.content.as_widget_mut().overlay(
+            &mut tree.children[0],
+            layout,
+            renderer,
+            viewport,
+            translation,
+        )
+    }
+}
+
+#[cfg(feature = "log-viewer")]
+impl<'a, Message: Clone + 'a> From<SearchKeys<'a, Message>> for Element<'a, Message> {
+    fn from(keys: SearchKeys<'a, Message>) -> Self {
+        Element::new(keys)
     }
 }
 

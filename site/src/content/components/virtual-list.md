@@ -35,15 +35,17 @@ api:
     description: "Every row's height, 32 by default, and the list's size. A fixed or filling height scrolls the rows."
   - name: ".keymap(keymap)"
     description: "Replaces the default keymap the focused list resolves keys with."
+  - name: ".context_menu(&menu, on_event) / .context_menu_keymap(keymap)"
+    description: "Gives every row a context menu keyed by its RowId, opened with a right-click, a long press or Shift+F10 on the highlighted row, and replaces the menu's keymap."
   - name: "virtual_list::default_keymap() / action.event(&state)"
     description: "The default shortcuts, and the Event a resolved Action sends. State::key_event does both."
   - name: "virtual_list::row_style(tokens, Status) / frame_style(tokens)"
-    description: "The row colours: the accent behind selected rows, a lighter tint under the pointer and a ring around the keyboard highlight, inside a bordered frame."
+    description: "The row colours, as a tree's rows: the accent behind selected rows, a lighter tint under the pointer and a ring around the keyboard highlight while the list has focus, inside a bordered frame."
 ---
 
 A virtual list shows thousands of items without building thousands of widgets. Every row is the same height, so the list knows where each one sits and builds only the rows in view, plus a few either side so scrolling never shows a gap. The app owns a `virtual_list::State` holding the items and routes the list's events into it. The closure passed to `virtual_list` draws one row from its index and item, and only runs for rows in view.
 
-Pressing a row highlights it, and in single or multiple mode selects it. In multiple mode Ctrl or Cmd adds or removes one item and Shift selects the range from the last one pressed. A double click or Enter activates the highlighted item. Give the list a fixed or filling height: one that shrinks to fit has to build every row.
+Pressing a row highlights it, and in single or multiple mode selects it. In multiple mode Ctrl or Cmd adds or removes one item and Shift selects the range from the last one pressed. Space selects the highlighted item, and a double click or Enter activates it. `.context_menu(&menu, on_event)` gives every row a menu, keyed by its `RowId`; `state.index(id)` turns that back into an index. Give the list a fixed or filling height: one that shrinks to fit has to build every row.
 
 Items can stream in from threads or tasks. `virtual_list::subscription()` owns a bounded channel and sends `Event::Ready` with its sender first. Hand clones of the sender to producers, and items arrive in batches, so a burst costs one update rather than one per item. A list made `with_follow(true)` stays scrolled to its newest item. Scrolling up stops following, so the rows stay still while you read, and scrolling back to the end or pressing End starts again. `with_limit(n)` drops the oldest items once the list holds that many, and the rows in view stay where they are as older ones go.
 

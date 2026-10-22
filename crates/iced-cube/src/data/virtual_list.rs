@@ -65,9 +65,10 @@ use iced::keyboard::key::Named;
 use iced::widget::{column, container};
 use iced::{Alignment, Border, Color, Element, Length, Padding, Subscription};
 
-use crate::data::interaction::{Look, pressable, scope};
+use crate::data::interaction::{Look, RowMenu, pressable, row_menu, scope};
 use crate::data::rows::rows;
 use crate::keys::{self, Chord, Keymap};
+use crate::overlay::context_menu;
 use crate::theme::{Tokens, fade, radius, space};
 
 /// The default height of every row.
@@ -706,12 +707,13 @@ pub struct RowStyle {
     pub ring: Option<Color>,
 }
 
-/// Resolves a row's colours: the accent behind a selected row, a lighter
-/// tint under the pointer and a ring around the keyboard highlight.
+/// Resolves a row's colours as a tree's rows do: the accent behind a
+/// selected row, a lighter tint under the pointer and a ring around the
+/// keyboard highlight. Disabled rows are plain.
 pub fn row_style(tokens: &Tokens, status: Status) -> RowStyle {
     if status.disabled {
         return RowStyle {
-            background: status.selected.then_some(tokens.muted),
+            background: None,
             ring: None,
         };
     }
@@ -742,6 +744,8 @@ pub fn frame_style(tokens: &Tokens) -> container::Style {
 
 type OnEvent<'a, T, Message> = dyn Fn(Event<T>) -> Message + 'a;
 type RowView<'a, T, Message> = dyn Fn(usize, &'a T) -> Element<'a, Message> + 'a;
+type BuildMenu<'a, Message> =
+    dyn FnOnce(Keymap<context_menu::Action>) -> RowMenu<'a, RowId, Message> + 'a;
 
 /// A virtual list builder. Convert it into an [`Element`] to render.
 pub struct VirtualList<'a, T, Message> {
@@ -751,6 +755,8 @@ pub struct VirtualList<'a, T, Message> {
     width: Length,
     height: Length,
     keymap: Keymap<Action>,
+    menu: Option<Box<BuildMenu<'a, Message>>>,
+    menu_keymap: Keymap<context_menu::Action>,
     on_event: Option<Box<OnEvent<'a, T, Message>>>,
 }
 
@@ -768,6 +774,8 @@ pub fn virtual_list<'a, T, Message>(
         width: Length::Fill,
         height: Length::Shrink,
         keymap: default_keymap(),
+        menu: None,
+        menu_keymap: context_menu::default_keymap(),
         on_event: None,
     }
 }
@@ -814,6 +822,31 @@ impl<'a, T, Message> VirtualList<'a, T, Message> {
         self
     }
 
+    /// Gives every row the context menu of `menu`, keyed by the row's
+    /// [`RowId`]; turn it into an index with [`State::index`]. It opens on a
+    /// right-click or a long press, and on the highlighted row with its
+    /// opening chord while the list has focus.
+    pub fn context_menu<MenuId>(
+        mut self,
+        menu: &'a context_menu::State<MenuId, RowId>,
+        on_event: impl Fn(context_menu::Event<MenuId, RowId>) -> Message + 'a,
+    ) -> Self
+    where
+        MenuId: Copy + PartialEq + 'a,
+        Message: Clone + 'a,
+    {
+        let on_event: Rc<dyn Fn(context_menu::Event<MenuId, RowId>) -> Message + 'a> =
+            Rc::new(on_event);
+        self.menu = Some(Box::new(move |keymap| row_menu(menu, keymap, on_event)));
+        self
+    }
+
+    /// Replaces the context menu's default keymap.
+    pub fn context_menu_keymap(mut self, keymap: Keymap<context_menu::Action>) -> Self {
+        self.menu_keymap = keymap;
+        self
+    }
+
     pub fn is_enabled(&self) -> bool {
         self.on_event.is_some()
     }
@@ -832,23 +865,27 @@ where
             width,
             height,
             keymap,
+            menu,
+            menu_keymap,
             on_event,
         } = list;
         let on_event: Option<Rc<OnEvent<'a, T, Message>>> = on_event.map(Rc::from);
+        let menu = menu
+            .filter(|_| on_event.is_some())
+            .map(|build| Rc::new(build(menu_keymap)));
 
         let build = {
             let on_event = on_event.clone();
+            let menu = menu.clone();
             move |range: Range<usize>| -> Element<'a, Message> {
                 column(range.filter_map(|index| {
                     let item = state.get(index)?;
                     let content = row(index, item);
-                    Some(row_frame(
-                        state,
-                        index,
-                        content,
-                        row_height,
-                        on_event.as_ref(),
-                    ))
+                    let framed = row_frame(state, index, content, row_height, on_event.as_ref());
+                    Some(match &menu {
+                        Some(menu) => menu.wrap(state.id(index), framed),
+                        None => framed,
+                    })
                 }))
                 .into()
             }
@@ -883,7 +920,14 @@ where
         let on_focus = on_event.clone();
         scope(framed)
             .on_focus(move |focused| on_focus(Event::Focus(focused)))
-            .on_key(move |key| state.key_event(&keymap, key).map(&*on_event))
+            .on_key(move |key| {
+                let target = state.highlighted().map(|index| state.id(index));
+                let opened = menu
+                    .as_ref()
+                    .zip(target)
+                    .and_then(|(menu, target)| menu.key(key, target));
+                opened.or_else(|| state.key_event(&keymap, key).map(&*on_event))
+            })
             .into()
     }
 }
@@ -1371,8 +1415,18 @@ mod tests {
                     selected: true,
                 },
             );
-            assert_eq!(disabled.background, Some(tokens.muted));
+            assert_eq!(disabled.background, None);
             assert_eq!(disabled.ring, None);
+            #[cfg(feature = "tree")]
+            {
+                use crate::data::tree;
+                let selected_node = tree::Status {
+                    selected: true,
+                    ..tree::Status::default()
+                };
+                let node = tree::row_style(&tokens, selected_node);
+                assert_eq!(selected.background, node.background, "rows match a tree's");
+            }
             assert_eq!(frame_style(&tokens).border.color, tokens.border);
         }
     }
@@ -1385,7 +1439,17 @@ mod tests {
         assert!(!list.is_enabled());
         assert_eq!(list.row_height, ROW_HEIGHT);
         assert_eq!(list.height, Length::Shrink);
-        let list = list.row_height(0.0).height(200).on_event(|_| ());
+        assert!(list.menu.is_none());
+        assert_eq!(list.menu_keymap, context_menu::default_keymap());
+        let menu: context_menu::State<u8, RowId> = context_menu::State::new([]);
+        let list = list
+            .row_height(0.0)
+            .height(200)
+            .context_menu(&menu, |_| ())
+            .context_menu_keymap(Keymap::new())
+            .on_event(|_| ());
+        assert!(list.menu.is_some());
+        assert!(list.menu_keymap.is_empty());
         assert!(list.is_enabled());
         assert_eq!(list.row_height, 1.0);
         assert_eq!(list.height, Length::Fixed(200.0));
