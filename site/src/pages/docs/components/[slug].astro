@@ -7,6 +7,7 @@ import { components, componentHref, guides, type Component } from "../../../lib/
 import { story } from "../../../lib/stories";
 import { keymapFor } from "../../../lib/keymaps";
 import { href } from "../../../lib/paths";
+import { breakableSignature } from "../../../lib/signature";
 
 interface PagerLink {
   title: string;
@@ -140,8 +141,8 @@ const pager = {
             <tbody>
               {data.api.map((item) => (
                 <tr>
-                  <td>
-                    <code>{item.name}</code>
+                  <td class="signature">
+                    <code set:html={breakableSignature(item.name)} />
                   </td>
                   <td set:html={inline(item.description)} />
                 </tr>
@@ -351,6 +352,18 @@ const pager = {
 
   td:first-child {
     white-space: nowrap;
+  }
+
+  /* Long signatures wrap at their break opportunities within a capped
+     width, so the description column keeps a readable measure. */
+  td.signature {
+    white-space: normal;
+  }
+
+  td.signature code {
+    display: inline-block;
+    max-width: 20rem;
+    overflow-wrap: normal;
   }
 
   td:last-child {

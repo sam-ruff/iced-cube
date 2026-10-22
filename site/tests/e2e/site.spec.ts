@@ -175,6 +175,24 @@ test("long inline code in usage notes wraps instead of widening the page", async
   await noHorizontalScroll(page);
 });
 
+test("API tables with long signatures fit without scrolling sideways", async ({ page, isMobile }) => {
+  for (const slug of ["data-table", "status-bar", "log-viewer"]) {
+    await page.goto(`docs/components/${slug}/`);
+    const table = page.getByRole("region", { name: "API" });
+    await expect(table).toBeVisible();
+    const sizes = await table.evaluate((wrap) => ({
+      overflow: wrap.scrollWidth - wrap.clientWidth,
+      description: wrap.querySelector("td:last-child")?.getBoundingClientRect().width ?? 0,
+      table: wrap.clientWidth,
+    }));
+    expect(sizes.overflow, slug).toBeLessThanOrEqual(0);
+    if (!isMobile) {
+      expect(sizes.description, slug).toBeGreaterThan(sizes.table * 0.45);
+    }
+    await noHorizontalScroll(page);
+  }
+});
+
 test("long lists take the wheel and touch inside their previews", async ({ page }) => {
   await page.goto("docs/components/virtual-list/");
   await expect(page.locator('[data-story="virtual-list/large"]').first()).toHaveAttribute("data-wheel", "true");
