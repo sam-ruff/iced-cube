@@ -2,6 +2,7 @@ use iced::widget::{column, row, text};
 use iced::{Alignment, Element, Length};
 use iced_cube::avatar;
 use iced_cube::feedback::avatar::Presence;
+use iced_cube::theme::Tokens;
 
 const TEAM: [(&str, &str, Presence); 4] = [
     ("Ada Lovelace", "Online", Presence::Online),
@@ -23,7 +24,13 @@ impl Example {
         let members = TEAM.map(|(name, status, presence)| {
             row![
                 avatar(name).presence(presence),
-                column![text(name).size(14), text(status).size(12)].spacing(2),
+                column![
+                    text(name).size(14),
+                    text(status).size(12).style(|theme| text::Style {
+                        color: Some(Tokens::of(theme).muted_foreground),
+                    }),
+                ]
+                .spacing(2),
             ]
             .spacing(12)
             .align_y(Alignment::Center)

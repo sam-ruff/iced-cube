@@ -17,7 +17,7 @@ use iced::{Alignment, Background, Border, Color, Element, Length, Padding, Theme
 use crate::icon::{Glyph, themed};
 use crate::lucide;
 use crate::natural::natural;
-use crate::theme::{Tokens, radius, semibold};
+use crate::theme::{Tokens, mix, radius, semibold};
 
 /// Avatar dimensions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -279,13 +279,26 @@ fn dot<'a, Message: 'a>(presence: Presence, diameter: f32) -> Element<'a, Messag
 /// rather than on a raised card.
 pub const RING: f32 = 2.0;
 
-/// The container style of an avatar: muted behind initials and icons, with
-/// a ring in the background colour when `ring` is set.
+/// The fill behind initials and icons: the muted surface, lifted a little
+/// in dark themes, where muted sits too close to the background for an
+/// avatar's edge, or the ring between overlapping avatars, to show.
+pub fn fill(tokens: &Tokens) -> Color {
+    if tokens.is_dark {
+        mix(tokens.muted, tokens.foreground, DARK_LIFT)
+    } else {
+        tokens.muted
+    }
+}
+
+const DARK_LIFT: f32 = 0.06;
+
+/// The container style of an avatar: the [`fill`] behind initials and
+/// icons, with a ring in the background colour when `ring` is set.
 pub fn style(tokens: &Tokens, shape: Shape, diameter: f32, ring: bool) -> container::Style {
     let ring_width = if ring { RING } else { 0.0 };
     container::Style {
         text_color: Some(tokens.muted_foreground),
-        background: Some(Background::Color(tokens.muted)),
+        background: Some(Background::Color(fill(tokens))),
         border: Border {
             color: if ring {
                 tokens.background
@@ -510,12 +523,27 @@ mod tests {
             for shape in Shape::ALL {
                 let alone = style(&tokens, shape, 32.0, false);
                 let ringed = style(&tokens, shape, 32.0, true);
-                assert_eq!(alone.background, Some(Background::Color(tokens.muted)));
+                assert_eq!(alone.background, Some(Background::Color(fill(&tokens))));
                 assert_eq!(alone.text_color, Some(tokens.muted_foreground));
                 assert_eq!(alone.border.width, 0.0);
                 assert_eq!(ringed.border.width, RING);
                 assert_eq!(ringed.border.color, tokens.background);
             }
+        }
+    }
+
+    fn lightness(colour: Color) -> f32 {
+        colour.r + colour.g + colour.b
+    }
+
+    #[test]
+    fn the_ring_stands_out_against_the_fill_in_both_themes() {
+        for theme in [light(), dark()] {
+            let tokens = Tokens::of(&theme);
+            let ringed = style(&tokens, Shape::Circle, 32.0, true);
+            assert_eq!(ringed.border.color, tokens.background);
+            let gap = (lightness(fill(&tokens)) - lightness(tokens.background)).abs();
+            assert!(gap > 0.35, "dark: {} gap {gap}", tokens.is_dark);
         }
     }
 
