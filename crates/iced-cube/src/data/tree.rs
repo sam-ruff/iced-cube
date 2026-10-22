@@ -29,7 +29,7 @@ use iced::widget::{Space, column, container, mouse_area, row, text};
 use iced::{Alignment, Background, Border, Color, Element, Length, Subscription, Theme, mouse};
 
 use crate::data::ellipsis::ellipsis;
-use crate::data::interaction::{Look, RowMenu, pressable, row_menu, scope};
+use crate::data::interaction::{Look, RowMenu, pressable, ringed, row_menu, scope};
 use crate::data::rows::rows;
 use crate::feedback::badge::{self, badge};
 use crate::icon::{Glyph, opacity, themed};
@@ -1278,11 +1278,17 @@ where
         let build = {
             let on_event = on_event.clone();
             let menu = menu.clone();
+            let menu_target = menu.as_ref().and_then(|menu| menu.target());
             move |range: Range<usize>| -> Element<'a, Message> {
                 let lines = lines.get(range).unwrap_or_default();
                 column(lines.iter().map(|line| match *line {
                     Line::Node { id, depth } => {
-                        let row = node_view(state, id, depth, guides, on_event.as_ref());
+                        let ringed = ringed(
+                            menu_target.as_ref(),
+                            &id,
+                            state.focused && state.highlighted == Some(id),
+                        );
+                        let row = node_view(state, id, depth, guides, ringed, on_event.as_ref());
                         match &menu {
                             Some(menu) if state.is_enabled(id) => menu.wrap(id, row),
                             _ => row,
@@ -1379,6 +1385,7 @@ fn node_view<'a, Id, Message>(
     id: Id,
     depth: usize,
     guides: bool,
+    ringed: bool,
     on_event: Option<&Rc<OnEvent<'a, Id, Message>>>,
 ) -> Element<'a, Message>
 where
@@ -1394,7 +1401,7 @@ where
     let status = Status {
         selected: state.mode != Mode::Checkbox && state.is_selected(id),
         hovered: false,
-        highlighted: state.focused && state.highlighted == Some(id),
+        highlighted: ringed,
         disabled: !enabled,
     };
     let colours = move |theme: &Theme| row_style(&Tokens::of(theme), status);

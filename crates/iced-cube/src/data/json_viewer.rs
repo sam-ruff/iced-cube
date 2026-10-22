@@ -32,7 +32,7 @@ use iced::{Alignment, Border, Color, Element, Font, Length, Task, Theme, mouse};
 use serde_json::Value;
 
 use crate::data::ellipsis::ellipsis;
-use crate::data::interaction::{Look, RowMenu, pressable, row_menu, scope, search_count};
+use crate::data::interaction::{Look, RowMenu, pressable, ringed, row_menu, scope, search_count};
 use crate::data::rows::rows;
 use crate::feedback::alert::{self, alert};
 use crate::icon::{opacity, themed};
@@ -1307,6 +1307,8 @@ impl<'a, Message> JsonViewer<'a, Message> {
 struct Context<'a, Message> {
     state: &'a State,
     key_width: f32,
+    /// The row a context menu is open on.
+    menu_target: Option<NodeId>,
     on_event: Option<Rc<OnEvent<'a, Message>>>,
 }
 
@@ -1349,6 +1351,7 @@ where
         let context = Rc::new(Context {
             state,
             key_width,
+            menu_target: menu.as_ref().and_then(|menu| menu.target()),
             on_event: on_event.clone(),
         });
 
@@ -1522,9 +1525,10 @@ fn row_view<'a, Message: Clone + 'a>(
     let enabled = on_event.is_some();
     let expanded = state.is_expanded(id);
     let highlighted = state.highlighted() == Some(id);
+    let menu_open_here = context.menu_target == Some(id);
     let status = Status {
-        highlighted,
-        focused: state.is_focused(),
+        highlighted: ringed(context.menu_target.as_ref(), &id, highlighted),
+        focused: state.is_focused() || menu_open_here,
         hovered: false,
         matched: state.is_match(id),
         current: state.current_match() == Some(id),

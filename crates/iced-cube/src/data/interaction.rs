@@ -380,6 +380,7 @@ type Open<'a, Key, Message> = dyn Fn(Key) -> Message + 'a;
 pub(crate) struct RowMenu<'a, Key, Message> {
     wrap: Box<Wrap<'a, Key, Message>>,
     key: Box<MenuKey<'a, Key, Message>>,
+    target: Box<dyn Fn() -> Option<Key> + 'a>,
     #[cfg(feature = "data-table")]
     open: Box<Open<'a, Key, Message>>,
 }
@@ -406,6 +407,31 @@ impl<'a, Key, Message> RowMenu<'a, Key, Message> {
     #[cfg(feature = "data-table")]
     pub(crate) fn open(&self, key: Key) -> Message {
         (self.open)(key)
+    }
+
+    /// The row the menu is open on, if it is open.
+    pub(crate) fn target(&self) -> Option<Key> {
+        (self.target)()
+    }
+}
+
+/// Whether the row `key` carries the ring: the row a context menu is open
+/// on, or else the keyboard highlight.
+#[cfg(any(
+    feature = "data-table",
+    feature = "json-viewer",
+    feature = "property-grid",
+    feature = "tree",
+    feature = "virtual-list"
+))]
+pub(crate) fn ringed<Key: PartialEq>(
+    menu_target: Option<&Key>,
+    key: &Key,
+    highlighted: bool,
+) -> bool {
+    match menu_target {
+        Some(target) => target == key,
+        None => highlighted,
     }
 }
 
@@ -448,6 +474,7 @@ where
     RowMenu {
         wrap: Box::new(wrap),
         key: Box::new(key),
+        target: Box::new(move || state.target().filter(|_| state.is_open()).cloned()),
         #[cfg(feature = "data-table")]
         open: Box::new(move |key| on_event(context_menu::Event::OpenFromKeyboard(key))),
     }
@@ -990,6 +1017,17 @@ mod tests {
         assert_eq!(press_at(&pressed, mouse::Cursor::Unavailable), None);
         let moved = Event::Mouse(mouse::Event::CursorMoved { position: at });
         assert_eq!(press_at(&moved, mouse::Cursor::Available(at)), None);
+    }
+
+    #[test]
+    fn an_open_menu_moves_the_ring_to_its_row() {
+        assert!(ringed(None, &1, true), "the keyboard highlight");
+        assert!(!ringed(None, &1, false));
+        assert!(ringed(Some(&2), &2, false), "the row the menu opened on");
+        assert!(
+            !ringed(Some(&2), &1, true),
+            "the highlight gives way while the menu is open elsewhere"
+        );
     }
 
     #[test]

@@ -65,7 +65,7 @@ use iced::keyboard::key::Named;
 use iced::widget::{column, container};
 use iced::{Alignment, Border, Color, Element, Length, Padding, Subscription};
 
-use crate::data::interaction::{Look, RowMenu, pressable, row_menu, scope};
+use crate::data::interaction::{Look, RowMenu, pressable, ringed, row_menu, scope};
 use crate::data::rows::rows;
 use crate::keys::{self, Chord, Keymap};
 use crate::overlay::context_menu;
@@ -877,11 +877,19 @@ where
         let build = {
             let on_event = on_event.clone();
             let menu = menu.clone();
+            let menu_target = menu.as_ref().and_then(|menu| menu.target());
             move |range: Range<usize>| -> Element<'a, Message> {
                 column(range.filter_map(|index| {
                     let item = state.get(index)?;
                     let content = row(index, item);
-                    let framed = row_frame(state, index, content, row_height, on_event.as_ref());
+                    let id = state.id(index);
+                    let ringed = ringed(
+                        menu_target.as_ref(),
+                        &id,
+                        state.focused && state.highlighted == Some(id),
+                    );
+                    let framed =
+                        row_frame(state, index, content, row_height, ringed, on_event.as_ref());
                     Some(match &menu {
                         Some(menu) => menu.wrap(state.id(index), framed),
                         None => framed,
@@ -938,6 +946,7 @@ fn row_frame<'a, T, Message>(
     index: usize,
     content: Element<'a, Message>,
     row_height: f32,
+    ringed: bool,
     on_event: Option<&Rc<OnEvent<'a, T, Message>>>,
 ) -> Element<'a, Message>
 where
@@ -948,7 +957,7 @@ where
     let status = Status {
         selected: state.mode != Mode::None && state.selected.contains(&id),
         hovered: false,
-        highlighted: state.focused && state.highlighted == Some(id),
+        highlighted: ringed,
         disabled: on_event.is_none(),
     };
     let body = container(content)

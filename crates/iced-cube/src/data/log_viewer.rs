@@ -70,7 +70,7 @@ use iced::widget::{self, Space, column, container, responsive, row, text};
 use iced::{Alignment, Border, Color, Element, Length, Padding, Pixels, Subscription, Task, Theme};
 
 use crate::data::ellipsis::ellipsis;
-use crate::data::interaction::{Look, RowMenu, pressable, row_menu, scope, search_keys};
+use crate::data::interaction::{Look, RowMenu, pressable, ringed, row_menu, scope, search_keys};
 use crate::data::marked::{find, marked};
 use crate::data::rows::rows;
 use crate::data::virtual_list::{self, Step, target};
@@ -1507,12 +1507,18 @@ impl<'a, Message: Clone + 'a> View<'a, Message> {
 
         let on_event = self.on_event.clone();
         let menu = self.menu.clone();
+        let menu_target = menu.as_ref().and_then(|menu| menu.target());
         let wrap = state.is_wrapped();
         let build = move |range: std::ops::Range<usize>| -> Element<'a, Message> {
             column(range.filter_map(|index| {
                 let id = *state.visible.get(index)?;
                 let entry = state.entry(id)?;
-                let line = line_view(state, id, entry, narrow, on_event.as_ref());
+                let ringed = ringed(
+                    menu_target.as_ref(),
+                    &id,
+                    state.focused && state.highlighted == Some(id),
+                );
+                let line = line_view(state, id, entry, narrow, ringed, on_event.as_ref());
                 Some(match &menu {
                     Some(menu) => menu.wrap(id, line),
                     None => line,
@@ -1593,12 +1599,13 @@ fn line_view<'a, Message: Clone + 'a>(
     id: LineId,
     entry: &'a Entry,
     stacked: bool,
+    ringed: bool,
     on_event: Option<&Rc<OnEvent<'a, Message>>>,
 ) -> Element<'a, Message> {
     let status = Status {
         selected: state.selected.contains(&id),
         hovered: false,
-        highlighted: state.focused && state.highlighted == Some(id),
+        highlighted: ringed,
         disabled: on_event.is_none(),
     };
     let level = entry.level;

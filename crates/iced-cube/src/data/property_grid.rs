@@ -33,7 +33,7 @@ use iced::{
 };
 
 use crate::data::ellipsis::ellipsis;
-use crate::data::interaction::{Look, RowMenu, pressable, row_menu, scope, search_count};
+use crate::data::interaction::{Look, RowMenu, pressable, ringed, row_menu, scope, search_count};
 use crate::data::rows::rows;
 use crate::forms::select::select;
 use crate::icon::{opacity, themed};
@@ -2058,9 +2058,15 @@ where
 
     fn status(&self, entry: &Entry<Id>, disabled: bool) -> Status {
         let state = self.state;
+        let target = self
+            .menu
+            .as_ref()
+            .and_then(RowMenu::target)
+            .map(Entry::Property);
+        let menu_open_here = target.as_ref() == Some(entry);
         Status {
-            highlighted: state.highlighted() == Some(entry),
-            focused: state.is_focused(),
+            highlighted: ringed(target.as_ref(), entry, state.highlighted() == Some(entry)),
+            focused: state.is_focused() || menu_open_here,
             hovered: false,
             disabled,
             heading: matches!(entry, Entry::Category(_)),
