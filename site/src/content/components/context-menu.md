@@ -44,7 +44,7 @@ api:
 
 A context menu offers actions for whatever is under the pointer: a file in a list, a selection in an editor, a node on a canvas. It shares its entries, rows and navigation with the [dropdown menu](../dropdown-menu/), so everything on that page applies here too.
 
-A right-click inside the area opens the menu with its top left corner at the pointer. It flips up or to the left near the edges of the window. Right-clicking somewhere else in the area moves the menu there, and a left-click anywhere outside the menu closes it. Clicks inside the menu never reach the area underneath.
+A right-click inside the area opens the menu with its top left corner at the pointer. It flips up or to the left near the edges of the window, opening on whichever side has room for the whole menu. Only when neither side has room does it take the roomier one and scroll. Right-clicking somewhere else in the area moves the menu there, and a left-click anywhere outside the menu closes it. Clicks inside the menu never reach the area underneath.
 
 Touch screens have no right-click, so holding a finger still on the area for half a second opens the menu at the finger instead. Moving the finger more than a few pixels first counts as a scroll and cancels it, and lifting early is an ordinary tap. The lift that ends a long press does not reach the content, so a button in a row is not pressed as the menu opens. A long press is easy to miss, so in a list on a narrow screen consider a visible button that opens the same menu, as the demo's job list does.
 

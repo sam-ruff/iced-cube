@@ -38,4 +38,4 @@ A popover holds a small piece of UI that belongs to one button, such as a settin
 
 Your app owns whether the popover is open. Toggle a flag from the trigger's message, clear it on dismiss and pass it to `.open`. Clicks on the trigger are left to the trigger, so it can close the popover as well as open it.
 
-The panel moves to the opposite side when there is no room on the one you asked for, and slides along its side to stay inside the window. Clicks inside it never reach the widgets underneath.
+The panel moves to the opposite side when there is no room on the one you asked for, and slides along its side to stay inside the window. A panel on the left or right that fits on neither moves below or above the trigger instead of covering it. Clicks inside it never reach the widgets underneath.

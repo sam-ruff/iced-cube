@@ -905,7 +905,8 @@ where
                     return row;
                 };
                 // The root menu dismisses everything, so a submenu lets
-                // outside presses through to it.
+                // outside presses through to it. Without room on either
+                // side of its row, the submenu drops below or above the row.
                 anchored(row)
                     .content(Some(level(state, children, depth + 1, on_event, width)))
                     .placement(
@@ -913,17 +914,15 @@ where
                             .gap(space::XS)
                             .offset(-(space::XS + 1.0)),
                     )
+                    .fit_height(true)
                     .pass_through(true)
                     .into()
             }
         });
 
+    // Each level scrolls when it is taller than the room beside its
+    // trigger or row, following the keyboard highlight.
     let rows = column(rows).width(width);
-    if depth > 0 {
-        return menu::surface(rows).into();
-    }
-    // The root menu scrolls when it is taller than the room beside its
-    // trigger, following the keyboard highlight.
     menu::surface(scrolling(rows, highlighted)).into()
 }
 

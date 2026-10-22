@@ -142,8 +142,10 @@ impl Placement {
 ///
 /// The panel moves to the opposite side when it does not fit on the
 /// requested one and does fit there, and to the mirrored alignment when it
-/// would overflow along the side. Whatever still overflows is shifted back
-/// inside, pinned to the top left if the panel is larger than the window.
+/// would overflow along the side. A panel on the left or right that fits on
+/// neither moves below the anchor, or above it, rather than covering it.
+/// Whatever still overflows is shifted back inside, pinned to the top left
+/// if the panel is larger than the window.
 pub fn place(
     anchor: Rectangle,
     size: Size,
@@ -151,23 +153,13 @@ pub fn place(
     placement: Placement,
 ) -> Rectangle {
     let area = viewport.shrink(MARGIN);
-    let room = |side: Side| room(anchor, area, placement.gap, side);
-    let needed = |side: Side| {
-        if side.is_vertical() {
-            size.height
-        } else {
-            size.width
-        }
-    };
-
-    let requested = placement.side;
-    let opposite = requested.opposite();
-    let side = if room(requested) >= needed(requested) {
-        requested
-    } else if room(opposite) >= needed(opposite) || room(opposite) > room(requested) {
-        opposite
+    let side = choose_side(anchor, size, area, placement);
+    // The offset runs along the requested side, so it does not carry over
+    // to a side across it.
+    let offset = if side.is_vertical() == placement.side.is_vertical() {
+        placement.offset
     } else {
-        requested
+        0.0
     };
 
     let main = match side {
@@ -195,9 +187,9 @@ pub fn place(
         )
     };
     let cross_at = |align: Align| match align {
-        Align::Start => start + placement.offset,
-        Align::Center => start + (length - extent) / 2.0 + placement.offset,
-        Align::End => start + length - extent - placement.offset,
+        Align::Start => start + offset,
+        Align::Center => start + (length - extent) / 2.0 + offset,
+        Align::End => start + length - extent - offset,
     };
     let fits = |value: f32| value >= low && value + extent <= high;
     let preferred = cross_at(placement.align);
@@ -222,6 +214,47 @@ pub fn place(
     )
 }
 
+/// The side [`place`] puts the panel on: the requested side, else the
+/// opposite one, else (for the left and right) below or above. With no
+/// side that fits, the roomier of the requested pair wins, keeping the
+/// requested side on a tie.
+fn choose_side(anchor: Rectangle, size: Size, area: Rectangle, placement: Placement) -> Side {
+    let room = |side: Side| room(anchor, area, placement.gap, side);
+    let fits = |side: Side| room(side) >= needed(size, side);
+    let roomier = |side: Side| {
+        if room(side.opposite()) > room(side) {
+            side.opposite()
+        } else {
+            side
+        }
+    };
+
+    let requested = placement.side;
+    let opposite = requested.opposite();
+    if fits(requested) {
+        return requested;
+    }
+    if fits(opposite) {
+        return opposite;
+    }
+    if requested.is_vertical() {
+        return roomier(requested);
+    }
+    [Side::Bottom, Side::Top]
+        .into_iter()
+        .find(|side| fits(*side))
+        .unwrap_or_else(|| roomier(Side::Bottom))
+}
+
+/// The panel's extent across `side`, the length that must fit beside it.
+fn needed(size: Size, side: Side) -> f32 {
+    if side.is_vertical() {
+        size.height
+    } else {
+        size.width
+    }
+}
+
 /// Space between the anchor and the edge of `area` on one side, less the gap.
 fn room(anchor: Rectangle, area: Rectangle, gap: f32, side: Side) -> f32 {
     match side {
@@ -233,29 +266,29 @@ fn room(anchor: Rectangle, area: Rectangle, gap: f32, side: Side) -> f32 {
 }
 
 /// The tallest a panel may be with [`Anchored::fit_height`]: `None` when
-/// it fits above or below `anchor` as it is, or when neither side has
-/// [`MIN_FIT_HEIGHT`] to spare; otherwise the room on the roomier side.
+/// it fits where [`place`] puts it as it is, otherwise the room on the
+/// roomier of above and below, however little, so the panel scrolls rather
+/// than covering its anchor. A panel placed on the left or right is only
+/// limited once it fits beside the anchor on neither side.
 pub fn fitted_height(
     anchor: Rectangle,
     size: Size,
     viewport: Rectangle,
     placement: Placement,
 ) -> Option<f32> {
-    if !placement.side.is_vertical() {
+    let area = viewport.shrink(MARGIN);
+    let side = placement.side;
+    let beside = |side: Side| room(anchor, area, placement.gap, side) >= size.width;
+    if !side.is_vertical() && (beside(side) || beside(side.opposite())) {
         return None;
     }
-    let area = viewport.shrink(MARGIN);
     let above = room(anchor, area, placement.gap, Side::Top);
     let below = room(anchor, area, placement.gap, Side::Bottom);
     if above >= size.height || below >= size.height {
         return None;
     }
-    let best = above.max(below);
-    (best >= MIN_FIT_HEIGHT).then_some(best)
+    Some(above.max(below).max(0.0))
 }
-
-/// The least room [`fitted_height`] shrinks a panel into.
-pub const MIN_FIT_HEIGHT: f32 = 96.0;
 
 /// Keeps `value` within `low..=high`, preferring `low` when the range is empty.
 fn clamp(value: f32, low: f32, high: f32) -> f32 {
@@ -420,9 +453,10 @@ impl<'a, Message> Anchored<'a, Message> {
         self
     }
 
-    /// When the panel fits neither above nor below the anchor, limits its
-    /// height to the roomier side instead of shifting it over the anchor.
-    /// For content that scrolls, such as a long menu.
+    /// When the panel fits on no side of the anchor, limits its height to
+    /// the roomier of above and below instead of shifting it over the
+    /// anchor; see [`fitted_height`]. For content that scrolls, such as a
+    /// long menu.
     pub fn fit_height(mut self, fit: bool) -> Self {
         self.behaviour.fit_height = fit;
         self
@@ -1125,10 +1159,71 @@ mod tests {
         let panel = place(low, Size::new(60.0, room_above), VIEWPORT, below);
         assert_eq!(panel.y + panel.height, 200.0 - GAP, "flips above it");
 
-        let squeezed = Rectangle::new(Point::new(150.0, 100.0), Size::new(100.0, 120.0));
-        assert_eq!(fitted_height(squeezed, tall, VIEWPORT, below), None);
         let beside = Placement::new(Side::Right, Align::Start);
         assert_eq!(fitted_height(anchor(), tall, VIEWPORT, beside), None);
+    }
+
+    #[test]
+    fn fitted_height_uses_the_roomier_side_however_little_room_it_has() {
+        let below = Placement::new(Side::Bottom, Align::Start);
+        let tall = Size::new(60.0, 290.0);
+        let squeezed = Rectangle::new(Point::new(150.0, 100.0), Size::new(100.0, 120.0));
+        let room_above = 100.0 - GAP - MARGIN;
+        assert_eq!(
+            fitted_height(squeezed, tall, VIEWPORT, below),
+            Some(room_above)
+        );
+        let panel = place(squeezed, Size::new(60.0, room_above), VIEWPORT, below);
+        assert_eq!(panel.y + panel.height, 100.0 - GAP, "clear of the anchor");
+
+        let filling = Rectangle::new(Point::new(0.0, 0.0), Size::new(400.0, 300.0));
+        assert_eq!(fitted_height(filling, tall, VIEWPORT, below), Some(0.0));
+    }
+
+    #[test]
+    fn a_menu_low_in_the_window_opens_above_at_full_height() {
+        let point = Rectangle::new(Point::new(100.0, 230.0), Size::ZERO);
+        let menu = Size::new(180.0, 200.0);
+        let placement = Placement::new(Side::Bottom, Align::Start).gap(0.0);
+        assert_eq!(fitted_height(point, menu, VIEWPORT, placement), None);
+        let panel = place(point, menu, VIEWPORT, placement);
+        assert_eq!(panel.y + panel.height, 230.0, "flipped above the point");
+    }
+
+    #[test]
+    fn a_side_panel_that_fits_neither_side_moves_below_its_anchor() {
+        let narrow = Rectangle::new(Point::new(0.0, 0.0), Size::new(320.0, 300.0));
+        let row = Rectangle::new(Point::new(40.0, 100.0), Size::new(216.0, 32.0));
+        let submenu = Size::new(224.0, 120.0);
+        let placement = Placement::new(Side::Right, Align::Start).gap(4.0);
+        let panel = place(row, submenu, narrow, placement);
+        assert_eq!(panel.y, 132.0 + 4.0, "below the row, clear of its label");
+        assert_eq!(panel.x, 40.0, "lined up with the row");
+
+        let low_row = Rectangle::new(Point::new(40.0, 200.0), Size::new(216.0, 32.0));
+        let panel = place(low_row, submenu, narrow, placement);
+        assert_eq!(panel.y + panel.height, 200.0 - 4.0, "above the row");
+
+        let wide = Rectangle::new(Point::new(0.0, 0.0), Size::new(600.0, 300.0));
+        let panel = place(row, submenu, wide, placement);
+        assert_eq!(panel.x, 256.0 + 4.0, "beside the row when it fits");
+        assert_eq!(fitted_height(row, submenu, wide, placement), None);
+    }
+
+    #[test]
+    fn a_tall_side_panel_without_room_beside_scrolls_on_the_roomier_side() {
+        let narrow = Rectangle::new(Point::new(0.0, 0.0), Size::new(320.0, 300.0));
+        let row = Rectangle::new(Point::new(40.0, 160.0), Size::new(216.0, 32.0));
+        let submenu = Size::new(224.0, 180.0);
+        let placement = Placement::new(Side::Right, Align::Start).gap(4.0);
+        assert_eq!(
+            fitted_height(row, submenu, narrow, placement),
+            Some(160.0 - 4.0 - MARGIN)
+        );
+        let fitted = Size::new(224.0, 160.0 - 4.0 - MARGIN);
+        let panel = place(row, fitted, narrow, placement);
+        assert_eq!(panel.y, MARGIN);
+        assert_eq!(panel.y + panel.height, 160.0 - 4.0, "clear of the row");
     }
 
     #[test]

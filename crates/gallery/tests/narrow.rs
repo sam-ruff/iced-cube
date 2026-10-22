@@ -377,6 +377,45 @@ fn the_editor_and_preview_stack_on_a_phone() {
 }
 
 #[test]
+fn a_submenu_never_covers_its_parent_row_on_a_phone() {
+    iced_cube::theme::set_font(FONT);
+    for width in [328.0, 358.0, 720.0] {
+        let gallery = Gallery::new(
+            Mode::Single,
+            Some("dropdown-menu/submenu"),
+            ThemeChoice::Light,
+        );
+        let settings = iced::Settings {
+            default_font: FONT,
+            fonts: FONT_FILES.iter().map(|font| (*font).into()).collect(),
+            ..iced::Settings::default()
+        };
+        let mut ui = Simulator::with_size(settings, Size::new(width, 340.0), gallery.view());
+        let parent = ui.find("More tools").expect("parent row").bounds();
+        let child = ui.find("Save page as").expect("open submenu").bounds();
+        assert!(child.x + child.width <= width, "{width}: submenu fits");
+        if width >= 720.0 {
+            assert!(child.x >= parent.x + parent.width, "beside its row");
+        }
+        // A press on the parent label reaches the parent row only when no
+        // submenu covers it.
+        for x in [
+            parent.x + 2.0,
+            parent.center_x(),
+            parent.x + parent.width - 2.0,
+        ] {
+            ui.point_at(iced::Point::new(x, parent.center_y()));
+            let _ = ui.simulate(iced_test::simulator::click());
+        }
+        let messages = format!("{:?}", ui.into_messages().collect::<Vec<_>>());
+        assert!(messages.contains("MoreTools"), "{width}: {messages}");
+        for covered in ["SavePage", "Shortcut", "NameWindow", "DevTools"] {
+            assert!(!messages.contains(covered), "{width}: {messages}");
+        }
+    }
+}
+
+#[test]
 fn collapsible_panels_keep_their_minimums_on_a_phone() {
     let gallery = open("resizable-panel/collapsible");
     let mut ui = render(&gallery);
