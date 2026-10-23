@@ -58,9 +58,13 @@ pub enum Pane {
     Json,
 }
 
-/// The tabs on the Jobs page, starting with the job list alone.
+/// The tabs on the Jobs page, starting with the job list alone. The job
+/// list stays pinned and never closes.
 pub fn documents() -> document_tabs::State<Doc> {
-    document_tabs::State::new([document(Doc::Jobs, "All jobs").pinned(true)])
+    document_tabs::State::new([document(Doc::Jobs, "All jobs")
+        .pinned(true)
+        .closable(false)
+        .locked(true)])
 }
 
 pub fn panes() -> toggle_group::State<Pane> {
@@ -282,29 +286,17 @@ impl Example {
     }
 
     pub(super) fn documents_event(&mut self, event: document_tabs::Event<Doc>) {
-        match self.documents.update(event) {
-            Some(Output::CloseRequested(ids)) => self.close_documents(&ids),
-            // The job list stays pinned.
-            Some(Output::Pinned(Doc::Jobs, false)) => {
-                let _ = self
-                    .documents
-                    .update(document_tabs::Event::Pin(Doc::Jobs, true));
-            }
-            _ => {}
+        if let Some(Output::CloseRequested(ids)) = self.documents.update(event) {
+            self.close_documents(&ids);
         }
     }
 
-    /// Closes job tabs. The job list never closes.
+    /// Closes job tabs and drops their inspectors.
     fn close_documents(&mut self, ids: &[Doc]) {
-        let jobs: Vec<Doc> = ids
-            .iter()
-            .copied()
-            .filter(|doc| *doc != Doc::Jobs)
-            .collect();
-        let _ = self.documents.close(&jobs);
-        for doc in jobs {
+        let _ = self.documents.close(ids);
+        for doc in ids {
             if let Doc::Job(id) = doc {
-                let _ = self.inspectors.remove(&id);
+                let _ = self.inspectors.remove(id);
             }
         }
     }

@@ -6,7 +6,7 @@ use iced_cube::data::log_viewer;
 use iced_cube::data::property_grid::{self, Value};
 use iced_cube::dropdown_menu;
 use iced_cube::keys;
-use iced_cube::navigation::document_tabs;
+use iced_cube::navigation::document_tabs::{self, MenuItem};
 use iced_cube::overlay::toast::{self, Variant as ToastVariant};
 use iced_cube::primitives::toggle_group;
 
@@ -692,6 +692,33 @@ fn closing_tabs_drops_their_inspectors_but_never_the_job_list() {
     );
     assert_eq!(tabs(&example)[0], Doc::Jobs);
     assert_eq!(example.documents.pinned_count(), 1);
+    let jobs = example.documents.document(Doc::Jobs);
+    assert!(jobs.is_some_and(|doc| !doc.closable && doc.locked));
+
+    // The job list's menu offers neither Close nor Unpin.
+    send(
+        &mut example,
+        Message::Documents(document_tabs::Event::Menu(
+            context_menu::Event::OpenFromKeyboard(Doc::Jobs),
+        )),
+    );
+    let offered: Vec<MenuItem> = example
+        .documents
+        .menu()
+        .menu()
+        .entries()
+        .iter()
+        .filter_map(|entry| entry.as_item())
+        .map(|item| item.id)
+        .collect();
+    assert!(!offered.contains(&MenuItem::Close), "{offered:?}");
+    assert!(!offered.contains(&MenuItem::Unpin), "{offered:?}");
+    send(
+        &mut example,
+        Message::Documents(document_tabs::Event::Menu(context_menu::Event::Menu(
+            dropdown_menu::Event::Close,
+        ))),
+    );
 
     send(
         &mut example,

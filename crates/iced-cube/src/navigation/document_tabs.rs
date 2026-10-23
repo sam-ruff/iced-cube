@@ -14,9 +14,12 @@
 //!
 //! With the pointer, a press activates a tab, dragging moves it (a line
 //! marks where it will land), a middle click asks to close it and a right
-//! click opens its context menu. The wheel scrolls tabs that do not fit,
-//! and a button at the end of the strip lists every tab. The strip keeps
-//! the active tab in view.
+//! click opens its context menu. When the tabs do not fit, pinned tabs stay
+//! at the start and the wheel scrolls the others, and a button at the end
+//! of the strip lists every tab. The strip keeps the active tab in view.
+//!
+//! [`Document::closable`] and [`Document::locked`] keep a document open
+//! and pinned, such as a list the other tabs are opened from.
 //!
 //! Keyboard shortcuts resolve through a [`Keymap`] of [`Action`]s; see
 //! [`default_keymap`] and [`crate::keys`].
@@ -88,9 +91,13 @@ pub struct Document<Id> {
     /// Unsaved changes, shown as a dot in the tab's slot.
     pub modified: bool,
     pub pinned: bool,
+    /// Whether the user can ask to close it. See [`Document::closable`].
+    pub closable: bool,
+    /// Whether it keeps its pinned state. See [`Document::locked`].
+    pub locked: bool,
 }
 
-/// Creates a saved, unpinned document.
+/// Creates a saved, unpinned document that can be closed and pinned.
 pub fn document<Id>(id: Id, label: impl Into<String>) -> Document<Id> {
     Document {
         id,
@@ -98,6 +105,8 @@ pub fn document<Id>(id: Id, label: impl Into<String>) -> Document<Id> {
         icon: None,
         modified: false,
         pinned: false,
+        closable: true,
+        locked: false,
     }
 }
 
@@ -114,6 +123,21 @@ impl<Id> Document<Id> {
 
     pub fn pinned(mut self, pinned: bool) -> Self {
         self.pinned = pinned;
+        self
+    }
+
+    /// With `false`, the tab has no close button or Close item, and no
+    /// close event or shortcut asks to close it. Defaults to `true`.
+    pub fn closable(mut self, closable: bool) -> Self {
+        self.closable = closable;
+        self
+    }
+
+    /// With `true`, the document stays pinned or unpinned as it is: its
+    /// menu has no Pin or Unpin item and [`Event::Pin`] leaves it alone. It
+    /// still moves within its group. Defaults to `false`.
+    pub fn locked(mut self, locked: bool) -> Self {
+        self.locked = locked;
         self
     }
 }
@@ -150,21 +174,22 @@ pub enum Event<Id> {
     /// Ends a walk through the most-recently-used list, making the document
     /// it stopped on the most recent. Any other event ends it too.
     EndCycle,
-    /// Asks to close one document.
+    /// Asks to close one document, unless it is not closable.
     Close(Id),
-    /// Asks to close every unpinned document except this one.
+    /// Asks to close every other unpinned, closable document.
     CloseOthers(Id),
-    /// Asks to close the unpinned documents after this one.
+    /// Asks to close the unpinned, closable documents after this one.
     CloseToTheRight(Id),
-    /// Asks to close every unpinned document without unsaved changes.
+    /// Asks to close every unpinned, closable document without unsaved
+    /// changes.
     CloseSaved,
-    /// Asks to close every unpinned document.
+    /// Asks to close every unpinned, closable document.
     CloseAll,
     /// Moves a document to an index. Pinned documents stay before the
     /// others, so the index is clamped to the document's group.
     Move(Id, usize),
-    /// Pins or unpins a document. It moves to the end of the pinned tabs
-    /// or the start of the others.
+    /// Pins or unpins a document, unless it is locked. It moves to the end
+    /// of the pinned tabs or the start of the others.
     Pin(Id, bool),
     /// Asks for a new document, from the new tab button, a double click on
     /// the empty strip or a shortcut.
@@ -368,21 +393,23 @@ impl<Id: Copy + PartialEq> State<Id> {
             Event::RecentNext => self.walk(true),
             Event::RecentPrevious => self.walk(false),
             Event::EndCycle => None,
-            Event::Close(id) => self.request(|document| document.id == id),
+            Event::Close(id) => self.request(|document| document.id == id && document.closable),
             Event::CloseOthers(id) => {
-                self.request(|document| document.id != id && !document.pinned)
+                self.request(|document| document.id != id && in_bulk_close(document))
             }
             Event::CloseToTheRight(id) => {
                 let index = self.index_of(id)?;
                 let right: Vec<Id> = self.documents[index + 1..]
                     .iter()
-                    .filter(|document| !document.pinned)
+                    .filter(|document| in_bulk_close(document))
                     .map(|document| document.id)
                     .collect();
                 (!right.is_empty()).then_some(Output::CloseRequested(right))
             }
-            Event::CloseSaved => self.request(|document| !document.modified && !document.pinned),
-            Event::CloseAll => self.request(|document| !document.pinned),
+            Event::CloseSaved => {
+                self.request(|document| !document.modified && in_bulk_close(document))
+            }
+            Event::CloseAll => self.request(in_bulk_close),
             Event::Move(id, to) => self.move_to(id, to),
             Event::Pin(id, pinned) => self.pin(id, pinned),
             Event::New => Some(Output::NewTab),
@@ -474,7 +501,8 @@ impl<Id: Copy + PartialEq> State<Id> {
 
     fn pin(&mut self, id: Id, pinned: bool) -> Option<Output<Id>> {
         let from = self.index_of(id)?;
-        if self.documents[from].pinned == pinned {
+        let document = &self.documents[from];
+        if document.locked || document.pinned == pinned {
             return None;
         }
         let mut document = self.documents.remove(from);
@@ -515,43 +543,42 @@ impl<Id: Copy + PartialEq> State<Id> {
         self.update(event)
     }
 
-    /// The context menu of the tab `target`, with the choices that would
-    /// do nothing disabled.
+    /// The context menu of the tab `target`, leaving out the choices that
+    /// would do nothing. `None` when no choice is left.
     fn menu_entries(&self, target: Id) -> Option<Vec<Entry<MenuItem>>> {
         let index = self.index_of(target)?;
-        let unpinned = |document: &&Document<Id>| !document.pinned;
-        let others = self
-            .documents
-            .iter()
-            .filter(unpinned)
-            .any(|document| document.id != target);
-        let right = self.documents[index + 1..].iter().any(|d| !d.pinned);
-        let saved = self
-            .documents
-            .iter()
-            .filter(unpinned)
-            .any(|document| !document.modified);
-        let any = self.documents.iter().any(|document| !document.pinned);
-        let pin = if self.documents[index].pinned {
-            item(MenuItem::Unpin, "Unpin")
-        } else {
-            item(MenuItem::Pin, "Pin")
+        let document = &self.documents[index];
+        let bulk = || self.documents.iter().filter(|d| in_bulk_close(d));
+
+        let mut close = Vec::new();
+        if document.closable {
+            close.push(item(MenuItem::Close, "Close"));
+        }
+        if bulk().any(|d| d.id != target) {
+            close.push(item(MenuItem::CloseOthers, "Close others"));
+        }
+        if self.documents[index + 1..].iter().any(in_bulk_close) {
+            close.push(item(MenuItem::CloseToTheRight, "Close to the right"));
+        }
+        // Only differs from Close all while some of those tabs are modified.
+        if bulk().any(|d| d.modified) && bulk().any(|d| !d.modified) {
+            close.push(item(MenuItem::CloseSaved, "Close saved"));
+        }
+        if bulk().next().is_some() {
+            close.push(item(MenuItem::CloseAll, "Close all"));
+        }
+        let pin = match (document.locked, document.pinned) {
+            (true, _) => Vec::new(),
+            (false, true) => vec![item(MenuItem::Unpin, "Unpin")],
+            (false, false) => vec![item(MenuItem::Pin, "Pin")],
         };
 
-        let mut entries = vec![
-            item(MenuItem::Close, "Close"),
-            item(MenuItem::CloseOthers, "Close others").disabled(!others),
-            item(MenuItem::CloseToTheRight, "Close to the right").disabled(!right),
-            item(MenuItem::CloseSaved, "Close saved").disabled(!saved),
-            item(MenuItem::CloseAll, "Close all").disabled(!any),
-            separator(),
-            pin,
-        ];
-        if !self.extra.is_empty() {
-            entries.push(separator());
-            entries.extend(self.extra.iter().cloned());
-        }
-        Some(entries)
+        let groups: Vec<Vec<Entry<MenuItem>>> = [close, pin, self.extra.clone()]
+            .into_iter()
+            .filter(|group| !group.is_empty())
+            .collect();
+        let entries = groups.join(&separator());
+        (!entries.is_empty()).then_some(entries)
     }
 
     fn overflow_event(&mut self, event: dropdown_menu::Event<Id>) -> Option<Output<Id>> {
@@ -576,6 +603,12 @@ impl<Id: Copy + PartialEq> State<Id> {
             dropdown_menu::Output::Toggled(..) => None,
         }
     }
+}
+
+/// Whether Close others, Close to the right, Close saved and Close all
+/// include `document`.
+fn in_bulk_close<Id>(document: &Document<Id>) -> bool {
+    document.closable && !document.pinned
 }
 
 /// What a document tabs keyboard shortcut does.
@@ -613,7 +646,9 @@ impl Action {
                 Some(Event::Move(active?, index))
             }
             Action::MoveRight => Some(Event::Move(active?, index? + 1)),
-            Action::Close => active.map(Event::Close),
+            Action::Close => active
+                .filter(|id| state.document(*id).is_some_and(|d| d.closable))
+                .map(Event::Close),
             Action::New => Some(Event::New),
             Action::Tab(position) => {
                 let index = usize::from(position).checked_sub(1)?;
@@ -868,34 +903,33 @@ where
         let on_event: Option<Rc<OnEvent<'a, Id, Message>>> = on_event.map(Rc::from);
         let enabled = on_event.is_some();
 
-        let tabs: Vec<Element<'a, Message>> = state
-            .documents
-            .iter()
-            .map(|document| {
-                let active = state.is_active(document.id);
-                let on_close = on_event
-                    .as_ref()
-                    .map(|on_event| on_event(Event::Close(document.id)));
-                let look = Look {
-                    active,
-                    hovered: false,
-                    enabled,
-                };
-                let base = tab_view(document, look, max_label_width, on_close.clone(), false);
-                let Some(on_event) = on_event.clone() else {
-                    return base;
-                };
-                let hovered = Look {
-                    hovered: true,
-                    ..look
-                };
-                let top = tab_view(document, hovered, max_label_width, on_close, true);
-                context_menu::keyed(state.menu(), document.id, widget::hover(base, top))
-                    .keymap(context_menu_keymap.clone())
-                    .on_event(move |event| on_event(Event::Menu(event)))
-                    .into()
-            })
-            .collect();
+        let tab = |document: &'a Document<Id>| -> Element<'a, Message> {
+            let active = state.is_active(document.id);
+            let on_close = on_event
+                .as_ref()
+                .map(|on_event| on_event(Event::Close(document.id)));
+            let look = Look {
+                active,
+                hovered: false,
+                enabled,
+            };
+            let base = tab_view(document, look, max_label_width, on_close.clone(), false);
+            let Some(on_event) = on_event.clone() else {
+                return base;
+            };
+            let hovered = Look {
+                hovered: true,
+                ..look
+            };
+            let top = tab_view(document, hovered, max_label_width, on_close, true);
+            context_menu::keyed(state.menu(), document.id, widget::hover(base, top))
+                .keymap(context_menu_keymap.clone())
+                .on_event(move |event| on_event(Event::Menu(event)))
+                .into()
+        };
+        let (pinned, unpinned) = state.documents.split_at(state.pinned_count());
+        let pinned_row = row(pinned.iter().map(&tab)).into();
+        let content = row(unpinned.iter().map(&tab)).into();
 
         let trailing: Element<'a, Message> = if new_tab {
             icon_button(crate::lucide!(Plus))
@@ -949,7 +983,8 @@ where
         });
 
         Element::new(Strip {
-            content: row(tabs).into(),
+            pinned_row,
+            content,
             trailing,
             overflow: overflow.into(),
             active: state.active_index(),
@@ -1107,7 +1142,7 @@ where
 
 /// The trailing slot of a tab: the close button on the active or hovered
 /// tab, otherwise a dot while modified, otherwise empty space so the label
-/// does not move. Pinned tabs only show the dot.
+/// does not move. Pinned and unclosable tabs only show the dot.
 fn slot<'a, Id, Message>(
     document: &Document<Id>,
     look: Look,
@@ -1117,8 +1152,8 @@ where
     Message: Clone + 'a,
 {
     let active = look.active;
-    let close = !document.pinned && (look.hovered || (active && !document.modified));
-    if close {
+    let closable = in_bulk_close(document);
+    if closable && (look.hovered || (active && !document.modified)) {
         return Some(close_button(on_close));
     }
     if document.modified {
@@ -1128,7 +1163,7 @@ where
             .style(move |theme| dot_style(&Tokens::of(theme), active));
         return Some(container(dot).center(SLOT).into());
     }
-    (!document.pinned).then(|| widget::space().width(SLOT).height(SLOT).into())
+    closable.then(|| widget::space().width(SLOT).height(SLOT).into())
 }
 
 fn close_button<'a, Message: Clone + 'a>(on_close: Option<Message>) -> Element<'a, Message> {
@@ -1281,12 +1316,30 @@ struct Press {
     gap: Option<usize>,
 }
 
+/// Most of the room for tabs the pinned tabs may take and still stay in
+/// place. Wider pinned tabs scroll with the others, so the unpinned tabs
+/// always keep at least this share of a narrow strip.
+const MAX_PINNED_SHARE: f32 = 0.5;
+
+/// Whether pinned tabs `pinned` pixels wide stay in place, given `room`
+/// pixels for every tab.
+fn pinned_stay(pinned: f32, room: f32, overflowing: bool) -> bool {
+    !overflowing || pinned <= room * MAX_PINNED_SHARE
+}
+
 /// What the strip remembers between frames.
+///
+/// Tab positions are measured from the strip's left edge as laid out. The
+/// first `fixed_tabs` tabs (the pinned ones, `fixed` pixels wide) never
+/// scroll. The rest scroll by `offset` in the `viewport_width` pixels after
+/// them, and `content_width` is how wide they are together.
 #[derive(Debug, Clone, Default)]
 struct Memory {
     offset: f32,
     content_width: f32,
     viewport_width: f32,
+    fixed: f32,
+    fixed_tabs: usize,
     overflowing: bool,
     /// The active index and tab count the strip last scrolled into view.
     revealed: Option<(Option<usize>, usize)>,
@@ -1366,8 +1419,10 @@ impl Memory {
         self.offset = self.offset.clamp(0.0, self.max_offset());
     }
 
+    /// Where the scrolling tabs show.
     fn viewport(&self, bounds: Rectangle) -> Rectangle {
         Rectangle {
+            x: bounds.x + self.fixed,
             width: self.viewport_width,
             ..bounds
         }
@@ -1377,18 +1432,128 @@ impl Memory {
         Vector::new(self.offset, 0.0)
     }
 
-    /// The cursor in the scrolled content's coordinates.
-    fn inner_cursor(&self, cursor: mouse::Cursor, viewport: Rectangle) -> mouse::Cursor {
-        match cursor.position_over(viewport) {
-            Some(position) => mouse::Cursor::Available(position + self.shift()),
-            None => cursor.levitate() + self.shift(),
+    fn scrolls(&self, index: usize) -> bool {
+        index >= self.fixed_tabs
+    }
+
+    /// The left edge and width of the tab at `index` among the scrolling
+    /// tabs, for [`Memory::follow`]. `None` for a tab that stays in place,
+    /// which is always in view.
+    fn scroll_span(&self, spans: &[(f32, f32)], index: usize) -> Option<(f32, f32)> {
+        let (left, width) = spans.get(index).filter(|_| self.scrolls(index))?;
+        Some((left - self.fixed, *width))
+    }
+
+    /// Where the pinned tabs show, and how far they are scrolled: in place
+    /// while they stay, otherwise with the rest.
+    fn pinned_frame(&self, bounds: Rectangle) -> (Rectangle, Vector) {
+        if self.fixed_tabs == 0 {
+            return (self.viewport(bounds), self.shift());
         }
+        let clip = Rectangle {
+            width: self.fixed,
+            ..bounds
+        };
+        (clip, Vector::ZERO)
+    }
+
+    /// The tab position under a pointer `x` pixels from the strip's left
+    /// edge, or `None` outside the tabs' regions.
+    fn locate(&self, x: f32) -> Option<f32> {
+        if x < 0.0 {
+            return None;
+        }
+        if x < self.fixed {
+            return Some(x);
+        }
+        (x < self.fixed + self.viewport_width).then_some(x + self.offset)
+    }
+
+    /// Like [`Memory::locate`], but past the regions too, for dragging.
+    fn unscroll(&self, x: f32) -> f32 {
+        if x < self.fixed { x } else { x + self.offset }
+    }
+
+    /// The shown part of the tab at `index`, as its left and right edges
+    /// from the strip's left edge.
+    fn visible_span(&self, spans: &[(f32, f32)], index: usize) -> Option<(f32, f32)> {
+        let (left, width) = *spans.get(index)?;
+        let (start, end, shift) = if self.scrolls(index) {
+            (self.fixed, self.fixed + self.viewport_width, self.offset)
+        } else {
+            (0.0, self.fixed, 0.0)
+        };
+        let shown_left = (left - shift).max(start);
+        let shown_right = (left - shift + width).min(end);
+        (shown_right > shown_left).then_some((shown_left, shown_right))
+    }
+
+    /// Where the short lines between tabs go, from the strip's left edge.
+    /// None touches the active tab, and one marks where the pinned tabs end
+    /// while they stay in place.
+    fn dividers(&self, spans: &[(f32, f32)], active: Option<usize>) -> Vec<f32> {
+        let end = self.fixed + self.viewport_width;
+        (1..spans.len())
+            .filter_map(|index| {
+                let boundary = index == self.fixed_tabs;
+                let next_to_active = active == Some(index) && !(boundary && self.offset > 0.0);
+                if active == Some(index - 1) || next_to_active {
+                    return None;
+                }
+                if boundary {
+                    return Some(self.fixed);
+                }
+                let left = spans[index].0;
+                if !self.scrolls(index) {
+                    return Some(left);
+                }
+                let x = left - self.offset;
+                (x > self.fixed && x < end).then_some(x)
+            })
+            .collect()
+    }
+
+    /// Where the drop indicator for a tab dragged from `from` into `gap`
+    /// starts, from the strip's left edge, kept inside the dragged tab's
+    /// region.
+    fn indicator_x(&self, spans: &[(f32, f32)], from: usize, gap: usize) -> Option<f32> {
+        let scrolls = self.scrolls(from);
+        let end = if scrolls {
+            spans.len()
+        } else {
+            self.fixed_tabs
+        };
+        let edge = match spans.get(gap).filter(|_| gap < end) {
+            Some((left, _)) => *left,
+            None => {
+                let (left, width) = spans.get(end.checked_sub(1)?)?;
+                left + width
+            }
+        };
+        let x = edge - INDICATOR_WIDTH / 2.0;
+        if !scrolls {
+            return Some(x.clamp(0.0, (self.fixed - INDICATOR_WIDTH).max(0.0)));
+        }
+        let start = self.fixed;
+        let stop = (start + self.viewport_width - INDICATOR_WIDTH).max(start);
+        Some((x - self.offset).clamp(start, stop))
     }
 }
 
-/// The tab strip: tabs that scroll sideways, a new tab button after them
-/// and, while they overflow, a menu button listing them at the end.
+/// The cursor in the coordinates of tabs shown through `clip` and scrolled
+/// by `shift`. Outside `clip` it is levitated, so no tab reacts to it.
+fn inner_cursor(cursor: mouse::Cursor, clip: Rectangle, shift: Vector) -> mouse::Cursor {
+    match cursor.position_over(clip) {
+        Some(position) => mouse::Cursor::Available(position + shift),
+        None => cursor.levitate() + shift,
+    }
+}
+
+/// The tab strip: pinned tabs that stay in place, the other tabs scrolling
+/// sideways after them, a new tab button after those and, while they
+/// overflow, a menu button listing them at the end.
 struct Strip<'a, Message> {
+    pinned_row: Element<'a, Message>,
     content: Element<'a, Message>,
     trailing: Element<'a, Message>,
     overflow: Element<'a, Message>,
@@ -1406,16 +1571,34 @@ impl<Message> Strip<'_, Message> {
     }
 }
 
-/// Each tab's left edge and width, relative to the content.
-fn spans(content: Layout<'_>) -> Vec<(f32, f32)> {
-    let origin = content.bounds().x;
-    content
+/// Each tab's left edge and width, measured from `origin`, pinned first.
+fn spans(origin: f32, pinned: Layout<'_>, content: Layout<'_>) -> Vec<(f32, f32)> {
+    pinned
         .children()
+        .chain(content.children())
         .map(|tab| {
             let bounds = tab.bounds();
             (bounds.x - origin, bounds.width)
         })
         .collect()
+}
+
+/// The strip's laid out children.
+struct Parts<'a> {
+    pinned: Layout<'a>,
+    content: Layout<'a>,
+    trailing: Layout<'a>,
+    overflow: Layout<'a>,
+}
+
+fn parts(layout: Layout<'_>) -> Option<Parts<'_>> {
+    let mut children = layout.children();
+    Some(Parts {
+        pinned: children.next()?,
+        content: children.next()?,
+        trailing: children.next()?,
+        overflow: children.next()?,
+    })
 }
 
 impl<Message> Widget<Message, Theme, Renderer> for Strip<'_, Message> {
@@ -1433,6 +1616,7 @@ impl<Message> Widget<Message, Theme, Renderer> for Strip<'_, Message> {
 
     fn children(&self) -> Vec<Tree> {
         vec![
+            Tree::new(&self.pinned_row),
             Tree::new(&self.content),
             Tree::new(&self.trailing),
             Tree::new(&self.overflow),
@@ -1440,7 +1624,12 @@ impl<Message> Widget<Message, Theme, Renderer> for Strip<'_, Message> {
     }
 
     fn diff(&self, tree: &mut Tree) {
-        tree.diff_children(&[&self.content, &self.trailing, &self.overflow]);
+        tree.diff_children(&[
+            &self.pinned_row,
+            &self.content,
+            &self.trailing,
+            &self.overflow,
+        ]);
     }
 
     fn layout(
@@ -1450,10 +1639,16 @@ impl<Message> Widget<Message, Theme, Renderer> for Strip<'_, Message> {
         limits: &layout::Limits,
     ) -> layout::Node {
         let max = limits.max();
-        let [content_tree, trailing_tree, overflow_tree] = tree.children.as_mut_slice() else {
+        let [pinned_tree, content_tree, trailing_tree, overflow_tree] =
+            tree.children.as_mut_slice()
+        else {
             return layout::Node::new(Size::ZERO);
         };
         let unbounded = layout::Limits::new(Size::ZERO, Size::new(f32::INFINITY, max.height));
+        let pinned = self
+            .pinned_row
+            .as_widget_mut()
+            .layout(pinned_tree, renderer, &unbounded);
         let content = self
             .content
             .as_widget_mut()
@@ -1468,48 +1663,68 @@ impl<Message> Widget<Message, Theme, Renderer> for Strip<'_, Message> {
             .as_widget_mut()
             .layout(overflow_tree, renderer, &loose);
 
+        let pinned_size = pinned.size();
         let content_size = content.size();
         let trailing_size = trailing.size();
         let overflow_size = overflow.size();
-        let natural = content_size.width + trailing_size.width;
+        let tabs_width = pinned_size.width + content_size.width;
+        let natural = tabs_width + trailing_size.width;
         let width = if max.width.is_finite() {
             max.width
         } else {
             natural
         };
-        let height = content_size
+        let height = pinned_size
             .height
+            .max(content_size.height)
             .max(trailing_size.height)
             .max(overflow_size.height)
             .max(limits.min().height);
         let overflowing = natural > width + 0.5;
-        let viewport_width = if overflowing {
+        let room = if overflowing {
             (width - trailing_size.width - overflow_size.width).max(0.0)
         } else {
-            content_size.width
+            tabs_width
         };
+        let (fixed, fixed_tabs) = if pinned_stay(pinned_size.width, room, overflowing) {
+            (pinned_size.width, self.pinned)
+        } else {
+            (0.0, 0)
+        };
+        let viewport_width = (room - fixed).max(0.0);
         let centre = |size: Size| (height - size.height) / 2.0;
 
-        let spans: Vec<(f32, f32)> = content
+        let spans: Vec<(f32, f32)> = pinned
             .children()
             .iter()
             .map(|tab| (tab.bounds().x, tab.bounds().width))
+            .chain(
+                content
+                    .children()
+                    .iter()
+                    .map(|tab| (pinned_size.width + tab.bounds().x, tab.bounds().width)),
+            )
             .collect();
-
         let memory = tree.state.downcast_mut::<Memory>();
         memory.overflowing = overflowing;
+        memory.fixed = fixed;
+        memory.fixed_tabs = fixed_tabs;
+        let active = self
+            .active
+            .and_then(|index| memory.scroll_span(&spans, index));
         memory.follow(
             (self.active, self.count),
-            (content_size.width, viewport_width),
-            self.active.and_then(|index| spans.get(index).copied()),
+            (tabs_width - fixed, viewport_width),
+            active,
         );
 
         let overflow_x = width - overflow_size.width;
         layout::Node::with_children(
             Size::new(width, height),
             vec![
-                content.move_to(Point::new(0.0, centre(content_size))),
-                trailing.move_to(Point::new(viewport_width, centre(trailing_size))),
+                pinned.move_to(Point::new(0.0, centre(pinned_size))),
+                content.move_to(Point::new(pinned_size.width, centre(content_size))),
+                trailing.move_to(Point::new(fixed + viewport_width, centre(trailing_size))),
                 overflow.move_to(Point::new(overflow_x, centre(overflow_size))),
             ],
         )
@@ -1528,9 +1743,12 @@ impl<Message> Widget<Message, Theme, Renderer> for Strip<'_, Message> {
         let memory = tree.state.downcast_ref::<Memory>();
         let colours = strip_style(&Tokens::of(theme));
         let bounds = layout.bounds();
-        let mut children = layout.children();
-        let (Some(content), Some(trailing), Some(overflow)) =
-            (children.next(), children.next(), children.next())
+        let Some(Parts {
+            pinned,
+            content,
+            trailing,
+            overflow,
+        }) = parts(layout)
         else {
             return;
         };
@@ -1538,35 +1756,56 @@ impl<Message> Widget<Message, Theme, Renderer> for Strip<'_, Message> {
         fill(renderer, bounds, colours.background);
 
         let clip = memory.viewport(bounds);
-        let inner = memory.inner_cursor(cursor, clip);
-        let tabs: Vec<Rectangle> = content.children().map(|tab| tab.bounds()).collect();
-        renderer.with_layer(clip, |renderer| {
-            renderer.with_translation(Vector::new(-memory.offset, 0.0), |renderer| {
-                self.content.as_widget().draw(
-                    &tree.children[0],
-                    renderer,
-                    theme,
-                    style,
-                    content,
-                    inner,
-                    &(clip + memory.shift()),
-                );
-                self.draw_marks(renderer, memory, &tabs, colours, bounds);
+        let rows = [
+            (
+                &self.pinned_row,
+                &tree.children[0],
+                pinned,
+                memory.pinned_frame(bounds),
+            ),
+            (
+                &self.content,
+                &tree.children[1],
+                content,
+                (clip, memory.shift()),
+            ),
+        ];
+        for (row, row_tree, row_layout, (row_clip, shift)) in rows {
+            renderer.with_layer(row_clip, |renderer| {
+                renderer.with_translation(Vector::new(-shift.x, 0.0), |renderer| {
+                    row.as_widget().draw(
+                        row_tree,
+                        renderer,
+                        theme,
+                        style,
+                        row_layout,
+                        inner_cursor(cursor, row_clip, shift),
+                        &(row_clip + shift),
+                    );
+                });
             });
-        });
+        }
 
-        // Marks where tabs are cut off before the buttons.
-        if memory.overflowing {
-            let top = bounds.y + (bounds.height - DIVIDER_HEIGHT) / 2.0;
+        let spans = spans(bounds.x, pinned, content);
+        let top = bounds.y + (bounds.height - DIVIDER_HEIGHT) / 2.0;
+        let divider = |renderer: &mut Renderer, x: f32| {
             fill(
                 renderer,
                 Rectangle::new(
-                    Point::new((clip.x + clip.width).round(), top),
+                    Point::new((bounds.x + x).round(), top),
                     Size::new(1.0, DIVIDER_HEIGHT),
                 ),
                 colours.divider,
             );
+        };
+        for x in memory.dividers(&spans, self.active) {
+            divider(renderer, x);
         }
+        // Marks where tabs are cut off before the buttons.
+        if memory.overflowing {
+            divider(renderer, memory.fixed + memory.viewport_width);
+        }
+        self.draw_indicator(renderer, memory, &spans, colours, bounds);
 
         // The bottom line, broken under the active tab where it is visible.
         let line = Rectangle {
@@ -1576,25 +1815,22 @@ impl<Message> Widget<Message, Theme, Renderer> for Strip<'_, Message> {
         };
         let gap = self
             .active
-            .and_then(|index| tabs.get(index))
-            .map(|tab| *tab - memory.shift())
-            .and_then(|tab| tab.intersection(&clip));
+            .and_then(|index| memory.visible_span(&spans, index));
         match gap {
-            Some(tab) => {
+            Some((left, right)) => {
                 fill(
                     renderer,
                     Rectangle {
-                        width: tab.x - line.x,
+                        width: left,
                         ..line
                     },
                     colours.line,
                 );
-                let right = tab.x + tab.width;
                 fill(
                     renderer,
                     Rectangle {
-                        x: right,
-                        width: line.x + line.width - right,
+                        x: line.x + right,
+                        width: line.width - right,
                         ..line
                     },
                     colours.line,
@@ -1604,7 +1840,7 @@ impl<Message> Widget<Message, Theme, Renderer> for Strip<'_, Message> {
         }
 
         self.trailing.as_widget().draw(
-            &tree.children[1],
+            &tree.children[2],
             renderer,
             theme,
             style,
@@ -1614,7 +1850,7 @@ impl<Message> Widget<Message, Theme, Renderer> for Strip<'_, Message> {
         );
         if memory.overflowing {
             self.overflow.as_widget().draw(
-                &tree.children[2],
+                &tree.children[3],
                 renderer,
                 theme,
                 style,
@@ -1632,23 +1868,52 @@ impl<Message> Widget<Message, Theme, Renderer> for Strip<'_, Message> {
         renderer: &Renderer,
         operation: &mut dyn Operation,
     ) {
-        let mut children = layout.children();
-        let (Some(content), Some(trailing), Some(overflow)) =
-            (children.next(), children.next(), children.next())
+        let bounds = layout.bounds();
+        let Some(Parts {
+            pinned,
+            content,
+            trailing,
+            overflow,
+        }) = parts(layout)
         else {
             return;
         };
-        let [content_tree, trailing_tree, overflow_tree] = tree.children.as_mut_slice() else {
+        let [pinned_tree, content_tree, trailing_tree, overflow_tree] =
+            tree.children.as_mut_slice()
+        else {
             return;
         };
         let memory = tree.state.downcast_mut::<Memory>();
-        let clip = memory.viewport(layout.bounds());
+        let clip = memory.viewport(bounds);
         let shift = memory.shift();
-        operation.scrollable(None, clip, content.bounds(), shift, memory);
+        let pinned_scroll = memory.fixed_tabs == 0;
+        let scrolled = Rectangle {
+            x: clip.x,
+            width: memory.content_width,
+            ..content.bounds()
+        };
+        if !pinned_scroll {
+            operation.traverse(&mut |operation| {
+                self.pinned_row
+                    .as_widget_mut()
+                    .operate(pinned_tree, pinned, renderer, operation);
+            });
+        }
         operation.traverse(&mut |operation| {
-            self.content
-                .as_widget_mut()
-                .operate(content_tree, content, renderer, operation);
+            operation.scrollable(None, clip, scrolled, shift, memory);
+            operation.traverse(&mut |operation| {
+                if pinned_scroll {
+                    self.pinned_row.as_widget_mut().operate(
+                        pinned_tree,
+                        pinned,
+                        renderer,
+                        operation,
+                    );
+                }
+                self.content
+                    .as_widget_mut()
+                    .operate(content_tree, content, renderer, operation);
+            });
         });
         self.trailing
             .as_widget_mut()
@@ -1670,36 +1935,46 @@ impl<Message> Widget<Message, Theme, Renderer> for Strip<'_, Message> {
         viewport: &Rectangle,
     ) {
         let bounds = layout.bounds();
-        let mut children = layout.children();
-        let (Some(content), Some(trailing), Some(overflow)) =
-            (children.next(), children.next(), children.next())
+        let Some(Parts {
+            pinned,
+            content,
+            trailing,
+            overflow,
+        }) = parts(layout)
         else {
             return;
         };
-        let spans = spans(content);
+        let spans = spans(bounds.x, pinned, content);
 
-        if self.drag(tree, event, cursor, content.bounds().x, &spans, shell) {
+        if self.drag(tree, event, cursor, bounds.x, &spans, shell) {
             return;
         }
 
         let memory = tree.state.downcast_ref::<Memory>();
         let clip = memory.viewport(bounds);
-        let inner = memory.inner_cursor(cursor, clip);
-        let inner_viewport = clip + memory.shift();
+        let frames = [memory.pinned_frame(bounds), (clip, memory.shift())];
         let overflowing = memory.overflowing;
-        let [content_tree, trailing_tree, overflow_tree] = tree.children.as_mut_slice() else {
+        let [pinned_tree, content_tree, trailing_tree, overflow_tree] =
+            tree.children.as_mut_slice()
+        else {
             return;
         };
-        self.content.as_widget_mut().update(
-            content_tree,
-            event,
-            content,
-            inner,
-            renderer,
-            clipboard,
-            shell,
-            &inner_viewport,
-        );
+        let rows = [
+            (&mut self.pinned_row, pinned_tree, pinned),
+            (&mut self.content, content_tree, content),
+        ];
+        for ((row, row_tree, row_layout), (row_clip, shift)) in rows.into_iter().zip(frames) {
+            row.as_widget_mut().update(
+                row_tree,
+                event,
+                row_layout,
+                inner_cursor(cursor, row_clip, shift),
+                renderer,
+                clipboard,
+                shell,
+                &(row_clip + shift),
+            );
+        }
         self.trailing.as_widget_mut().update(
             trailing_tree,
             event,
@@ -1727,10 +2002,7 @@ impl<Message> Widget<Message, Theme, Renderer> for Strip<'_, Message> {
         }
 
         let memory = tree.state.downcast_mut::<Memory>();
-        let content_x = content.bounds().x;
-        self.pointer(
-            memory, event, cursor, bounds, clip, content_x, &spans, shell,
-        );
+        self.pointer(memory, event, cursor, bounds, &spans, shell);
     }
 
     fn mouse_interaction(
@@ -1746,26 +2018,44 @@ impl<Message> Widget<Message, Theme, Renderer> for Strip<'_, Message> {
             return mouse::Interaction::Grabbing;
         }
         let bounds = layout.bounds();
-        let mut children = layout.children();
-        let (Some(content), Some(trailing), Some(overflow)) =
-            (children.next(), children.next(), children.next())
+        let Some(Parts {
+            pinned,
+            content,
+            trailing,
+            overflow,
+        }) = parts(layout)
         else {
             return mouse::Interaction::None;
         };
         let clip = memory.viewport(bounds);
-        let inner = memory.inner_cursor(cursor, clip);
-        let interaction = self
-            .content
-            .as_widget()
-            .mouse_interaction(
+        let rows = [
+            (
+                &self.pinned_row,
                 &tree.children[0],
-                content,
-                inner,
-                &(clip + memory.shift()),
-                renderer,
-            )
-            .max(self.trailing.as_widget().mouse_interaction(
+                pinned,
+                memory.pinned_frame(bounds),
+            ),
+            (
+                &self.content,
                 &tree.children[1],
+                content,
+                (clip, memory.shift()),
+            ),
+        ];
+        let interaction = rows
+            .into_iter()
+            .map(|(row, row_tree, row_layout, (row_clip, shift))| {
+                row.as_widget().mouse_interaction(
+                    row_tree,
+                    row_layout,
+                    inner_cursor(cursor, row_clip, shift),
+                    &(row_clip + shift),
+                    renderer,
+                )
+            })
+            .fold(mouse::Interaction::None, mouse::Interaction::max)
+            .max(self.trailing.as_widget().mouse_interaction(
+                &tree.children[2],
                 trailing,
                 cursor,
                 viewport,
@@ -1775,7 +2065,7 @@ impl<Message> Widget<Message, Theme, Renderer> for Strip<'_, Message> {
             return interaction;
         }
         interaction.max(self.overflow.as_widget().mouse_interaction(
-            &tree.children[2],
+            &tree.children[3],
             overflow,
             cursor,
             viewport,
@@ -1792,27 +2082,38 @@ impl<Message> Widget<Message, Theme, Renderer> for Strip<'_, Message> {
         translation: Vector,
     ) -> Option<overlay::Element<'b, Message, Theme, Renderer>> {
         let memory = tree.state.downcast_ref::<Memory>();
-        let clip = memory.viewport(layout.bounds());
-        let shift = memory.shift();
+        let bounds = layout.bounds();
+        let frames = [
+            memory.pinned_frame(bounds),
+            (memory.viewport(bounds), memory.shift()),
+        ];
         let overflowing = memory.overflowing;
-        let mut children = layout.children();
-        let (Some(content), Some(trailing), Some(overflow)) =
-            (children.next(), children.next(), children.next())
+        let Parts {
+            pinned,
+            content,
+            trailing,
+            overflow,
+        } = parts(layout)?;
+        let [pinned_tree, content_tree, trailing_tree, overflow_tree] =
+            tree.children.as_mut_slice()
         else {
-            return None;
-        };
-        let [content_tree, trailing_tree, overflow_tree] = tree.children.as_mut_slice() else {
             return None;
         };
 
         let mut overlays = Vec::new();
-        overlays.extend(self.content.as_widget_mut().overlay(
-            content_tree,
-            content,
-            renderer,
-            &(clip + shift),
-            translation - shift,
-        ));
+        let rows = [
+            (&mut self.pinned_row, pinned_tree, pinned),
+            (&mut self.content, content_tree, content),
+        ];
+        for ((row, row_tree, row_layout), (row_clip, shift)) in rows.into_iter().zip(frames) {
+            overlays.extend(row.as_widget_mut().overlay(
+                row_tree,
+                row_layout,
+                renderer,
+                &(row_clip + shift),
+                translation - shift,
+            ));
+        }
         overlays.extend(self.trailing.as_widget_mut().overlay(
             trailing_tree,
             trailing,
@@ -1852,54 +2153,30 @@ fn fill(renderer: &mut Renderer, bounds: Rectangle, colour: Color) {
 }
 
 impl<Message> Strip<'_, Message> {
-    /// Dividers between inactive tabs and the drop indicator, in content
-    /// coordinates.
-    fn draw_marks(
+    /// The line marking where a dragged tab will land.
+    fn draw_indicator(
         &self,
         renderer: &mut Renderer,
         memory: &Memory,
-        tabs: &[Rectangle],
+        spans: &[(f32, f32)],
         colours: StripStyle,
         bounds: Rectangle,
     ) {
-        let top = bounds.y + (bounds.height - DIVIDER_HEIGHT) / 2.0;
-        for (index, pair) in tabs.windows(2).enumerate() {
-            let touches_active = self
-                .active
-                .is_some_and(|active| active == index || active == index + 1);
-            if touches_active {
-                continue;
-            }
-            let x = pair[1].x.round();
-            fill(
-                renderer,
-                Rectangle::new(Point::new(x, top), Size::new(1.0, DIVIDER_HEIGHT)),
-                colours.divider,
-            );
-        }
-
-        let Some(gap) = memory
+        let Some(x) = memory
             .press
             .filter(|press| press.dragging)
             .and_then(|press| {
                 let gap = press.gap?;
-                drop_index(press.index, gap).map(|_| gap)
+                drop_index(press.index, gap)?;
+                memory.indicator_x(spans, press.index, gap)
             })
         else {
             return;
         };
-        let x = match (tabs.get(gap), tabs.last()) {
-            (Some(tab), _) => tab.x,
-            (None, Some(last)) => last.x + last.width,
-            (None, None) => return,
-        };
-        let x = (x - INDICATOR_WIDTH / 2.0)
-            .max(bounds.x)
-            .min(bounds.x + memory.content_width - INDICATOR_WIDTH);
         fill(
             renderer,
             Rectangle::new(
-                Point::new(x, bounds.y),
+                Point::new(bounds.x + x, bounds.y),
                 Size::new(INDICATOR_WIDTH, bounds.height),
             ),
             colours.indicator,
@@ -1912,7 +2189,7 @@ impl<Message> Strip<'_, Message> {
         tree: &mut Tree,
         event: &Input,
         cursor: mouse::Cursor,
-        content_x: f32,
+        strip_x: f32,
         spans: &[(f32, f32)],
         shell: &mut Shell<'_, Message>,
     ) -> bool {
@@ -1932,8 +2209,7 @@ impl<Message> Strip<'_, Message> {
                     }
                     press.dragging = true;
                 }
-                let x = position.x + memory.offset - content_x;
-                let gap = gap_at(spans, x);
+                let gap = gap_at(spans, memory.unscroll(position.x - strip_x));
                 press.gap = Some(clamp_gap(press.index, gap, self.pinned, self.count));
                 memory.press = Some(press);
                 shell.request_redraw();
@@ -1965,21 +2241,18 @@ impl<Message> Strip<'_, Message> {
 
     /// Presses, double clicks, the wheel and touch panning, once no child
     /// has used the event.
-    #[allow(clippy::too_many_arguments)]
     fn pointer(
         &self,
         memory: &mut Memory,
         event: &Input,
         cursor: mouse::Cursor,
         bounds: Rectangle,
-        clip: Rectangle,
-        content_x: f32,
         spans: &[(f32, f32)],
         shell: &mut Shell<'_, Message>,
     ) {
         let tab_at = |memory: &Memory, cursor: mouse::Cursor| {
-            let position = cursor.position_over(clip)?;
-            let x = position.x + memory.offset - content_x;
+            let position = cursor.position_over(bounds)?;
+            let x = memory.locate(position.x - bounds.x)?;
             spans
                 .iter()
                 .position(|(left, width)| x >= *left && x < left + width)
@@ -2291,12 +2564,12 @@ mod tests {
             [
                 (MenuItem::Close, false),
                 (MenuItem::CloseOthers, false),
-                (MenuItem::CloseToTheRight, true),
                 (MenuItem::CloseSaved, false),
                 (MenuItem::CloseAll, false),
                 (MenuItem::Pin, false),
                 (MenuItem::Custom("copy-path"), false),
-            ]
+            ],
+            "the last tab has nothing to its right"
         );
         let _ = state.update(Event::Menu(context_menu::Event::OpenFromKeyboard(3)));
         assert!(items(&state).contains(&(MenuItem::Unpin, false)));
@@ -2663,5 +2936,348 @@ mod tests {
         assert!(tabs.context_menu_keymap.is_empty());
         assert!(tabs.overflow_keymap.is_empty());
         assert!(tabs.is_enabled());
+    }
+
+    #[test]
+    fn documents_are_closable_and_unlocked_by_default() {
+        let plain = document(1, "a");
+        assert!(plain.closable);
+        assert!(!plain.locked);
+        let kept = plain.closable(false).locked(true);
+        assert!(!kept.closable);
+        assert!(kept.locked);
+    }
+
+    /// A pinned job list that never closes or unpins, then three files.
+    fn kept() -> State<u8> {
+        State::new([
+            document(0, "All jobs")
+                .pinned(true)
+                .closable(false)
+                .locked(true),
+            document(1, "a.rs"),
+            document(2, "b.rs"),
+            document(3, "c.rs"),
+        ])
+    }
+
+    /// The items the context menu offers on `target`, checking none is a
+    /// disabled no-op and separators only sit between groups.
+    fn offered(state: &mut State<u8>, target: u8) -> Vec<MenuItem> {
+        let _ = state.update(Event::Menu(context_menu::Event::OpenFromKeyboard(target)));
+        if !state.menu().is_open() {
+            return Vec::new();
+        }
+        let entries = state.menu().menu().entries();
+        assert!(
+            entries
+                .first()
+                .is_some_and(|entry| entry.as_item().is_some())
+        );
+        assert!(
+            entries
+                .last()
+                .is_some_and(|entry| entry.as_item().is_some())
+        );
+        let has_double = entries
+            .windows(2)
+            .any(|pair| pair[0].as_item().is_none() && pair[1].as_item().is_none());
+        assert!(!has_double, "two separators in a row");
+        items(state)
+            .into_iter()
+            .map(|(id, disabled)| {
+                assert!(!disabled, "{id:?} is disabled");
+                id
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_menu_hides_close_and_pin_on_a_kept_tab() {
+        let mut state = kept();
+        assert_eq!(
+            offered(&mut state, 0),
+            [
+                MenuItem::CloseOthers,
+                MenuItem::CloseToTheRight,
+                MenuItem::CloseAll
+            ]
+        );
+        assert_eq!(
+            offered(&mut state, 1),
+            [
+                MenuItem::Close,
+                MenuItem::CloseOthers,
+                MenuItem::CloseToTheRight,
+                MenuItem::CloseAll,
+                MenuItem::Pin,
+            ]
+        );
+        assert_eq!(
+            offered(&mut state, 3),
+            [
+                MenuItem::Close,
+                MenuItem::CloseOthers,
+                MenuItem::CloseAll,
+                MenuItem::Pin
+            ]
+        );
+    }
+
+    #[test]
+    fn a_pinned_closable_tab_offers_close_and_unpin() {
+        let mut state = State::new([document(0, "notes").pinned(true), document(1, "a.rs")]);
+        assert_eq!(
+            offered(&mut state, 0),
+            [
+                MenuItem::Close,
+                MenuItem::CloseOthers,
+                MenuItem::CloseToTheRight,
+                MenuItem::CloseAll,
+                MenuItem::Unpin
+            ]
+        );
+    }
+
+    #[test]
+    fn a_menu_with_nothing_to_offer_does_not_open() {
+        let mut alone = State::new([document(0, "All jobs")
+            .pinned(true)
+            .closable(false)
+            .locked(true)]);
+        assert!(offered(&mut alone, 0).is_empty());
+        assert!(!alone.menu().is_open());
+
+        let mut extra = alone.with_menu_items([item(MenuItem::Custom("refresh"), "Refresh")]);
+        assert_eq!(offered(&mut extra, 0), [MenuItem::Custom("refresh")]);
+        assert_eq!(extra.menu().menu().entries().len(), 1, "no separators");
+    }
+
+    #[test]
+    fn close_saved_shows_only_when_it_differs_from_close_all() {
+        let mut state = kept();
+        assert!(!offered(&mut state, 1).contains(&MenuItem::CloseSaved));
+
+        state.set_modified(2, true);
+        assert!(offered(&mut state, 1).contains(&MenuItem::CloseSaved));
+
+        for id in [1, 3] {
+            state.set_modified(id, true);
+        }
+        assert!(
+            !offered(&mut state, 1).contains(&MenuItem::CloseSaved),
+            "every tab it would look at is modified"
+        );
+
+        let mut pinned_only = kept();
+        pinned_only.set_modified(0, true);
+        assert!(
+            !offered(&mut pinned_only, 1).contains(&MenuItem::CloseSaved),
+            "a modified pinned tab is never closed in bulk"
+        );
+    }
+
+    #[test]
+    fn close_requests_skip_unclosable_documents() {
+        let mut state = State::new([
+            document(0, "All jobs").pinned(true).closable(false),
+            document(1, "log").closable(false),
+            document(2, "a.rs"),
+            document(3, "b.rs").modified(true),
+        ]);
+        assert_eq!(state.update(Event::Close(0)), None);
+        assert_eq!(state.update(Event::Close(1)), None);
+        assert_eq!(
+            state.update(Event::Close(2)),
+            Some(Output::CloseRequested(vec![2]))
+        );
+        assert_eq!(
+            state.update(Event::CloseOthers(2)),
+            Some(Output::CloseRequested(vec![3]))
+        );
+        assert_eq!(
+            state.update(Event::CloseToTheRight(0)),
+            Some(Output::CloseRequested(vec![2, 3]))
+        );
+        assert_eq!(
+            state.update(Event::CloseSaved),
+            Some(Output::CloseRequested(vec![2]))
+        );
+        assert_eq!(
+            state.update(Event::CloseAll),
+            Some(Output::CloseRequested(vec![2, 3]))
+        );
+        assert!(!offered(&mut state, 1).contains(&MenuItem::Close));
+
+        assert_eq!(Action::Close.event(&state.clone().with_active(1)), None);
+        assert_eq!(Action::Close.event(&state.clone().with_active(0)), None);
+        assert_eq!(
+            Action::Close.event(&state.with_active(2)),
+            Some(Event::Close(2))
+        );
+    }
+
+    #[test]
+    fn unclosable_tabs_have_no_close_slot() {
+        let look = Look {
+            active: true,
+            hovered: true,
+            enabled: true,
+        };
+        let has_slot = |document: &Document<u8>| slot::<u8, ()>(document, look, None).is_some();
+        assert!(has_slot(&document(1, "a")));
+        assert!(!has_slot(&document(1, "a").closable(false)));
+        assert!(has_slot(&document(1, "a").closable(false).modified(true)));
+    }
+
+    #[test]
+    fn pin_events_leave_locked_documents_alone() {
+        let mut state = kept();
+        let mut locked = State::new([document(5, "x").locked(true), document(6, "y")]);
+        assert_eq!(state.update(Event::Pin(0, false)), None);
+        assert_eq!(state.pinned_count(), 1);
+        assert_eq!(locked.update(Event::Pin(5, true)), None);
+        assert_eq!(locked.pinned_count(), 0);
+        assert_eq!(
+            locked.update(Event::Pin(6, true)),
+            Some(Output::Pinned(6, true))
+        );
+    }
+
+    #[test]
+    fn locked_tabs_still_move_within_their_group() {
+        let mut state = State::new([
+            document(0, "jobs").pinned(true).locked(true),
+            document(1, "notes").pinned(true),
+            document(2, "a.rs"),
+        ]);
+        assert_eq!(
+            state.update(Event::Move(0, 9)),
+            Some(Output::Moved {
+                id: 0,
+                from: 0,
+                to: 1
+            }),
+            "clamped to the end of the pinned tabs"
+        );
+        assert_eq!(ids(&state), [1, 0, 2]);
+        assert_eq!(state.update(Event::Move(2, 0)), None);
+        assert_eq!(
+            clamp_gap(1, 3, 2, 3),
+            2,
+            "a dragged pinned tab stays pinned"
+        );
+        assert_eq!(clamp_gap(2, 0, 2, 3), 2, "an unpinned tab stays unpinned");
+    }
+
+    #[test]
+    fn pinned_tabs_stay_unless_they_take_most_of_a_narrow_strip() {
+        assert!(pinned_stay(100.0, 250.0, true));
+        assert!(pinned_stay(125.0, 250.0, true));
+        assert!(!pinned_stay(126.0, 250.0, true));
+        assert!(pinned_stay(400.0, 250.0, false), "everything fits");
+        assert!(pinned_stay(0.0, 0.0, true));
+    }
+
+    /// One pinned tab 100 pixels wide, then six 100 pixel tabs scrolling
+    /// in 150 pixels, laid out with the last one active.
+    fn split() -> (Memory, Vec<(f32, f32)>) {
+        let spans: Vec<(f32, f32)> = (0..7).map(|index| (index as f32 * 100.0, 100.0)).collect();
+        let mut memory = Memory {
+            fixed: 100.0,
+            fixed_tabs: 1,
+            ..Memory::default()
+        };
+        let active = memory.scroll_span(&spans, 6);
+        memory.follow((Some(6), 7), (600.0, 150.0), active);
+        (memory, spans)
+    }
+
+    #[test]
+    fn the_active_tab_is_revealed_after_the_pinned_tabs() {
+        let (mut memory, spans) = split();
+        assert_eq!(memory.scroll_span(&spans, 6), Some((500.0, 100.0)));
+        assert_eq!(memory.offset, 450.0);
+        assert_eq!(memory.visible_span(&spans, 6), Some((150.0, 250.0)));
+        assert_eq!(memory.visible_span(&spans, 0), Some((0.0, 100.0)));
+        assert_eq!(memory.visible_span(&spans, 1), None, "scrolled away");
+        assert_eq!(
+            memory
+                .viewport(Rectangle::new(
+                    Point::new(10.0, 0.0),
+                    Size::new(300.0, 36.0)
+                ))
+                .x,
+            110.0
+        );
+
+        assert_eq!(memory.scroll_span(&spans, 0), None);
+        memory.follow((Some(0), 7), (600.0, 150.0), None);
+        assert_eq!(memory.offset, 450.0, "a pinned tab is already in view");
+        memory.follow((Some(1), 7), (600.0, 150.0), memory.scroll_span(&spans, 1));
+        assert_eq!(memory.offset, 0.0);
+        assert_eq!(memory.visible_span(&spans, 1), Some((100.0, 200.0)));
+    }
+
+    #[test]
+    fn pointers_find_pinned_tabs_in_place_and_others_scrolled() {
+        let (memory, _) = split();
+        assert_eq!(memory.locate(-1.0), None);
+        assert_eq!(memory.locate(50.0), Some(50.0));
+        assert_eq!(memory.locate(105.0), Some(555.0));
+        assert_eq!(memory.locate(250.0), None, "past the scrolling tabs");
+        assert_eq!(memory.unscroll(50.0), 50.0);
+        assert_eq!(memory.unscroll(400.0), 850.0);
+
+        let fallback = Memory {
+            offset: 30.0,
+            viewport_width: 200.0,
+            ..Memory::default()
+        };
+        assert_eq!(fallback.locate(50.0), Some(80.0), "everything scrolls");
+        assert_eq!(
+            fallback.pinned_frame(Rectangle::default()).1,
+            Vector::new(30.0, 0.0)
+        );
+    }
+
+    #[test]
+    fn dividers_mark_the_end_of_the_pinned_tabs() {
+        let (memory, spans) = split();
+        assert_eq!(memory.dividers(&spans, Some(6)), [100.0]);
+        assert_eq!(memory.dividers(&spans, Some(0)), [150.0]);
+        assert_eq!(
+            memory.dividers(&spans, Some(1)),
+            [100.0, 150.0],
+            "the active tab is scrolled away from the edge"
+        );
+        let still = Memory {
+            offset: 0.0,
+            ..memory
+        };
+        assert_eq!(still.dividers(&spans, Some(1)), Vec::<f32>::new());
+    }
+
+    #[test]
+    fn the_drop_indicator_stays_in_the_dragged_tab_region() {
+        let (memory, spans) = split();
+        let half = INDICATOR_WIDTH / 2.0;
+        assert_eq!(memory.indicator_x(&spans, 0, 0), Some(0.0));
+        assert_eq!(
+            memory.indicator_x(&spans, 0, 1),
+            Some(100.0 - INDICATOR_WIDTH),
+            "the end of the pinned tabs"
+        );
+        assert_eq!(
+            memory.indicator_x(&spans, 6, 1),
+            Some(100.0),
+            "the first unpinned gap is scrolled away, so it sits at the edge"
+        );
+        assert_eq!(memory.indicator_x(&spans, 6, 6), Some(150.0 - half));
+        assert_eq!(
+            memory.indicator_x(&spans, 6, 7),
+            Some(250.0 - INDICATOR_WIDTH)
+        );
+        assert_eq!(memory.indicator_x(&[], 0, 0), None);
     }
 }

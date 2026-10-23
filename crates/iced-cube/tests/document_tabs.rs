@@ -453,6 +453,124 @@ fn the_active_tab_stays_in_view_when_the_strip_widens() {
     assert_last_tab_in_view(&mut ui, 300.0);
 }
 
+/// A kept pinned tab, then eight files with the last one active.
+fn pinned_and_many() -> State<u8> {
+    let files = (1..=8).map(|id| document(id, format!("file-{id}.rs")));
+    let jobs = document(0, "Jobs")
+        .pinned(true)
+        .closable(false)
+        .locked(true);
+    State::new(std::iter::once(jobs).chain(files)).with_active(8)
+}
+
+#[test]
+fn pinned_tabs_stay_at_the_start_of_a_narrow_strip() {
+    let state = pinned_and_many();
+    let mut ui = simulator(view(&state, 300.0, false));
+    let found = ui
+        .find("Jobs")
+        .map(|target| (target.bounds(), target.visible_bounds()));
+    let Ok((pinned, Some(shown))) = found else {
+        panic!("the pinned label is not visible: {found:?}");
+    };
+    assert!((shown.width - pinned.width).abs() < 0.01, "shown in full");
+    assert_eq!(shown.x, pinned.x);
+    assert!(pinned.x < 20.0, "at the left edge, at {}", pinned.x);
+
+    let last = ui.find("file-8.rs").expect("label is rendered");
+    let last = last.visible_bounds().expect("the active label is visible");
+    assert!(last.x > pinned.x + pinned.width, "after the pinned tab");
+
+    ui.click("Jobs").expect("pinned tab is rendered");
+    assert_eq!(messages(ui), [Event::Activate(0)]);
+}
+
+#[test]
+fn the_start_of_the_scrolling_tabs_hits_an_unpinned_tab() {
+    let state = pinned_and_many();
+    let mut ui = simulator(view(&state, 300.0, false));
+    let pinned = label_bounds(&mut ui, "Jobs");
+    // The pinned tab ends one padding after its label.
+    let start = Point::new(pinned.x + pinned.width + 12.0 + 4.0, pinned.center_y());
+    ui.point_at(start);
+    let _ = ui.simulate(simulator::click());
+    // A partly scrolled tab sits there, so the press may land on its label
+    // or its close button.
+    let events = messages(ui);
+    assert!(
+        matches!(events.as_slice(), [Event::Activate(id) | Event::Close(id)] if *id != 0),
+        "{events:?}"
+    );
+}
+
+#[test]
+fn pinned_tabs_reorder_in_place_while_the_others_are_scrolled() {
+    let files = (1..=8).map(|id| document(id, format!("file-{id}.rs")));
+    let pinned = [document(10, "Jobs"), document(11, "Notes")].map(|d| d.pinned(true));
+    let state = State::new(pinned.into_iter().chain(files)).with_active(8);
+    let mut ui = simulator(view(&state, 300.0, false));
+    let jobs = centre(&mut ui, "Jobs");
+    let notes = label_bounds(&mut ui, "Notes");
+    let end = Point::new(notes.x + notes.width + 8.0, notes.center_y());
+    ui.point_at(jobs);
+    let _ = ui.simulate([press(mouse::Button::Left)]);
+    ui.point_at(end);
+    let _ = ui.simulate([move_to(end), release(mouse::Button::Left)]);
+    assert_eq!(messages(ui), [Event::Activate(10), Event::Move(10, 1)]);
+}
+
+#[test]
+fn hidden_tabs_never_show_under_the_pinned_tab() {
+    let state = pinned_and_many();
+    let mut ui = simulator(view(&state, 300.0, false));
+    let pinned = label_bounds(&mut ui, "Jobs");
+    for id in 1..=8 {
+        let label = format!("file-{id}.rs");
+        let Some(shown) = ui
+            .find(label.as_str())
+            .ok()
+            .and_then(|target| target.visible_bounds())
+        else {
+            continue;
+        };
+        assert!(
+            shown.x > pinned.x + pinned.width,
+            "{label} shows at {shown:?}"
+        );
+    }
+}
+
+#[test]
+fn an_unclosable_tab_has_no_close_item_or_button() {
+    let mut state = State::new([
+        document(0, "Jobs")
+            .pinned(true)
+            .closable(false)
+            .locked(true),
+        document(1, "log.txt").closable(false),
+        document(2, "a.rs"),
+    ])
+    .with_active(1);
+    let _ = state.update(Event::Menu(context_menu::Event::OpenFromKeyboard(1)));
+    let mut ui = simulator(view(&state, 600.0, false));
+    for label in ["Close", "Unpin", "Close saved"] {
+        assert!(ui.find(label).is_err(), "{label} is offered");
+    }
+    for label in ["Close others", "Close all", "Pin"] {
+        assert!(ui.find(label).is_ok(), "{label} is missing");
+    }
+
+    let unclosable = State::new([document(1, "log.txt").closable(false), document(2, "a.rs")]);
+    let mut ui = simulator(view(&unclosable, 600.0, false));
+    let label = label_bounds(&mut ui, "log.txt");
+    // Where the close button would be, just after the label.
+    let slot = Point::new(label.x + label.width + 6.0, label.center_y());
+    ui.point_at(slot);
+    let _ = ui.simulate([move_to(slot)]);
+    let _ = ui.simulate(simulator::click());
+    assert_eq!(messages(ui), [Event::Activate(1)], "a press, not a close");
+}
+
 const CHAPTERS: [&str; 12] = [
     "Introduction to the project.md",
     "Getting started.md",
