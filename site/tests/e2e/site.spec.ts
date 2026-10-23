@@ -196,6 +196,8 @@ test("API tables with long signatures fit without scrolling sideways", async ({ 
 test("long lists take the wheel and touch inside their previews", async ({ page }) => {
   await page.goto("docs/components/virtual-list/");
   await expect(page.locator('[data-story="virtual-list/large"]').first()).toHaveAttribute("data-wheel", "true");
+  await page.goto("docs/components/document-tabs/");
+  await expect(page.locator('[data-story="document-tabs/overflow"]').first()).toHaveAttribute("data-wheel", "true");
   await page.goto("docs/components/button/");
   await expect(page.locator('[data-story="button/variants"]').first()).not.toHaveAttribute("data-wheel");
 });

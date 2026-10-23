@@ -548,25 +548,44 @@ impl<Id: Copy + PartialEq> State<Id> {
     fn menu_entries(&self, target: Id) -> Option<Vec<Entry<MenuItem>>> {
         let index = self.index_of(target)?;
         let document = &self.documents[index];
-        let bulk = || self.documents.iter().filter(|d| in_bulk_close(d));
-
-        let mut close = Vec::new();
-        if document.closable {
-            close.push(item(MenuItem::Close, "Close"));
-        }
-        if bulk().any(|d| d.id != target) {
-            close.push(item(MenuItem::CloseOthers, "Close others"));
-        }
-        if self.documents[index + 1..].iter().any(in_bulk_close) {
-            close.push(item(MenuItem::CloseToTheRight, "Close to the right"));
-        }
-        // Only differs from Close all while some of those tabs are modified.
-        if bulk().any(|d| d.modified) && bulk().any(|d| !d.modified) {
-            close.push(item(MenuItem::CloseSaved, "Close saved"));
-        }
-        if bulk().next().is_some() {
-            close.push(item(MenuItem::CloseAll, "Close all"));
-        }
+        let ids = |range: &[Document<Id>], keep: &dyn Fn(&Document<Id>) -> bool| -> Vec<usize> {
+            range
+                .iter()
+                .enumerate()
+                .filter(|(_, d)| in_bulk_close(d) && keep(d))
+                .map(|(i, _)| i)
+                .collect()
+        };
+        let all = ids(&self.documents, &|_| true);
+        let right: Vec<usize> = ids(&self.documents[index + 1..], &|_| true)
+            .into_iter()
+            .map(|i| i + index + 1)
+            .collect();
+        // What each choice would close, by position, in the menu's order.
+        let choices = [
+            (
+                MenuItem::Close,
+                "Close",
+                if document.closable {
+                    vec![index]
+                } else {
+                    Vec::new()
+                },
+            ),
+            (
+                MenuItem::CloseOthers,
+                "Close others",
+                all.iter().copied().filter(|i| *i != index).collect(),
+            ),
+            (MenuItem::CloseToTheRight, "Close to the right", right),
+            (
+                MenuItem::CloseSaved,
+                "Close saved",
+                ids(&self.documents, &|d| !d.modified),
+            ),
+            (MenuItem::CloseAll, "Close all", all),
+        ];
+        let close = offered_closes(&choices);
         let pin = match (document.locked, document.pinned) {
             (true, _) => Vec::new(),
             (false, true) => vec![item(MenuItem::Unpin, "Unpin")],
@@ -603,6 +622,35 @@ impl<Id: Copy + PartialEq> State<Id> {
             dropdown_menu::Output::Toggled(..) => None,
         }
     }
+}
+
+/// The close choices worth offering, in the menu's order: each one closes
+/// some tabs, and never exactly the tabs another offered choice closes.
+/// Close and Close all win a tie, then the order of the menu.
+fn offered_closes(choices: &[(MenuItem, &str, Vec<usize>)]) -> Vec<Entry<MenuItem>> {
+    let priority = [
+        MenuItem::Close,
+        MenuItem::CloseAll,
+        MenuItem::CloseOthers,
+        MenuItem::CloseToTheRight,
+        MenuItem::CloseSaved,
+    ];
+    let mut kept: Vec<&(MenuItem, &str, Vec<usize>)> = Vec::new();
+    for wanted in priority {
+        let Some(choice) = choices.iter().find(|(id, ..)| *id == wanted) else {
+            continue;
+        };
+        let (_, _, closes) = choice;
+        if closes.is_empty() || kept.iter().any(|(_, _, other)| other == closes) {
+            continue;
+        }
+        kept.push(choice);
+    }
+    choices
+        .iter()
+        .filter(|choice| kept.iter().any(|kept| kept.0 == choice.0))
+        .map(|(id, label, _)| item(*id, *label))
+        .collect()
 }
 
 /// Whether Close others, Close to the right, Close saved and Close all
@@ -1321,6 +1369,9 @@ struct Press {
 /// always keep at least this share of a narrow strip.
 const MAX_PINNED_SHARE: f32 = 0.5;
 
+/// Space between the pinned tabs' divider and scrolled tabs cut off by it.
+const PINNED_GAP: f32 = 6.0;
+
 /// Whether pinned tabs `pinned` pixels wide stay in place, given `room`
 /// pixels for every tab.
 fn pinned_stay(pinned: f32, room: f32, overflowing: bool) -> bool {
@@ -1347,8 +1398,29 @@ struct Memory {
     measured: Option<(f32, f32)>,
     press: Option<Press>,
     last_click: Option<mouse::Click>,
-    /// A finger panning the strip: which one, and where it was last.
-    touch: Option<(Finger, f32)>,
+    touch: Option<Touch>,
+}
+
+/// A finger on the strip. It pans the strip as it moves, and taps the tab
+/// it started on if it lifts without having moved.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Touch {
+    finger: Finger,
+    /// Where the finger was last, along the strip.
+    last: f32,
+    origin: Point,
+    tab: Option<usize>,
+}
+
+/// How far a finger may drift and still tap a tab rather than pan.
+const TAP_SLOP: f32 = 10.0;
+
+impl Touch {
+    /// The tab a finger lifted at `position` taps, if it is a tap.
+    fn tapped(&self, position: Point) -> Option<usize> {
+        self.tab
+            .filter(|_| self.origin.distance(position) <= TAP_SLOP)
+    }
 }
 
 impl Scrollable for Memory {
@@ -1488,6 +1560,27 @@ impl Memory {
         (shown_right > shown_left).then_some((shown_left, shown_right))
     }
 
+    /// Where scrolled tabs start to show, from the strip's left edge: a few
+    /// pixels clear of the pinned tabs' divider once tabs are scrolled under
+    /// it, so a cut-off label never touches the line.
+    fn scroll_start(&self) -> f32 {
+        if self.fixed_tabs == 0 || self.offset <= 0.0 {
+            return self.fixed;
+        }
+        self.fixed + PINNED_GAP.min(self.viewport_width)
+    }
+
+    /// The scrolling region as drawn, starting at [`Memory::scroll_start`].
+    fn scroll_clip(&self, bounds: Rectangle) -> Rectangle {
+        let clip = self.viewport(bounds);
+        let inset = self.scroll_start() - self.fixed;
+        Rectangle {
+            x: clip.x + inset,
+            width: (clip.width - inset).max(0.0),
+            ..clip
+        }
+    }
+
     /// Where the short lines between tabs go, from the strip's left edge.
     /// None touches the active tab, and one marks where the pinned tabs end
     /// while they stay in place.
@@ -1508,7 +1601,7 @@ impl Memory {
                     return Some(left);
                 }
                 let x = left - self.offset;
-                (x > self.fixed && x < end).then_some(x)
+                (x > self.scroll_start() && x < end).then_some(x)
             })
             .collect()
     }
@@ -1755,7 +1848,7 @@ impl<Message> Widget<Message, Theme, Renderer> for Strip<'_, Message> {
 
         fill(renderer, bounds, colours.background);
 
-        let clip = memory.viewport(bounds);
+        let clip = memory.scroll_clip(bounds);
         let rows = [
             (
                 &self.pinned_row,
@@ -2311,25 +2404,43 @@ impl<Message> Strip<'_, Message> {
                 if !bounds.contains(*position) {
                     return;
                 }
-                memory.touch = Some((*id, position.x));
-                if let Some(index) = tab_at(memory, cursor) {
-                    self.publish(shell, Gesture::Press(index));
+                let tab = tab_at(memory, cursor);
+                memory.touch = Some(Touch {
+                    finger: *id,
+                    last: position.x,
+                    origin: *position,
+                    tab,
+                });
+                if tab.is_some() {
                     shell.capture_event();
                 }
             }
             Input::Touch(touch::Event::FingerMoved { id, position }) => {
-                let Some((finger, last)) = memory.touch.filter(|(finger, _)| finger == id) else {
+                let Some(touch) = memory.touch.filter(|touch| touch.finger == *id) else {
                     return;
                 };
-                memory.touch = Some((finger, position.x));
-                if memory.scroll_by(last - position.x) {
+                memory.touch = Some(Touch {
+                    last: position.x,
+                    ..touch
+                });
+                if memory.scroll_by(touch.last - position.x) {
                     shell.request_redraw();
                     shell.capture_event();
                 }
             }
-            Input::Touch(
-                touch::Event::FingerLifted { id, .. } | touch::Event::FingerLost { id, .. },
-            ) if memory.touch.is_some_and(|(finger, _)| finger == *id) => {
+            Input::Touch(touch::Event::FingerLifted { id, position }) => {
+                let Some(touch) = memory.touch.filter(|touch| touch.finger == *id) else {
+                    return;
+                };
+                memory.touch = None;
+                if let Some(index) = touch.tapped(*position) {
+                    self.publish(shell, Gesture::Press(index));
+                    shell.capture_event();
+                }
+            }
+            Input::Touch(touch::Event::FingerLost { id, .. })
+                if memory.touch.is_some_and(|touch| touch.finger == *id) =>
+            {
                 memory.touch = None;
             }
             _ => {}
@@ -2600,8 +2711,8 @@ mod tests {
             Some(Output::CloseRequested(vec![1, 4]))
         );
         assert_eq!(
-            choose(1, MenuItem::CloseToTheRight).0,
-            Some(Output::CloseRequested(vec![2, 4]))
+            choose(2, MenuItem::CloseToTheRight).0,
+            Some(Output::CloseRequested(vec![4]))
         );
         assert_eq!(
             choose(1, MenuItem::CloseSaved).0,
@@ -2997,21 +3108,18 @@ mod tests {
         let mut state = kept();
         assert_eq!(
             offered(&mut state, 0),
-            [
-                MenuItem::CloseOthers,
-                MenuItem::CloseToTheRight,
-                MenuItem::CloseAll
-            ]
+            [MenuItem::CloseAll],
+            "Close others and Close to the right would close the same tabs"
         );
         assert_eq!(
             offered(&mut state, 1),
             [
                 MenuItem::Close,
                 MenuItem::CloseOthers,
-                MenuItem::CloseToTheRight,
                 MenuItem::CloseAll,
                 MenuItem::Pin,
-            ]
+            ],
+            "Close to the right would close what Close others does"
         );
         assert_eq!(
             offered(&mut state, 3),
@@ -3025,17 +3133,25 @@ mod tests {
     }
 
     #[test]
+    fn a_lone_tab_beside_a_kept_one_offers_close_without_close_all() {
+        let mut state = State::new([
+            document(0, "All jobs")
+                .pinned(true)
+                .closable(false)
+                .locked(true),
+            document(1, "orders-etl"),
+        ]);
+        assert_eq!(offered(&mut state, 1), [MenuItem::Close, MenuItem::Pin]);
+        assert_eq!(offered(&mut state, 0), [MenuItem::CloseAll]);
+    }
+
+    #[test]
     fn a_pinned_closable_tab_offers_close_and_unpin() {
         let mut state = State::new([document(0, "notes").pinned(true), document(1, "a.rs")]);
         assert_eq!(
             offered(&mut state, 0),
-            [
-                MenuItem::Close,
-                MenuItem::CloseOthers,
-                MenuItem::CloseToTheRight,
-                MenuItem::CloseAll,
-                MenuItem::Unpin
-            ]
+            [MenuItem::Close, MenuItem::CloseAll, MenuItem::Unpin],
+            "the bulk closes all close just a.rs"
         );
     }
 
@@ -3238,6 +3354,36 @@ mod tests {
         assert_eq!(
             fallback.pinned_frame(Rectangle::default()).1,
             Vector::new(30.0, 0.0)
+        );
+    }
+
+    #[test]
+    fn scrolled_tabs_keep_clear_of_the_pinned_divider() {
+        let (memory, spans) = split();
+        assert_eq!(memory.scroll_start(), 100.0 + PINNED_GAP);
+        let clip = memory.scroll_clip(Rectangle::new(Point::ORIGIN, Size::new(400.0, 36.0)));
+        assert_eq!(
+            (clip.x, clip.width),
+            (100.0 + PINNED_GAP, 150.0 - PINNED_GAP)
+        );
+
+        let still = Memory {
+            offset: 0.0,
+            ..memory
+        };
+        assert_eq!(still.scroll_start(), 100.0, "nothing is cut off yet");
+
+        // Tab 6 starts 3 pixels after the pinned divider.
+        let close = Memory {
+            offset: 497.0,
+            ..memory
+        };
+        assert!(
+            !close
+                .dividers(&spans, Some(0))
+                .iter()
+                .any(|x| *x > 100.0 && *x < 100.0 + PINNED_GAP),
+            "no second line right beside the pinned one"
         );
     }
 

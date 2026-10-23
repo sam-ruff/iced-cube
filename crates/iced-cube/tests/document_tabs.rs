@@ -192,9 +192,13 @@ fn the_open_menu_offers_the_close_actions() {
     let mut state = state();
     let _ = state.update(Event::Menu(context_menu::Event::OpenFromKeyboard(1)));
     let mut ui = simulator(view(&state, 600.0, false));
-    for label in ["Close", "Close to the right", "Close saved", "Pin"] {
+    for label in ["Close", "Close saved", "Close all", "Pin"] {
         assert!(ui.find(label).is_ok(), "{label}");
     }
+    assert!(
+        ui.find("Close to the right").is_err(),
+        "it would close what Close others does"
+    );
     ui.click("Close others").expect("menu item is rendered");
     assert_eq!(
         messages(ui).last(),
@@ -218,6 +222,41 @@ fn tabs_without_a_handler_are_disabled() {
 
 fn many() -> State<u8> {
     State::new((1..=6).map(|id| document(id, format!("file-{id}.rs")))).with_active(6)
+}
+
+fn finger(ui: &mut Simulator<'_, Message>, from: Point, to: Point) {
+    let id = iced::touch::Finger(1);
+    ui.point_at(from);
+    let _ = ui.simulate([Input::Touch(iced::touch::Event::FingerPressed {
+        id,
+        position: from,
+    })]);
+    ui.point_at(to);
+    let _ = ui.simulate([
+        Input::Touch(iced::touch::Event::FingerMoved { id, position: to }),
+        Input::Touch(iced::touch::Event::FingerLifted { id, position: to }),
+    ]);
+}
+
+#[test]
+fn a_tap_activates_a_tab_but_a_swipe_from_one_does_not() {
+    let state = state();
+    let mut ui = simulator(view(&state, 600.0, false));
+    let beta = centre(&mut ui, "beta.rs");
+    finger(&mut ui, beta, Point::new(beta.x + 3.0, beta.y));
+    assert_eq!(messages(ui), [Event::Activate(2)]);
+
+    let mut ui = simulator(view(&state, 600.0, false));
+    let gamma = ui
+        .find("gamma.rs")
+        .expect("tab is rendered")
+        .bounds()
+        .center();
+    finger(&mut ui, gamma, Point::new(gamma.x - 80.0, gamma.y));
+    assert!(
+        messages(ui).is_empty(),
+        "a swipe that starts on a tab activates nothing"
+    );
 }
 
 #[test]
@@ -553,10 +592,11 @@ fn an_unclosable_tab_has_no_close_item_or_button() {
     .with_active(1);
     let _ = state.update(Event::Menu(context_menu::Event::OpenFromKeyboard(1)));
     let mut ui = simulator(view(&state, 600.0, false));
-    for label in ["Close", "Unpin", "Close saved"] {
+    // Close others would close only a.rs, as Close all does.
+    for label in ["Close", "Unpin", "Close saved", "Close others"] {
         assert!(ui.find(label).is_err(), "{label} is offered");
     }
-    for label in ["Close others", "Close all", "Pin"] {
+    for label in ["Close all", "Pin"] {
         assert!(ui.find(label).is_ok(), "{label} is missing");
     }
 
