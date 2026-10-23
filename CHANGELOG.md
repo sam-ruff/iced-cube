@@ -1,3 +1,9 @@
+## [0.0.5](https://github.com/sam-ruff/iced-cube/compare/v0.0.4...v0.0.5) (2026-10-23)
+
+### Features
+
+* add property grid, JSON viewer, document tabs, virtual list and log viewer ([#2](https://github.com/sam-ruff/iced-cube/issues/2)) ([7572512](https://github.com/sam-ruff/iced-cube/commit/7572512e51f9d017939667d33e35cb496c47cc4f))
+
 ## [0.0.4](https://github.com/sam-ruff/iced-cube/compare/v0.0.3...v0.0.4) (2026-10-21)
 
 ### Features
