@@ -1,3 +1,9 @@
+## [0.0.6](https://github.com/sam-ruff/iced-cube/compare/v0.0.5...v0.0.6) (2026-10-23)
+
+### Features
+
+* use the data views in the demo and finish their follow-ups ([#3](https://github.com/sam-ruff/iced-cube/issues/3)) ([9a1a333](https://github.com/sam-ruff/iced-cube/commit/9a1a333a3f9b6993b86d6fc4670268a3be87c56b))
+
 ## [0.0.5](https://github.com/sam-ruff/iced-cube/compare/v0.0.4...v0.0.5) (2026-10-23)
 
 ### Features
