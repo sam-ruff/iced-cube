@@ -162,7 +162,7 @@ impl Example {
                     command::item(Cmd::Open(job.id), job.name.clone())
                         .icon(lucide!(Briefcase))
                         .shortcut(job.id.to_string())
-                        .keywords([job.owner.to_owned(), job.id.to_string()])
+                        .keywords(["open".to_owned(), job.owner.to_owned(), job.id.to_string()])
                 }),
             ),
         ])

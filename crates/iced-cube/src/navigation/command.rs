@@ -561,6 +561,8 @@ impl<Id> State<Id> {
             .flatten();
 
         let mut entries = Vec::new();
+        // The best enabled match in any group, as (score, position).
+        let mut best: Option<(u32, usize)> = None;
         for (index, group) in self.groups.iter().enumerate() {
             let mut scored: Vec<(u32, usize)> = group
                 .items
@@ -569,12 +571,23 @@ impl<Id> State<Id> {
                 .filter_map(|(index, item)| item.score(&self.query).map(|score| (score, index)))
                 .collect();
             scored.sort_by_key(|&(score, _)| std::cmp::Reverse(score));
-            entries.extend(scored.into_iter().map(|(_, item)| Entry {
-                remote: false,
-                group: index,
-                item,
-            }));
+            for (score, item) in scored {
+                let enabled = group.items.get(item).is_some_and(|item| !item.disabled);
+                if enabled && best.is_none_or(|(top, _)| score > top) {
+                    best = Some((score, entries.len()));
+                }
+                entries.push(Entry {
+                    remote: false,
+                    group: index,
+                    item,
+                });
+            }
         }
+        // Groups keep their order, but typing highlights the best match in
+        // any of them, so Enter runs what was typed for.
+        let best = best
+            .filter(|_| !self.query.trim().is_empty())
+            .map(|(_, position)| position);
         for (index, group) in self.remote.iter().enumerate() {
             entries.extend((0..group.items.len()).map(|item| Entry {
                 remote: true,
@@ -588,7 +601,9 @@ impl<Id> State<Id> {
         if kept.is_none() {
             self.offset = 0;
         }
-        let first = kept.or_else(|| (0..self.entries.len()).find(|&p| self.is_enabled(p)));
+        let first = kept
+            .or(best)
+            .or_else(|| (0..self.entries.len()).find(|&p| self.is_enabled(p)));
         self.highlight(first);
     }
 
@@ -1262,6 +1277,36 @@ mod tests {
         assert_eq!(highlighted(&state), Some("settings"));
         let _ = state.update(Event::Next);
         assert_eq!(highlighted(&state), Some("calendar"));
+    }
+
+    #[test]
+    fn typing_highlights_the_best_match_in_any_group() {
+        let mut state = State::new([
+            group(
+                "Actions",
+                [
+                    item("retry", "Retry failed jobs"),
+                    item("clear", "Clear finished jobs").destructive(true),
+                ],
+            ),
+            group(
+                "Open job",
+                [
+                    item("ledger", "ledger-reconcile"),
+                    item("lead", "lead-import").disabled(true),
+                ],
+            ),
+        ]);
+        let _ = state.update(Event::Input("led".into()));
+        assert_eq!(
+            ids(&state)[..2],
+            ["retry", "clear"],
+            "groups keep their order"
+        );
+        assert_eq!(highlighted(&state), Some("ledger"));
+
+        let _ = state.update(Event::Input(String::new()));
+        assert_eq!(highlighted(&state), Some("retry"), "no query, first row");
     }
 
     #[test]
