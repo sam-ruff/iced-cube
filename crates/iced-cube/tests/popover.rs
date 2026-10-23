@@ -1,7 +1,7 @@
 #![cfg(feature = "popover")]
 
-use iced::keyboard::{Key, key::Named};
-use iced::widget::{Button, column, text};
+use iced::keyboard::{self, Key, key::Named};
+use iced::widget::{Button, column, text, text_input};
 use iced::{Element, Length, Point};
 use iced_cube::Chord;
 use iced_cube::overlay::popover::{Action, Side, default_keymap, popover};
@@ -13,6 +13,8 @@ enum Message {
     Dismiss,
     Apply,
     Behind,
+    Width(String),
+    Max(String),
 }
 
 fn button(label: &'static str) -> Button<'static, Message> {
@@ -123,6 +125,70 @@ fn the_trigger_toggles_without_being_dismissed() {
     let mut ui = simulator::simulator(view(true, true));
     ui.click("Open").expect("trigger is rendered");
     assert_eq!(messages(ui), vec![Message::Toggle]);
+}
+
+fn form() -> Element<'static, Message> {
+    let content = column![
+        text_input("Width", "").on_input(Message::Width),
+        text_input("Max", "").on_input(Message::Max),
+    ]
+    .spacing(8);
+    column![
+        popover(button("Open").on_press(Message::Toggle), content)
+            .open(true)
+            .on_dismiss(Message::Dismiss),
+        text_input("Outside", "").on_input(|_| Message::Behind),
+    ]
+    .into()
+}
+
+fn shift_tab() -> iced::Event {
+    iced::Event::Keyboard(keyboard::Event::KeyPressed {
+        key: Key::Named(Named::Tab),
+        modified_key: Key::Named(Named::Tab),
+        physical_key: keyboard::key::Physical::Unidentified(
+            keyboard::key::NativeCode::Unidentified,
+        ),
+        location: keyboard::Location::Standard,
+        modifiers: keyboard::Modifiers::SHIFT,
+        text: None,
+        repeat: false,
+    })
+}
+
+#[test]
+fn tab_moves_between_the_fields_in_the_panel_and_wraps() {
+    let mut ui = simulator::simulator(form());
+    ui.click("Width").expect("first field");
+    let _ = ui.tap_key(Key::Named(Named::Tab));
+    let _ = ui.typewrite("5");
+    let _ = ui.tap_key(Key::Named(Named::Tab));
+    let _ = ui.typewrite("7");
+    let _ = ui.simulate([shift_tab()]);
+    let _ = ui.typewrite("9");
+    let fields: Vec<&str> = messages(ui)
+        .iter()
+        .map(|message| match message {
+            Message::Width(_) => "Width",
+            Message::Max(_) => "Max",
+            _ => "other",
+        })
+        .collect();
+    assert_eq!(
+        fields,
+        ["Max", "Width", "Max"],
+        "Tab, Tab wrapping to the first field, then Shift+Tab back"
+    );
+}
+
+#[test]
+fn tab_outside_the_panel_is_left_alone() {
+    let mut ui = simulator::simulator(form());
+    ui.click("Outside").expect("field behind the popover");
+    assert_eq!(
+        ui.tap_key(Key::Named(Named::Tab)),
+        iced::event::Status::Ignored
+    );
 }
 
 #[test]

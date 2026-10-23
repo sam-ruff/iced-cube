@@ -36,6 +36,8 @@ api:
 
 A popover holds a small piece of UI that belongs to one button, such as a settings form, a colour picker or a short explanation. It is not modal: the rest of the window stays usable, and clicking elsewhere closes it through `on_dismiss` while the click still reaches what it landed on. Menus, comboboxes and command lists inside a popover close first: Escape or a click outside closes the inner layer and leaves the popover open. For choosing one action from a list, use a [dropdown menu](../dropdown-menu/) instead, and for a label that appears on hover, a [tooltip](../tooltip/).
 
+While a text field in the panel has focus, Tab and Shift+Tab move between the panel's fields and wrap at either end, so a form in a popover works from the keyboard. Tab anywhere else is left alone.
+
 Your app owns whether the popover is open. Toggle a flag from the trigger's message, clear it on dismiss and pass it to `.open`. Clicks on the trigger are left to the trigger, so it can close the popover as well as open it.
 
 The panel moves to the opposite side when there is no room on the one you asked for, and slides along its side to stay inside the window. A panel on the left or right that fits on neither moves below or above the trigger instead of covering it. Clicks inside it never reach the widgets underneath.
