@@ -10,9 +10,15 @@
 //! Escape reaches the content first, so a menu, combobox or command list
 //! inside the popover closes before the popover does.
 
+use iced::advanced::layout::{self, Layout};
+use iced::advanced::widget::operation::Focusable;
+use iced::advanced::widget::{Operation, Tree, Widget};
+use iced::advanced::{Clipboard, Shell, overlay, renderer};
 use iced::keyboard::key::Named;
 use iced::widget::container;
-use iced::{Element, Length};
+use iced::{
+    Element, Event, Length, Rectangle, Renderer, Size, Theme, Vector, keyboard, mouse, widget,
+};
 
 use crate::keys::{self, Chord, Keymap};
 use crate::overlay::anchored::{Placement, anchored, surface_style};
@@ -131,8 +137,12 @@ impl<'a, Message: Clone + 'a> From<Popover<'a, Message>> for Element<'a, Message
             keymap,
         } = popover;
 
+        let cycle = Cycle {
+            content,
+            keymap: keymap.clone(),
+        };
         let panel = open.then(|| {
-            container(content)
+            container(Element::new(cycle))
                 .width(width)
                 .padding(padding)
                 .style(|theme| style(&Tokens::of(theme)))
@@ -159,6 +169,10 @@ pub enum Action {
     /// Opens a closed popover and closes an open one. Not bound by default.
     Toggle,
     Close,
+    /// Moves focus from a field in the panel to the next one, wrapping.
+    FocusNext,
+    /// Moves focus from a field in the panel to the previous one, wrapping.
+    FocusPrevious,
 }
 
 impl Action {
@@ -168,12 +182,18 @@ impl Action {
         match self {
             Action::Toggle => Some(!open),
             Action::Close => open.then_some(false),
+            Action::FocusNext | Action::FocusPrevious => None,
         }
     }
 }
 
 impl keys::Action for Action {
-    const ALL: &'static [Self] = &[Action::Toggle, Action::Close];
+    const ALL: &'static [Self] = &[
+        Action::Toggle,
+        Action::Close,
+        Action::FocusNext,
+        Action::FocusPrevious,
+    ];
 
     fn defaults() -> Keymap<Self> {
         default_keymap()
@@ -183,6 +203,8 @@ impl keys::Action for Action {
         match self {
             Action::Toggle => "Toggle",
             Action::Close => "Close",
+            Action::FocusNext => "FocusNext",
+            Action::FocusPrevious => "FocusPrevious",
         }
     }
 
@@ -190,6 +212,12 @@ impl keys::Action for Action {
         match self {
             Action::Toggle => "Opens the popover, or closes it when it is open.",
             Action::Close => "Closes the popover.",
+            Action::FocusNext => {
+                "Moves from a field in the popover to its next field, wrapping at the end."
+            }
+            Action::FocusPrevious => {
+                "Moves from a field in the popover to its previous field, wrapping at the start."
+            }
         }
     }
 }
@@ -199,6 +227,11 @@ impl keys::Action for Action {
 /// | Keys | Action |
 /// | --- | --- |
 /// | `Escape` | [`Action::Close`] |
+/// | `Tab` | [`Action::FocusNext`] |
+/// | `Shift+Tab` | [`Action::FocusPrevious`] |
+///
+/// The focus actions only apply while a field inside the panel has focus,
+/// so Tab elsewhere moves on as usual.
 ///
 /// An open popover with [`on_dismiss`](Popover::on_dismiss) resolves
 /// [`Action::Close`] itself, after its content has had the key, so pass a
@@ -207,7 +240,225 @@ impl keys::Action for Action {
 /// when a popover deserves an app-wide shortcut, and route it from
 /// [`keys::subscription`] with [`Action::apply`].
 pub fn default_keymap() -> Keymap<Action> {
-    Keymap::new().bind(Chord::named(Named::Escape), Action::Close)
+    Keymap::new()
+        .bind(Chord::named(Named::Escape), Action::Close)
+        .bind(Chord::named(Named::Tab), Action::FocusNext)
+        .bind(Chord::named(Named::Tab).shift(), Action::FocusPrevious)
+}
+
+/// The field to focus after `forward` or backward movement from the
+/// focused one, wrapping at either end, given whether each field in the
+/// panel has focus. `None` when no field in the panel has focus.
+fn cycle_target(focused: &[bool], forward: bool) -> Option<usize> {
+    let current = focused.iter().position(|focused| *focused)?;
+    let count = focused.len();
+    Some(if forward {
+        (current + 1) % count
+    } else {
+        (current + count - 1) % count
+    })
+}
+
+/// The panel's content, with Tab and Shift+Tab moving between its fields
+/// while one of them has focus.
+struct Cycle<'a, Message> {
+    content: Element<'a, Message>,
+    keymap: Keymap<Action>,
+}
+
+/// Whether each focusable widget has focus, in tree order.
+#[derive(Default)]
+struct Survey {
+    focused: Vec<bool>,
+}
+
+impl Operation for Survey {
+    fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation)) {
+        operate(self);
+    }
+
+    fn focusable(
+        &mut self,
+        _id: Option<&widget::Id>,
+        _bounds: Rectangle,
+        state: &mut dyn Focusable,
+    ) {
+        self.focused.push(state.is_focused());
+    }
+}
+
+/// Focuses the focusable widget at `target` and unfocuses the others.
+struct Apply {
+    target: usize,
+    index: usize,
+}
+
+impl Operation for Apply {
+    fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation)) {
+        operate(self);
+    }
+
+    fn focusable(
+        &mut self,
+        _id: Option<&widget::Id>,
+        _bounds: Rectangle,
+        state: &mut dyn Focusable,
+    ) {
+        if self.index == self.target {
+            state.focus();
+        } else {
+            state.unfocus();
+        }
+        self.index += 1;
+    }
+}
+
+impl<Message> Cycle<'_, Message> {
+    /// The movement a key press asks for, if it is a focus chord.
+    fn movement(&self, event: &Event) -> Option<bool> {
+        let Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) = event else {
+            return None;
+        };
+        match self.keymap.resolve(key, *modifiers)? {
+            Action::FocusNext => Some(true),
+            Action::FocusPrevious => Some(false),
+            Action::Toggle | Action::Close => None,
+        }
+    }
+}
+
+impl<Message> Widget<Message, Theme, Renderer> for Cycle<'_, Message> {
+    fn size(&self) -> Size<Length> {
+        self.content.as_widget().size()
+    }
+
+    fn size_hint(&self) -> Size<Length> {
+        self.content.as_widget().size_hint()
+    }
+
+    fn children(&self) -> Vec<Tree> {
+        vec![Tree::new(&self.content)]
+    }
+
+    fn diff(&self, tree: &mut Tree) {
+        tree.diff_children(std::slice::from_ref(&self.content));
+    }
+
+    fn layout(
+        &mut self,
+        tree: &mut Tree,
+        renderer: &Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
+        self.content
+            .as_widget_mut()
+            .layout(&mut tree.children[0], renderer, limits)
+    }
+
+    fn draw(
+        &self,
+        tree: &Tree,
+        renderer: &mut Renderer,
+        theme: &Theme,
+        style: &renderer::Style,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+    ) {
+        self.content.as_widget().draw(
+            &tree.children[0],
+            renderer,
+            theme,
+            style,
+            layout,
+            cursor,
+            viewport,
+        );
+    }
+
+    fn operate(
+        &mut self,
+        tree: &mut Tree,
+        layout: Layout<'_>,
+        renderer: &Renderer,
+        operation: &mut dyn Operation,
+    ) {
+        self.content
+            .as_widget_mut()
+            .operate(&mut tree.children[0], layout, renderer, operation);
+    }
+
+    fn update(
+        &mut self,
+        tree: &mut Tree,
+        event: &Event,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        renderer: &Renderer,
+        clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, Message>,
+        viewport: &Rectangle,
+    ) {
+        let content = &mut tree.children[0];
+        self.content.as_widget_mut().update(
+            content, event, layout, cursor, renderer, clipboard, shell, viewport,
+        );
+        if shell.is_event_captured() {
+            return;
+        }
+        let Some(forward) = self.movement(event) else {
+            return;
+        };
+        let mut survey = Survey::default();
+        self.content
+            .as_widget_mut()
+            .operate(content, layout, renderer, &mut survey);
+        let Some(target) = cycle_target(&survey.focused, forward) else {
+            return;
+        };
+        self.content.as_widget_mut().operate(
+            content,
+            layout,
+            renderer,
+            &mut Apply { target, index: 0 },
+        );
+        shell.capture_event();
+        shell.request_redraw();
+    }
+
+    fn mouse_interaction(
+        &self,
+        tree: &Tree,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+        renderer: &Renderer,
+    ) -> mouse::Interaction {
+        self.content.as_widget().mouse_interaction(
+            &tree.children[0],
+            layout,
+            cursor,
+            viewport,
+            renderer,
+        )
+    }
+
+    fn overlay<'b>(
+        &'b mut self,
+        tree: &'b mut Tree,
+        layout: Layout<'b>,
+        renderer: &Renderer,
+        viewport: &Rectangle,
+        translation: Vector,
+    ) -> Option<overlay::Element<'b, Message, Theme, Renderer>> {
+        self.content.as_widget_mut().overlay(
+            &mut tree.children[0],
+            layout,
+            renderer,
+            viewport,
+            translation,
+        )
+    }
 }
 
 #[cfg(test)]
@@ -264,12 +515,39 @@ mod tests {
     }
 
     #[test]
-    fn default_keymap_closes_on_escape_only() {
+    fn default_keymap_closes_on_escape_and_moves_focus_on_tab() {
         let keymap = default_keymap();
         assert_eq!(press(&keymap, "Escape"), Some(Action::Close));
+        assert_eq!(press(&keymap, "Tab"), Some(Action::FocusNext));
+        assert_eq!(press(&keymap, "Shift+Tab"), Some(Action::FocusPrevious));
         assert!(keymap.chords(&Action::Toggle).is_empty());
-        assert_eq!(keymap.len(), 1);
+        assert_eq!(keymap.len(), 3);
         assert_eq!(Keymap::<Action>::defaults(), keymap);
+    }
+
+    #[test]
+    fn focus_moves_between_fields_and_wraps() {
+        assert_eq!(cycle_target(&[true, false, false], true), Some(1));
+        assert_eq!(cycle_target(&[false, false, true], true), Some(0));
+        assert_eq!(cycle_target(&[true, false, false], false), Some(2));
+        assert_eq!(cycle_target(&[false, true], false), Some(0));
+        assert_eq!(
+            cycle_target(&[true], true),
+            Some(0),
+            "a lone field keeps focus"
+        );
+        assert_eq!(
+            cycle_target(&[false, false], true),
+            None,
+            "no field in the panel has focus"
+        );
+        assert_eq!(cycle_target(&[], true), None);
+    }
+
+    #[test]
+    fn focus_actions_leave_the_open_state_alone() {
+        assert_eq!(Action::FocusNext.apply(true), None);
+        assert_eq!(Action::FocusPrevious.apply(false), None);
     }
 
     #[test]

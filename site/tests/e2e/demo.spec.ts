@@ -70,6 +70,21 @@ test("a theme picked in the app carries over to the page", async ({ page }) => {
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
 });
 
+test("Tab the app does not use moves to the header around it", async ({ page }) => {
+  await release(page, 200, [LINUX, WINDOWS]);
+  await page.goto("demo/");
+  await expect(page.locator("iframe#demo")).toHaveAttribute("src", /preview/);
+  const app = await (await page.locator("iframe#demo").elementHandle())?.contentFrame();
+  expect(app).toBeTruthy();
+  await app?.waitForLoadState();
+  const focused = () => page.evaluate(() => document.activeElement?.getAttribute("aria-label"));
+
+  await app?.evaluate(() => window.parent.postMessage({ type: "exit", back: false }, "*"));
+  await expect.poll(focused).toBe("iced-cube home");
+  await app?.evaluate(() => window.parent.postMessage({ type: "exit", back: true }, "*"));
+  await expect.poll(focused).toBe("Switch theme");
+});
+
 test("the front page opens the demo in a new tab", async ({ page }) => {
   await page.goto("./");
   const link = page.getByRole("link", { name: /Open the demo/ });

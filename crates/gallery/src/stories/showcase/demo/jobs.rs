@@ -17,6 +17,7 @@ use iced_cube::{
 };
 
 use super::data::{Job, Status, StatusFilter};
+use super::inspector::SPLIT;
 use super::{Example, Message, RowAction, caption, count, muted};
 
 /// Room kept beside the rows for the scrollbar, whether it shows or not, so
@@ -25,8 +26,14 @@ const GUTTER: f32 = scroll_area::THICKNESS + 8.0;
 /// Height of the progress line on a narrow row, whatever it shows.
 const PROGRESS_LINE: f32 = 30.0;
 
+/// The widget id of the search field above the job list.
+pub const SEARCH_ID: &str = "demo-job-search";
+
 pub fn row_menu_entries() -> Vec<Entry<RowAction>> {
     vec![
+        item(RowAction::Open, "Open")
+            .icon(lucide!(PanelRight))
+            .shortcut("Enter"),
         item(RowAction::Logs, "View logs").icon(lucide!(ScrollText)),
         item(RowAction::Retry, "Retry").icon(lucide!(RotateCw)),
         item(RowAction::Pause, "Pause").icon(lucide!(Pause)),
@@ -51,8 +58,24 @@ pub fn row_menu_entries() -> Vec<Entry<RowAction>> {
 }
 
 impl Example {
-    pub(super) fn jobs_page(&self, narrow: bool) -> Element<'_, Message> {
+    /// The job list, or an open job, under the tabs while a job is open.
+    pub(super) fn jobs_page(&self, narrow: bool, content: f32) -> Element<'_, Message> {
+        let body = match self.active_job() {
+            Some(id) => self.job_view(id, narrow, content >= SPLIT),
+            None => self.job_list(narrow),
+        };
+        if !self.documents_shown() {
+            return body;
+        }
+        column![self.document_strip(), body]
+            .spacing(12)
+            .height(Length::Fill)
+            .into()
+    }
+
+    fn job_list(&self, narrow: bool) -> Element<'_, Message> {
         let search = input("Search jobs, owners or IDs", &self.search)
+            .id(SEARCH_ID)
             .icon(lucide!(Search))
             .width(Length::Fill)
             .on_input(Message::Search);
@@ -171,9 +194,9 @@ impl Example {
             .on_exit(Message::ListHover(false));
 
         let hint = if narrow {
-            "Tap and hold a job, or tap its menu button, for more."
+            "Tap a job to open it. Hold it, or tap its menu button, for more."
         } else {
-            "Right-click a job, or press Shift+F10, for more. Up and Down move, Space ticks."
+            "Double-click or press Enter to open a job. Right-click or Shift+F10 for more."
         };
 
         column![
@@ -255,6 +278,12 @@ impl Example {
 
         let current = self.cursor == Some(id);
         let padding = if self.compact { [4, 8] } else { [10, 8] };
+        // Phones have no double click, so a tap opens the job.
+        let press = if narrow {
+            Message::OpenJob(id)
+        } else {
+            Message::Cursor(id)
+        };
         let row = mouse_area(
             container(content)
                 .padding(padding)
@@ -276,7 +305,8 @@ impl Example {
                     }
                 }),
         )
-        .on_press(Message::Cursor(id));
+        .on_press(press)
+        .on_double_click(Message::OpenJob(id));
 
         context_menu::keyed(&self.row_menu, id, row)
             .keymap(self.keys.row_menu.clone())

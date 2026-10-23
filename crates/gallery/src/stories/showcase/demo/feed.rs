@@ -1,9 +1,9 @@
 //! Updates from the simulated platform, delivered through a channel.
 //!
 //! [`subscription`] owns the receiver and hands out the sender first. A
-//! [`Worker`] holds clones of that sender and the toast sender, like a
-//! background thread would, and waits with futures-timer so it also runs in
-//! the browser.
+//! [`Worker`] holds clones of that sender, the log viewer's sender and the
+//! toast sender, like a background thread would, and waits with
+//! futures-timer so it also runs in the browser.
 
 use std::hash::{Hash, Hasher};
 use std::time::Duration;
@@ -13,9 +13,10 @@ use iced::Subscription;
 use iced::futures::channel::mpsc;
 use iced::futures::{SinkExt, Stream, StreamExt, stream};
 use iced::time::Instant;
+use iced_cube::data::log_viewer::{self, Level};
 use iced_cube::overlay::toast::{self, Variant, toast};
 
-use super::data::{CHATTER, JobId, Level, LogLine, SERVICES};
+use super::data::{CHATTER, JobId, SERVICES, log_line, now};
 
 const CAPACITY: usize = 64;
 const BATCH: usize = 32;
@@ -28,7 +29,6 @@ pub enum Update {
     Progress(JobId, f32),
     Succeeded(JobId),
     Failed(JobId, f32),
-    Log(LogLine),
     /// Someone submitted a job built from one of the templates.
     Submitted(usize),
 }
@@ -83,7 +83,10 @@ pub enum Never {}
 pub struct Worker {
     pub jobs: Vec<Running>,
     pub feed: Sender,
+    pub logs: log_viewer::Sender,
     pub toasts: toast::Sender,
+    /// When the demo started, for the clock on log lines.
+    pub epoch: Instant,
 }
 
 impl Hash for Worker {
@@ -114,8 +117,7 @@ impl Worker {
             }
             if rng.chance(0.55) {
                 let (level, service, message) = CHATTER[rng.below(CHATTER.len())];
-                self.send(Update::Log(LogLine::new(level, service, message)))
-                    .await;
+                self.log(level, service, message).await;
             }
         }
     }
@@ -132,21 +134,13 @@ impl Worker {
         if job.fails_at.is_some_and(|at| job.progress >= at) {
             self.jobs.remove(index);
             self.send(Update::Failed(job.id, job.progress)).await;
-            self.send(Update::Log(LogLine::new(
-                Level::Error,
-                SERVICES[0],
-                format!("{} ({}) exited with status 137", job.name, job.id),
-            )))
-            .await;
+            let message = format!("{} ({}) exited with status 137", job.name, job.id);
+            self.log(Level::Error, SERVICES[0], message).await;
         } else if job.progress >= 1.0 {
             self.jobs.remove(index);
             self.send(Update::Succeeded(job.id)).await;
-            self.send(Update::Log(LogLine::new(
-                Level::Info,
-                SERVICES[0],
-                format!("{} ({}) finished", job.name, job.id),
-            )))
-            .await;
+            let message = format!("{} ({}) finished", job.name, job.id);
+            self.log(Level::Info, SERVICES[0], message).await;
             let _ = self
                 .toasts
                 .send(
@@ -163,6 +157,11 @@ impl Worker {
     async fn send(&mut self, update: Update) {
         // A closed channel means the app has gone; there is nobody to tell.
         let _ = self.feed.send(update).await;
+    }
+
+    async fn log(&mut self, level: Level, service: &str, message: impl Into<String>) {
+        let line = log_line(level, service, message, now(self.epoch));
+        let _ = self.logs.send(line).await;
     }
 }
 

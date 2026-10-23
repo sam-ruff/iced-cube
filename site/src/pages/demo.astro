@@ -71,7 +71,7 @@ const preview = href("/preview/index.html");
     </main>
 
     <script>
-      import { LATEST_RELEASE, appTheme, assetAvailability } from "../lib/demo";
+      import { LATEST_RELEASE, appTheme, assetAvailability, exitDirection } from "../lib/demo";
 
       const frame = document.querySelector<HTMLIFrameElement>("#demo");
       const root = document.documentElement;
@@ -103,6 +103,14 @@ const preview = href("/preview/index.html");
       // system" asks the page for its theme again.
       window.addEventListener("message", (event) => {
         if (!frame || event.source !== frame.contentWindow) return;
+        // Tab that the app did not use moves to the header, which wraps
+        // around the app: forward to its first control, back to its last.
+        const exit = exitDirection(event.data);
+        if (exit) {
+          const controls = [...document.querySelectorAll<HTMLElement>("header a[href], header button")];
+          (exit === "back" ? controls.at(-1) : controls[0])?.focus();
+          return;
+        }
         const picked = appTheme(event.data);
         if (picked === null) return;
         if (picked === "system") {

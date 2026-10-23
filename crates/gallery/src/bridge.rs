@@ -11,6 +11,28 @@ use crate::app::ThemeChoice;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Event {
     Theme(ThemeChoice),
+    /// Tab reached the gallery unused, so focus should leave the preview,
+    /// backwards with Shift.
+    TabOut {
+        back: bool,
+    },
+}
+
+/// Whether an event is a plain Tab or Shift+Tab, and if so whether it goes
+/// backwards. Tab with Ctrl, Alt or the logo key belongs to the story.
+pub fn tab_out(event: &iced::Event) -> Option<bool> {
+    let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) = event
+    else {
+        return None;
+    };
+    if *key != iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab)
+        || modifiers.control()
+        || modifiers.alt()
+        || modifiers.logo()
+    {
+        return None;
+    }
+    Some(modifiers.shift())
 }
 
 /// Parses a posted message into an [`Event`].
@@ -21,13 +43,27 @@ pub fn parse(kind: &str, value: &str) -> Option<Event> {
     ThemeChoice::parse(value).map(Event::Theme)
 }
 
-#[cfg(target_arch = "wasm32")]
+/// Theme changes from the page, and Tab presses no widget used. A dialog
+/// keeps Tab for its buttons; anywhere else Tab leaves the preview.
 pub fn subscription() -> Subscription<Event> {
+    Subscription::batch([
+        messages(),
+        iced::event::listen_with(|event, status, _| {
+            if status == iced::event::Status::Captured {
+                return None;
+            }
+            tab_out(&event).map(|back| Event::TabOut { back })
+        }),
+    ])
+}
+
+#[cfg(target_arch = "wasm32")]
+fn messages() -> Subscription<Event> {
     Subscription::run(web::listen)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub fn subscription() -> Subscription<Event> {
+fn messages() -> Subscription<Event> {
     Subscription::none()
 }
 
@@ -51,6 +87,16 @@ pub fn report_theme(choice: Option<ThemeChoice>) {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn report_theme(_choice: Option<ThemeChoice>) {}
+
+/// Asks the hosting page to move focus out of the preview, as
+/// `{ "type": "exit", "back": <bool> }`.
+#[cfg(target_arch = "wasm32")]
+pub fn report_exit(back: bool) {
+    web::post_exit(back);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn report_exit(_back: bool) {}
 
 /// The value [`report_theme`] posts.
 pub fn theme_value(choice: Option<ThemeChoice>) -> &'static str {
@@ -127,6 +173,17 @@ mod web {
         let _ = parent.post_message(&message, "*");
     }
 
+    pub fn post_exit(back: bool) {
+        let Some(parent) = web_sys::window().and_then(|window| window.parent().ok().flatten())
+        else {
+            return;
+        };
+        let message = js_sys::Object::new();
+        let _ = js_sys::Reflect::set(&message, &"type".into(), &"exit".into());
+        let _ = js_sys::Reflect::set(&message, &"back".into(), &back.into());
+        let _ = parent.post_message(&message, "*");
+    }
+
     pub fn post(kind: &str, value: &str) {
         let Some(parent) = web_sys::window().and_then(|window| window.parent().ok().flatten())
         else {
@@ -168,6 +225,38 @@ mod tests {
         assert_eq!(theme_value(None), "system");
         assert_eq!(theme_value(Some(ThemeChoice::Light)), "light");
         assert_eq!(theme_value(Some(ThemeChoice::Dark)), "dark");
+    }
+
+    fn press(key: iced::keyboard::Key, modifiers: iced::keyboard::Modifiers) -> iced::Event {
+        iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
+            key: key.clone(),
+            modified_key: key,
+            physical_key: iced::keyboard::key::Physical::Unidentified(
+                iced::keyboard::key::NativeCode::Unidentified,
+            ),
+            location: iced::keyboard::Location::Standard,
+            modifiers,
+            text: None,
+            repeat: false,
+        })
+    }
+
+    #[test]
+    fn only_plain_and_shift_tab_leave_the_preview() {
+        use iced::keyboard::{Key, Modifiers, key::Named};
+
+        let tab = Key::Named(Named::Tab);
+        assert_eq!(
+            tab_out(&press(tab.clone(), Modifiers::empty())),
+            Some(false)
+        );
+        assert_eq!(tab_out(&press(tab.clone(), Modifiers::SHIFT)), Some(true));
+        assert_eq!(tab_out(&press(tab.clone(), Modifiers::CTRL)), None);
+        assert_eq!(tab_out(&press(tab, Modifiers::ALT)), None);
+        assert_eq!(
+            tab_out(&press(Key::Named(Named::Enter), Modifiers::empty())),
+            None
+        );
     }
 
     #[test]

@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use iced::keyboard::{Key, Modifiers, key::Named};
 use iced::widget::container;
-use iced::{Element, Length, Point, Size, keyboard, mouse};
+use iced::{Element, Length, Point, Size, keyboard, mouse, touch, window};
 use iced_cube::data::data_table::{Align, Column, Event, Output, State, column as col, data_table};
 use iced_cube::overlay::{context_menu, dropdown_menu};
 use iced_test::simulator::{self, Simulator};
@@ -383,6 +383,54 @@ fn a_narrow_table_becomes_cards_that_fit() {
         label.y > first.y,
         "each column is a line below the card's title"
     );
+}
+
+#[test]
+fn pressing_and_holding_any_card_opens_its_menu() {
+    let table = state(4);
+    let menu = context_menu::State::<u8, u32>::new([dropdown_menu::item(1, "Refund")]);
+    for id in 1..=4 {
+        let element: Element<'_, Message> = container(
+            data_table(&table)
+                .context_menu(&menu, Message::Menu)
+                .row_actions(true)
+                .on_event(Message::Table),
+        )
+        .width(328)
+        .into();
+        let mut ui =
+            Simulator::with_size(iced::Settings::default(), Size::new(360.0, 1400.0), element);
+        let card = ui
+            .find(format!("user{id}@example.com"))
+            .expect("card")
+            .bounds();
+        let position = Point::new(card.x + 20.0, card.y + 40.0);
+        ui.point_at(position);
+        let finger = touch::Finger(1);
+        let start = Instant::now();
+        let _ = ui.simulate([
+            iced::Event::Touch(touch::Event::FingerPressed {
+                id: finger,
+                position,
+            }),
+            iced::Event::Window(window::Event::RedrawRequested(start)),
+            iced::Event::Window(window::Event::RedrawRequested(
+                start + Duration::from_millis(600),
+            )),
+            iced::Event::Touch(touch::Event::FingerLifted {
+                id: finger,
+                position,
+            }),
+        ]);
+        let opened: Vec<_> = ui
+            .into_messages()
+            .filter_map(|message| match message {
+                Message::Menu(context_menu::Event::Open(key, _)) => Some(key),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(opened, [id], "card {id}");
+    }
 }
 
 #[test]

@@ -9,6 +9,7 @@ pub mod data_table;
     feature = "json-viewer",
     feature = "log-viewer",
     feature = "property-grid",
+    feature = "select",
     feature = "tree"
 ))]
 pub(crate) mod ellipsis;

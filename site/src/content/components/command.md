@@ -51,7 +51,7 @@ api:
     description: "Turns an Action into the Event it sends, or None when it would do nothing, for keys the app routes itself."
 ---
 
-A command list puts every action behind one search field. Typing ranks the items: an exact match comes first, then prefixes, then matches at the start of a word, then anywhere, then letters in order. Keywords let an item be found by other names, such as "preferences" for Settings. Disabled items stay visible but are skipped by the keyboard.
+A command list puts every action behind one search field. Typing ranks the items within each group: an exact match comes first, then prefixes, then matches at the start of a word, then anywhere, then letters in order. Groups keep their order, and the highlight goes to the best match in any group, so Enter runs what was typed for. Keywords let an item be found by other names, such as "preferences" for Settings. Disabled items stay visible but are skipped by the keyboard.
 
 The list is embedded where you place it. For an app-wide launcher, use the [command palette](../command-palette/), which builds this list into a dialog with the Ctrl+K and Ctrl+Shift+P chords, recent commands and nested pages. To compose one yourself, put the list in a [dialog](../dialog/) and open it from a button or a shortcut such as Ctrl+K, as the palette example does. Let that shortcut through the dialog with `.pass_through(...)` so it closes the palette too, and close the dialog when `update` returns `Output::Activated` or `Output::Closed`. Give a palette `.max_height(...)` rather than a fixed height, so it shrinks around a handful of matches instead of leaving an empty panel.
 
@@ -59,4 +59,4 @@ Results can also come from background work, such as a file index or a server. Wh
 
 While the search field has focus, the list handles its keys itself, before a surrounding dialog or popover sees them. Home and End then move the highlight rather than the text cursor. Escape clears the query, and a second press returns `Output::Closed`.
 
-The first enabled row is always the target of Enter, but it is only drawn highlighted while the field has focus or after the user moves the highlight with the keys or the pointer. An inline list in a sidebar therefore sits quietly until someone uses it. The widget reports focus changes with `Event::Focus`, so route every event to `update`.
+The highlighted row is always the target of Enter, but it is only drawn highlighted while the field has focus or after the user moves the highlight with the keys or the pointer. An inline list in a sidebar therefore sits quietly until someone uses it. The widget reports focus changes with `Event::Focus`, so route every event to `update`.

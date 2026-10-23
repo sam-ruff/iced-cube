@@ -50,7 +50,7 @@ use iced::futures::channel::mpsc;
 use iced::futures::{Stream, StreamExt, stream};
 use iced::keyboard::key::Named;
 use iced::time::{Duration, Instant};
-use iced::widget::{self, column, container, mouse_area, opaque, row, stack, text};
+use iced::widget::{self, column, container, mouse_area, row, stack, text};
 use iced::{
     Alignment, Background, Border, Color, Element, Length, Shadow, Subscription, Theme, Vector,
 };
@@ -59,6 +59,7 @@ use crate::icon::{Glyph, themed};
 use crate::keys::{self, Chord, Keymap};
 use crate::primitives::button::{self, Size};
 use crate::primitives::icon_button::icon_button;
+use crate::solid::solid;
 use crate::theme::{Tokens, fade, mix, radius, space, text_size};
 
 /// How many toasts a producer can send before it has to wait.
@@ -737,7 +738,7 @@ fn card<'a, Message: Clone + 'a>(
         .id(close_button_id(id)),
     );
 
-    opaque(
+    solid(
         container(content)
             .padding([space::MD, space::LG])
             .width(Length::Fill)

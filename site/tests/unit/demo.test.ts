@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { appTheme, assetAvailability } from "../../src/lib/demo.ts";
+import { appTheme, assetAvailability, exitDirection } from "../../src/lib/demo.ts";
 
 const file = "iced-cube-demo-linux-x86_64.tar.gz";
 
@@ -27,4 +27,12 @@ test("reads the app's theme messages and ignores everything else", () => {
   assert.equal(appTheme({ type: "size", height: 300 }), null);
   assert.equal(appTheme("dark"), null);
   assert.equal(appTheme(null), null);
+});
+
+test("reads which way Tab left the app", () => {
+  assert.equal(exitDirection({ type: "exit", back: false }), "forward");
+  assert.equal(exitDirection({ type: "exit", back: true }), "back");
+  assert.equal(exitDirection({ type: "exit" }), "forward");
+  assert.equal(exitDirection({ type: "app-theme", value: "dark" }), null);
+  assert.equal(exitDirection(null), null);
 });

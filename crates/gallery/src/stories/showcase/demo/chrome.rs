@@ -162,7 +162,7 @@ impl Example {
                     command::item(Cmd::Open(job.id), job.name.clone())
                         .icon(lucide!(Briefcase))
                         .shortcut(job.id.to_string())
-                        .keywords([job.owner.to_owned(), job.id.to_string()])
+                        .keywords(["open".to_owned(), job.owner.to_owned(), job.id.to_string()])
                 }),
             ),
         ])
@@ -453,8 +453,16 @@ fn shortcuts<'a>() -> Element<'a, Message> {
         ("Ctrl+K", "Command palette"),
         ("Ctrl+/", "This list"),
         ("F10", "The More menu"),
+        ("Ctrl+F", "Search the list, log or job in front"),
         ("Left, Right", "Switch pages"),
-        ("Up, Down", "Move through jobs, runbooks or settings"),
+        ("Ctrl+Tab", "Switch open jobs, or pages when none are open"),
+        ("Ctrl+[, ]", "Previous or next open job"),
+        ("Ctrl+W", "Close the open job"),
+        (
+            "Up, Down",
+            "Move through jobs, log lines, runbooks or settings",
+        ),
+        ("Enter", "Open the current job"),
         ("Space", "Tick the job, or change the setting"),
         ("Shift+F10", "Actions for the current job"),
         ("Delete", "Delete the current job"),

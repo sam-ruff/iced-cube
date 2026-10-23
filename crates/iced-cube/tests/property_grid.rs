@@ -378,6 +378,33 @@ fn escape_in_the_filter_clears_it_then_leaves_it() {
 }
 
 #[test]
+fn enter_and_f3_in_the_filter_step_through_the_matches() {
+    let mut state = sample();
+    let _ = state.update(Event::Search("wid".into()));
+    let mut ui = simulator::simulator(view(&state));
+    assert!(ui.click("wid").is_ok());
+    let _ = ui.simulate([
+        press_key(Key::Named(Named::Enter), Modifiers::empty()),
+        press_key(Key::Named(Named::F3), Modifiers::SHIFT),
+        press_key(Key::Named(Named::F3), Modifiers::empty()),
+    ]);
+    let stepped: Vec<_> = events(ui)
+        .into_iter()
+        .filter(|event| {
+            matches!(
+                event,
+                Event::NextMatch | Event::PreviousMatch | Event::EditHighlighted
+            )
+        })
+        .collect();
+    assert_eq!(
+        stepped,
+        [Event::NextMatch, Event::PreviousMatch, Event::NextMatch],
+        "Enter steps rather than editing"
+    );
+}
+
+#[test]
 fn the_filter_keeps_its_width_when_the_count_appears() {
     let mut state = sample();
     let before = simulator::simulator(view(&state))
@@ -388,7 +415,7 @@ fn the_filter_keeps_its_width_when_the_count_appears() {
     {
         let mut ui = simulator::simulator(view(&state));
         let after = ui.find(SEARCH).expect("filter").bounds();
-        assert!(ui.find("5 shown").is_ok(), "every name but Blend");
+        assert!(ui.find("1 of 5").is_ok(), "every name but Blend");
         assert_eq!(before.width, after.width);
     }
 

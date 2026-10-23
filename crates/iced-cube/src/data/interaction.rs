@@ -572,14 +572,12 @@ impl<Message> SearchKeys<'_, Message> {
     }
 
     /// Sent for Enter and F3.
-    #[cfg(any(feature = "json-viewer", feature = "log-viewer"))]
     pub(crate) fn on_next(mut self, message: Option<Message>) -> Self {
         self.next = message;
         self
     }
 
     /// Sent for Shift+Enter and Shift+F3.
-    #[cfg(any(feature = "json-viewer", feature = "log-viewer"))]
     pub(crate) fn on_previous(mut self, message: Option<Message>) -> Self {
         self.previous = message;
         self
@@ -768,7 +766,11 @@ impl<'a, Message: Clone + 'a> From<SearchKeys<'a, Message>> for Element<'a, Mess
 /// The count beside a search that steps through matches: "3 of 12" once a
 /// match is current, counted from one, "12 found" before that, "None" when
 /// nothing matches, and nothing without a search.
-#[cfg(any(feature = "json-viewer", feature = "log-viewer"))]
+#[cfg(any(
+    feature = "json-viewer",
+    feature = "log-viewer",
+    feature = "property-grid"
+))]
 pub(crate) fn match_count_label(query: &str, total: usize, current: Option<usize>) -> String {
     if query.trim().is_empty() {
         return String::new();
@@ -777,19 +779,6 @@ pub(crate) fn match_count_label(query: &str, total: usize, current: Option<usize
         (0, _) => NO_MATCHES.to_owned(),
         (_, Some(position)) => format!("{position} of {total}"),
         (_, None) => format!("{total} found"),
-    }
-}
-
-/// The count beside a search that filters rows: "3 shown", "None" when
-/// nothing passes, and nothing without a search.
-#[cfg(feature = "property-grid")]
-pub(crate) fn shown_label(query: &str, shown: usize) -> String {
-    if query.trim().is_empty() {
-        return String::new();
-    }
-    match shown {
-        0 => NO_MATCHES.to_owned(),
-        shown => format!("{shown} shown"),
     }
 }
 
@@ -1205,14 +1194,6 @@ mod tests {
         assert_eq!(match_count_label("a", 12, None), "12 found");
         assert_eq!(match_count_label("a", 12, Some(3)), "3 of 12");
         assert_eq!(match_count_label("a", 0, None), "None");
-    }
-
-    #[cfg(feature = "property-grid")]
-    #[test]
-    fn filtering_search_counts_say_how_many_are_shown() {
-        assert_eq!(shown_label("", 4), "");
-        assert_eq!(shown_label("a", 3), "3 shown");
-        assert_eq!(shown_label("a", 0), "None");
     }
 
     #[test]

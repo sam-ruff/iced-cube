@@ -97,6 +97,23 @@ fn clicking_the_field_again_closes_the_list() {
 }
 
 #[test]
+fn a_long_value_stays_clear_of_the_chevron_in_a_narrow_field() {
+    const LONG: &str = "postgres://ledger/reconciliation";
+    let narrow: Element<'_, Message> =
+        container(select(&[LONG], Some(LONG)).on_select(|_| Message::Other))
+            .width(160)
+            .into();
+    let mut ui = simulator(narrow);
+    let label = ui.find(LONG).expect("the value is shown").bounds();
+    // The chevron and the gap before it sit to the right of the label.
+    assert!(
+        label.x + label.width <= 160.0 - 16.0 - 8.0,
+        "label ends at {}",
+        label.x + label.width
+    );
+}
+
+#[test]
 fn disabled_select_does_not_open() {
     let mut ui = simulator(view(Some("Apple"), false));
     open(&mut ui);

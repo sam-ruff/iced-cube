@@ -34,7 +34,7 @@ use iced::{
 
 use crate::data::ellipsis::ellipsis;
 use crate::data::interaction::{
-    Look, RowMenu, pressable, ringed, row_menu, scope, search_count, search_keys, shown_label,
+    Look, RowMenu, match_count_label, pressable, ringed, row_menu, scope, search_count, search_keys,
 };
 use crate::data::rows::rows;
 use crate::forms::select::select;
@@ -660,6 +660,11 @@ pub enum Event<Id> {
     ResetHighlighted,
     /// The search text, which filters properties by name, changed.
     Search(String),
+    /// Highlights the next property the filter shows, wrapping at the end.
+    NextMatch,
+    /// Highlights the previous property the filter shows, wrapping at the
+    /// start.
+    PreviousMatch,
     /// Moves keyboard focus to the filter box.
     FocusSearch,
     /// Asks the app to copy a property's value, as it is shown.
@@ -999,6 +1004,8 @@ impl<Id: Copy + Eq + Hash> State<Id> {
                 self.query = query;
                 self.highlight_nearest_shown();
             }
+            Event::NextMatch => self.step_match(true),
+            Event::PreviousMatch => self.step_match(false),
             Event::FocusSearch => {
                 self.finish();
                 self.request(Target::Filter);
@@ -1177,6 +1184,36 @@ impl<Id: Copy + Eq + Hash> State<Id> {
         if let Some(target) = target {
             self.highlighted = Some(target.clone());
         }
+    }
+
+    /// The properties on screen in order, without category headings.
+    fn shown_properties(&self) -> Vec<Entry<Id>> {
+        self.entries()
+            .into_iter()
+            .filter(|entry| matches!(entry, Entry::Property(_)))
+            .collect()
+    }
+
+    /// Moves the highlight through the properties shown, skipping category
+    /// headings and wrapping at either end.
+    fn step_match(&mut self, forward: bool) {
+        self.finish();
+        let properties = self.shown_properties();
+        let count = properties.len();
+        if count == 0 {
+            return;
+        }
+        let current = self
+            .highlighted
+            .as_ref()
+            .and_then(|highlighted| properties.iter().position(|entry| entry == highlighted));
+        let index = match (current, forward) {
+            (None, true) => 0,
+            (None, false) => count - 1,
+            (Some(index), true) => (index + 1) % count,
+            (Some(index), false) => (index + count - 1) % count,
+        };
+        self.highlighted = properties.get(index).cloned();
     }
 
     fn expand_or_enter(&mut self) {
@@ -1549,15 +1586,18 @@ pub fn focus_search<Id, Message>(_state: &State<Id>) -> Task<Message> {
     widget::operation::focus(SEARCH)
 }
 
-/// The text beside the search box: how many properties pass it, such as
-/// "3 shown", "None" when nothing does, and empty without a search.
+/// The text beside the search box, as in the log and JSON viewers: "2 of 5"
+/// for the highlighted property of those shown, "5 found" while none of
+/// them is highlighted, "None" when nothing passes, and empty without a
+/// search.
 pub fn match_label<Id: Copy + Eq + Hash>(state: &State<Id>) -> String {
-    let shown = state
-        .properties()
-        .iter()
-        .filter(|property| state.passes(property))
-        .count();
-    shown_label(state.query(), shown)
+    let shown = state.shown_properties();
+    let current = state
+        .highlighted
+        .as_ref()
+        .and_then(|highlighted| shown.iter().position(|entry| entry == highlighted))
+        .map(|index| index + 1);
+    match_count_label(state.query(), shown.len(), current)
 }
 
 /// An entry of the context menu from [`menu`].
@@ -2044,10 +2084,14 @@ where
             .size(input::Size::Sm)
             .width(Length::Fill)
             .on_input_maybe(on_event.map(|on_event| move |query| on_event(Event::Search(query))));
-        let filter = search_keys(field, SEARCH).on_clear(
-            self.send(Event::Search(String::new()))
-                .filter(|_| !state.query().is_empty()),
-        );
+        let searching = !state.query().is_empty();
+        let filter = search_keys(field, SEARCH)
+            .on_clear(
+                self.send(Event::Search(String::new()))
+                    .filter(|_| searching),
+            )
+            .on_next(self.send(Event::NextMatch).filter(|_| searching))
+            .on_previous(self.send(Event::PreviousMatch).filter(|_| searching));
         let sort = |sort: Sort, glyph, label| {
             icon_button(glyph)
                 .label(label)
@@ -2727,6 +2771,29 @@ mod tests {
     }
 
     #[test]
+    fn stepping_through_matches_skips_headings_and_wraps() {
+        let mut state = sample();
+        let _ = state.update(Event::Search("e".into()));
+        let mut visited = Vec::new();
+        for _ in 0..5 {
+            let _ = state.update(Event::NextMatch);
+            visited.push(state.highlighted().cloned());
+        }
+        assert_eq!(
+            visited,
+            [4, 6, 7, 8, 3].map(|id| Some(Entry::Property(id))),
+            "Height, Visible, Blend, Label and Locked, then back to Height"
+        );
+        let _ = state.update(Event::PreviousMatch);
+        assert_eq!(state.highlighted(), Some(&Entry::Property(8)), "wraps back");
+
+        let mut none = sample();
+        let _ = none.update(Event::Search("nothing".into()));
+        let _ = none.update(Event::NextMatch);
+        assert_eq!(none.highlighted(), None);
+    }
+
+    #[test]
     fn pressing_a_heading_toggles_it_and_collapsing_lifts_the_highlight() {
         let mut state = sample();
         let _ = state.update(Event::Press(Entry::Property(3)));
@@ -3213,8 +3280,19 @@ mod tests {
         let _ = state.update(Event::Search("i".into()));
         assert_eq!(
             match_label(&state),
-            "5 shown",
-            "Id, Width, Height, Visible, Fill"
+            "1 of 5",
+            "Id, Width, Height, Visible, Fill, with Id highlighted"
+        );
+        let _ = state.update(Event::NextMatch);
+        assert_eq!(match_label(&state), "2 of 5");
+        let _ = state.update(Event::PreviousMatch);
+        let _ = state.update(Event::PreviousMatch);
+        assert_eq!(match_label(&state), "5 of 5", "wraps to Fill");
+        let _ = state.update(Event::ToggleCategory("Layout".into()));
+        assert_eq!(
+            match_label(&state),
+            "2 of 2",
+            "a closed category's properties are not shown"
         );
         let _ = state.update(Event::Search("zebra".into()));
         assert_eq!(match_label(&state), "None");

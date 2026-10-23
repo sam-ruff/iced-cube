@@ -48,6 +48,8 @@ mod natural;
 pub mod navigation;
 pub mod overlay;
 pub mod primitives;
+#[cfg(any(feature = "dialog", feature = "sidebar", feature = "toast"))]
+mod solid;
 pub mod theme;
 
 pub use icon::{Glyph, Icon};

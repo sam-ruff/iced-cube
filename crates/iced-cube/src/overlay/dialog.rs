@@ -55,7 +55,7 @@ use iced::advanced::widget::operation::Focusable;
 use iced::advanced::widget::{Operation, Tree, Widget, tree};
 use iced::advanced::{Clipboard, Renderer as _, Shell, overlay, renderer};
 use iced::keyboard::key::Named;
-use iced::widget::{self, center, column, container, mouse_area, opaque, row, stack, text};
+use iced::widget::{self, center, column, container, mouse_area, row, stack, text};
 use iced::{
     Alignment, Background, Border, Color, Element, Event, Length, Padding, Rectangle, Renderer,
     Size as Bounds, Theme, Vector, keyboard, mouse,
@@ -65,6 +65,7 @@ use crate::keys::{self, Chord, Keymap};
 use crate::overlay::anchored;
 use crate::primitives::button::{self, Size as ButtonSize};
 use crate::primitives::icon_button::icon_button;
+use crate::solid::solid;
 use crate::theme::{Tokens, fade, radius, space, text_size};
 
 /// The default widget id of the dialog surface, which scopes focus.
@@ -396,13 +397,13 @@ impl<'a, Message: Clone + 'a> From<Dialog<'a, Message>> for Element<'a, Message>
                 width,
                 id.clone(),
             );
-            let scrim = center(opaque(surface))
+            let scrim = center(solid(surface))
                 .padding(space::LG)
                 .style(|theme| scrim_style(&Tokens::of(theme)));
             let layer: Element<'a, Message> = match on_dismiss.clone().filter(|_| dismiss_on_scrim)
             {
-                Some(message) => opaque(mouse_area(scrim).on_press(message)),
-                None => opaque(scrim),
+                Some(message) => solid(mouse_area(scrim).on_press(message)),
+                None => solid(scrim),
             };
             layers = layers.push(layer);
         }

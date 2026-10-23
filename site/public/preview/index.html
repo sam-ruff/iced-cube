@@ -48,17 +48,13 @@
         if (!embedded || params.get("keys") === "own") return;
 
         // These run in the capture phase, before the canvas's own listeners, so
-        // the page keeps scrolling and keyboard users can always leave the preview.
-        // Only plain Tab leaves: Escape and modified keys belong to the component.
+        // the page keeps scrolling and site search stays reachable. Tab goes to
+        // the component, and the gallery asks the page to move focus on when
+        // nothing in the preview used it.
         addEventListener(
           "keydown",
           (event) => {
-            const modified = event.ctrlKey || event.metaKey || event.altKey;
-            if (event.key === "Tab" && !modified) {
-              event.preventDefault();
-              event.stopImmediatePropagation();
-              notify({ type: "exit", back: event.shiftKey });
-            } else if (event.key === "k" && (event.ctrlKey || event.metaKey)) {
+            if (event.key === "k" && (event.ctrlKey || event.metaKey)) {
               event.preventDefault();
               event.stopImmediatePropagation();
               notify({ type: "search" });

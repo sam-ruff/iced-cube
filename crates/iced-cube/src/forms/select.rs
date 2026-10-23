@@ -13,18 +13,18 @@ use iced::advanced::widget::{Operation, Tree, Widget, tree};
 use iced::advanced::{Clipboard, Shell, overlay, renderer};
 use iced::keyboard::key::Named;
 use iced::widget::pick_list::{self, Status};
-use iced::widget::text::LineHeight;
-use iced::widget::{self, Column, row, text};
+use iced::widget::{self, Column, row};
 use iced::{
     Alignment, Background, Border, Color, Element, Event, Length, Rectangle, Renderer, Size, Theme,
     Vector, mouse, touch,
 };
 
+use crate::data::ellipsis::ellipsis;
 use crate::icon::{opacity, themed};
 use crate::keys::{self, Chord, Keymap};
 use crate::overlay::anchored::{self, Align, Behaviour, Placement, Side};
 use crate::overlay::menu::{self, Parts, ROW_PADDING, RowStatus, Trailing};
-use crate::theme::{Tokens, fade, mix, radius, space, text_size};
+use crate::theme::{Tokens, fade, mix, radius, space};
 
 /// Height of the closed select in logical pixels.
 pub const HEIGHT: f32 = 36.0;
@@ -133,15 +133,9 @@ where
             opacity(enabled),
             move |theme| style(&Tokens::of(theme), Status::Active, enabled).handle_color,
         );
+        // A long label ends in an ellipsis rather than running under the chevron.
         let field = row![
-            text(label.or(placeholder).unwrap_or_default())
-                .size(text_size::SM)
-                .line_height(LineHeight::Absolute(LINE_HEIGHT.into()))
-                .wrapping(text::Wrapping::None)
-                .width(Length::Fill)
-                .style(move |theme| text::Style {
-                    color: Some(text_colour(theme)),
-                }),
+            ellipsis(label.or(placeholder).unwrap_or_default()).colour(text_colour),
             chevron,
         ]
         .spacing(space::SM)

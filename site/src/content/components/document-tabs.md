@@ -6,7 +6,7 @@ order: 4
 module: navigation::document_tabs
 imports: |
   use iced_cube::navigation::document_tabs::{self, Event, MenuItem, Output, State, document, document_tabs};
-keywords: [editor tabs, file tabs, open files, tab strip, tab bar, workspace tabs, dirty, unsaved]
+keywords: [editor tabs, file tabs, open files, tab strip, tab bar, workspace tabs, dirty, unsaved, pinned tabs, sticky tabs]
 related: [tabs, context-menu, dropdown-menu, dialog]
 hero: document-tabs/editor
 stories: [document-tabs/editor, document-tabs/overflow, document-tabs/confirm-close, document-tabs/keyboard]
@@ -15,6 +15,10 @@ api:
     description: "Opens the documents, pinned ones first, with the first one active. Ids must be unique."
   - name: "document(id, label)"
     description: "A saved, unpinned document. Add .icon(glyph), .modified(true) or .pinned(true)."
+  - name: ".closable(false)"
+    description: "A document the user cannot close: no close button, no Close item, left out of Close others, Close to the right, Close saved and Close all, and Ctrl+W does nothing on it."
+  - name: ".locked(true)"
+    description: "Keeps a document pinned or unpinned as it is: its menu has no Pin or Unpin item and Event::Pin leaves it alone. It still moves within its group."
   - name: ".with_active(id) / .with_menu_items(entries)"
     description: "The document to start on, and app items added to every tab's context menu, built with dropdown_menu::item(MenuItem::Custom(\"name\"), label)."
   - name: "state.update(Event)"
@@ -49,7 +53,9 @@ Closing never happens by itself. The close button, a middle click, `Ctrl+W` and 
 
 Each tab reserves a slot after its label. The active tab shows its close button there, other tabs show it on hover, and a document with unsaved changes shows a dot that turns into the close button under the pointer, so the label never moves. Pinned tabs sit before the others, show only their icon (or a short label when they have none), have no close button, and are left alone by Close others, Close to the right, Close saved and Close all. Dragging a tab moves it, with a line marking where it will land, and a pinned tab only moves among pinned tabs.
 
-When the tabs do not fit, the strip scrolls sideways with the wheel or a finger and shows a button at its end that lists every tab. The strip keeps the active tab in view when it first appears, when the active tab changes and when the window is resized. The list opens below its button, marks the active tab and scrolls to it. Labels stay on one line, in the strip and in the list, and end in an ellipsis when they do not fit. A tab's context menu opens below the tab, whether from a right-click, a long press or the keyboard, and scrolls when the window is too short for it.
+A tab's context menu only lists what would do something on it, and never two close items that would close exactly the same tabs; Close and Close all are kept over the others. So Close saved, which closes the tabs without unsaved changes, appears only while some of those tabs have unsaved changes and some do not. A finger activates a tab when it lifts without having moved, so swiping the strip or holding a tab for its menu never switches tabs. For a document the app always keeps open, such as a list the other tabs are opened from, use `.pinned(true).closable(false).locked(true)`: it then has no close button, no Close, Pin or Unpin item, and no close gesture or shortcut asks to close it.
+
+When the tabs do not fit, the pinned tabs stay at the start of the strip and only the others scroll sideways, with the wheel or a finger, in the room after them. A button at the end of the strip lists every tab. When pinned tabs would take more than half that room, they scroll with the others instead, so a narrow window always has room to show the active tab. The strip keeps the active tab in view when it first appears, when the active tab changes and when the window is resized. The list opens below its button, marks the active tab and scrolls to it. Labels stay on one line, in the strip and in the list, and end in an ellipsis when they do not fit. A tab's context menu opens below the tab, whether from a right-click, a long press or the keyboard, and scrolls when the window is too short for it.
 
 `Ctrl+Tab` walks the documents in the order they were last used, as editors do: each press goes one further back until Ctrl is released, which the app learns from `document_tabs::cycle_end()`. `Ctrl+PageDown` and `Ctrl+PageUp` move through the strip in order. The segmented [tabs](../tabs/) also bind `Ctrl+Tab` and `Ctrl+Shift+Tab`, so an app showing both should unbind them from one of them, usually the segmented tabs. Browsers keep these chords for their own tabs, which is why the keyboard example adds chords such as `Ctrl+]` that reach the page.
 

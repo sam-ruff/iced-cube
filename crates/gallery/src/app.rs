@@ -109,6 +109,7 @@ impl Gallery {
             }
             Message::ToggleTheme => self.theme = self.theme.toggled(),
             Message::Host(bridge::Event::Theme(choice)) => self.theme = choice,
+            Message::Host(bridge::Event::TabOut { back }) => bridge::report_exit(back),
             Message::Measured(size) => {
                 let height = size.height + 2.0 * self.padding();
                 self.needed_height = Some(height);
