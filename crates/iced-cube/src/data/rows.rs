@@ -1,11 +1,20 @@
-//! A scrolling list of equal-height rows that only builds the rows in view,
-//! and scrolls the highlighted row into view when the highlight moves.
+//! A scrolling list of rows that only builds the rows in view, and scrolls
+//! a chosen row into view when asked.
 //!
 //! The rows are built during layout, once the height is known, so a list
-//! of thousands of rows costs no more than a screenful. An optional header
-//! stays above the rows as they scroll, and gives up the same room for the
-//! scrollbar, so its columns keep lining up with theirs.
+//! of thousands of rows costs no more than a screenful. Rows are equally
+//! tall by default. Measured rows can differ: each built row's height is
+//! remembered by its key, and rows not built yet count as the estimate. An
+//! optional header stays above the rows as they scroll, and gives up the
+//! same room for the scrollbar, so its columns keep lining up with theirs.
+//!
+//! The list can follow its end, staying scrolled to the bottom as rows
+//! arrive, and reports when the user scrolls away from the end or back to
+//! it. Rows dropped from the front can be reported through an origin, so
+//! the rows in view stay put.
 
+#[cfg(feature = "log-viewer")]
+use std::collections::HashMap;
 use std::ops::Range;
 
 use iced::advanced::layout::{self, Layout};
@@ -33,17 +42,17 @@ pub(crate) const GUTTER: f32 = THICKNESS + MARGIN * 2.0;
 const MIN_THUMB: f32 = 24.0;
 /// Pixels a wheel scrolls per line.
 const LINE: f32 = 60.0;
+/// How close to the end, in pixels, still counts as being at the end.
+const END_SLOP: f32 = 1.0;
 
 /// Keeps a scroll offset inside the content.
 pub(crate) fn clamp_offset(offset: f32, content: f32, viewport: f32) -> f32 {
     offset.min((content - viewport).max(0.0)).max(0.0)
 }
 
-/// The offset that brings row `index` fully into view, moving as little as
-/// possible.
-pub(crate) fn reveal(offset: f32, index: usize, row_height: f32, viewport: f32) -> f32 {
-    let top = index as f32 * row_height;
-    let bottom = top + row_height;
+/// The offset that brings the span from `top` to `bottom` fully into view,
+/// moving as little as possible.
+fn reveal_span(offset: f32, top: f32, bottom: f32, viewport: f32) -> f32 {
     if top < offset {
         top
     } else if bottom > offset + viewport {
@@ -63,6 +72,46 @@ pub(crate) fn window(offset: f32, viewport: f32, row_height: f32, count: usize) 
     first.saturating_sub(OVERSCAN).min(count)..last.saturating_add(OVERSCAN).min(count)
 }
 
+/// The rows to build when rows differ in height. `tops` holds where each
+/// row starts, followed by the content height.
+fn measured_window(tops: &[f32], offset: f32, viewport: f32) -> Range<usize> {
+    let count = tops.len().saturating_sub(1);
+    if count == 0 {
+        return 0..0;
+    }
+    let first = tops[..count]
+        .partition_point(|&top| top <= offset)
+        .saturating_sub(1);
+    let last = tops[..count].partition_point(|&top| top < offset + viewport);
+    first.saturating_sub(OVERSCAN)..last.saturating_add(OVERSCAN).min(count)
+}
+
+/// Where each row starts, given the rows' heights, followed by the total.
+#[cfg(feature = "log-viewer")]
+fn tops(heights: impl Iterator<Item = f32>) -> Vec<f32> {
+    let mut tops = Vec::with_capacity(heights.size_hint().0 + 1);
+    let mut top = 0.0;
+    tops.push(top);
+    for height in heights {
+        top += height;
+        tops.push(top);
+    }
+    tops
+}
+
+/// Whether an offset sits at the end of the content.
+pub(crate) fn at_end(offset: f32, content: f32, viewport: f32) -> bool {
+    offset >= (content - viewport).max(0.0) - END_SLOP
+}
+
+/// How many whole rows fit in a view, at least one.
+pub(crate) fn page(viewport: f32, row_height: f32) -> usize {
+    if row_height <= 0.0 {
+        return 1;
+    }
+    ((viewport / row_height).floor() as usize).max(1)
+}
+
 /// The scrollbar thumb as a top and a height within a track of `track`
 /// pixels, or `None` when everything fits.
 pub(crate) fn thumb(offset: f32, content: f32, viewport: f32, track: f32) -> Option<(f32, f32)> {
@@ -76,17 +125,30 @@ pub(crate) fn thumb(offset: f32, content: f32, viewport: f32, track: f32) -> Opt
 }
 
 type Build<'a, Message> = Box<dyn Fn(Range<usize>) -> Element<'a, Message> + 'a>;
+type OnFollow<'a, Message> = Box<dyn Fn(bool) -> Message + 'a>;
+type OnPage<'a, Message> = Box<dyn Fn(usize) -> Message + 'a>;
+#[cfg(feature = "log-viewer")]
+type Key<'a> = Box<dyn Fn(usize) -> u64 + 'a>;
 
 /// A list of `count` rows, each `row_height` tall. `build` returns the
-/// rows in a range, stacked in one element.
+/// rows in a range, stacked in one column.
 pub(crate) struct Rows<'a, Message> {
     count: usize,
     row_height: f32,
-    highlight: Option<usize>,
+    /// Names the row at an index when rows are measured, so a measurement
+    /// stays with its row. `row_height` is then the estimate for rows not
+    /// built yet.
+    #[cfg(feature = "log-viewer")]
+    key: Option<Key<'a>>,
+    reveal: Option<(usize, u64)>,
+    follow: bool,
+    origin: u64,
     height: Length,
     header: Option<Element<'a, Message>>,
     build: Build<'a, Message>,
     built: Option<(Range<usize>, Element<'a, Message>)>,
+    on_follow: Option<OnFollow<'a, Message>>,
+    on_page: Option<OnPage<'a, Message>>,
 }
 
 pub(crate) fn rows<'a, Message>(
@@ -97,18 +159,76 @@ pub(crate) fn rows<'a, Message>(
     Rows {
         count,
         row_height,
-        highlight: None,
+        #[cfg(feature = "log-viewer")]
+        key: None,
+        reveal: None,
+        follow: false,
+        origin: 0,
         height: Length::Shrink,
         header: None,
         build: Box::new(build),
         built: None,
+        on_follow: None,
+        on_page: None,
     }
 }
 
 impl<'a, Message> Rows<'a, Message> {
     /// The row to keep in view. The list scrolls to it whenever it changes.
+    #[cfg(any(
+        feature = "tree",
+        feature = "data-table",
+        feature = "json-viewer",
+        feature = "property-grid"
+    ))]
     pub(crate) fn highlight(mut self, index: Option<usize>) -> Self {
-        self.highlight = index;
+        self.reveal = index.map(|index| (index, index as u64));
+        self
+    }
+
+    /// Scrolls row `index` into view whenever `token` changes.
+    #[cfg(feature = "virtual-list")]
+    pub(crate) fn reveal(mut self, target: Option<(usize, u64)>) -> Self {
+        self.reveal = target;
+        self
+    }
+
+    /// Keeps the list scrolled to its end.
+    #[cfg(feature = "virtual-list")]
+    pub(crate) fn follow(mut self, follow: bool) -> Self {
+        self.follow = follow;
+        self
+    }
+
+    /// How many rows have been dropped from the front of the list so far.
+    /// When it grows, the offset moves up by their height, so the rows in
+    /// view stay where they are.
+    #[cfg(feature = "virtual-list")]
+    pub(crate) fn origin(mut self, origin: u64) -> Self {
+        self.origin = origin;
+        self
+    }
+
+    /// Sent with `false` when the user scrolls away from the end while
+    /// following, and with `true` when they scroll back to it.
+    #[cfg(feature = "virtual-list")]
+    pub(crate) fn on_follow(mut self, on_follow: impl Fn(bool) -> Message + 'a) -> Self {
+        self.on_follow = Some(Box::new(on_follow));
+        self
+    }
+
+    /// Sent with how many rows fit in the view whenever that changes.
+    #[cfg(feature = "virtual-list")]
+    pub(crate) fn on_page(mut self, on_page: impl Fn(usize) -> Message + 'a) -> Self {
+        self.on_page = Some(Box::new(on_page));
+        self
+    }
+
+    /// Lets rows take the height they lay out at, with `row_height` as the
+    /// estimate for rows not built yet. `key` names the row at an index.
+    #[cfg(feature = "log-viewer")]
+    pub(crate) fn measured(mut self, key: impl Fn(usize) -> u64 + 'a) -> Self {
+        self.key = Some(Box::new(key));
         self
     }
 
@@ -125,20 +245,263 @@ impl<'a, Message> Rows<'a, Message> {
         self
     }
 
-    fn content_height(&self) -> f32 {
-        self.count as f32 * self.row_height
+    #[cfg(feature = "log-viewer")]
+    fn is_measured(&self) -> bool {
+        self.key.is_some()
+    }
+
+    #[cfg(not(feature = "log-viewer"))]
+    fn is_measured(&self) -> bool {
+        false
+    }
+
+    fn geometry<'s>(&self, state: &'s State) -> Geometry<'s> {
+        if self.is_measured() {
+            Geometry::Measured(&state.tops)
+        } else {
+            Geometry::Fixed {
+                row: self.row_height,
+                count: self.count,
+            }
+        }
+    }
+
+    /// Whether the list keeps to its end. It stops as soon as the user
+    /// scrolls away, before the app has answered the report.
+    fn follows(&self, state: &State) -> bool {
+        self.follow && !state.left_end
+    }
+
+    /// Moves the offset for rows dropped from the front, the end being
+    /// followed, or a row to reveal, then keeps it inside the content.
+    /// Returns the row it revealed, if any.
+    fn place(&self, state: &mut State, viewport: f32, dropped_height: f32) -> Option<usize> {
+        state.offset -= dropped_height;
+        let geometry = self.geometry(state);
+        let content = geometry.content();
+        let token = self.reveal.map(|(_, token)| token);
+        let mut revealed = None;
+        if self.follows(state) {
+            state.offset = (content - viewport).max(0.0);
+        } else if token != state.revealed
+            && let Some((index, _)) = self.reveal.filter(|(index, _)| *index < self.count)
+        {
+            state.offset = reveal_span(
+                state.offset,
+                geometry.top(index),
+                geometry.top(index + 1),
+                viewport,
+            );
+            revealed = Some(index);
+        }
+        state.revealed = token;
+        state.offset = clamp_offset(state.offset, content, viewport);
+        revealed
+    }
+
+    /// Builds the rows in `range` unless they are built already.
+    fn build(&mut self, tree: &mut Tree, range: &Range<usize>) {
+        let stale = self.built.as_ref().is_none_or(|(built, _)| built != range);
+        if !stale {
+            return;
+        }
+        let element = (self.build)(range.clone());
+        tree.children[0].diff(&element);
+        self.built = Some((range.clone(), element));
+    }
+
+    /// Lays out the built rows `inner` pixels wide.
+    fn layout_rows(&mut self, tree: &mut Tree, renderer: &Renderer, inner: f32) -> layout::Node {
+        let measured = self.is_measured();
+        let row_height = self.row_height;
+        let Some((range, element)) = self.built.as_mut() else {
+            return layout::Node::new(Size::ZERO);
+        };
+        let max = if measured {
+            f32::INFINITY
+        } else {
+            range.len() as f32 * row_height
+        };
+        element.as_widget_mut().layout(
+            &mut tree.children[0],
+            renderer,
+            &layout::Limits::new(Size::new(inner, 0.0), Size::new(inner, max)),
+        )
+    }
+}
+
+#[cfg(feature = "log-viewer")]
+impl<Message> Rows<'_, Message> {
+    /// Recomputes where each measured row starts from the remembered
+    /// heights, and forgets rows that are gone.
+    fn measure_tops(&self, state: &mut State) {
+        let Some(key) = &self.key else {
+            return;
+        };
+        let estimate = self.row_height;
+        state.tops = tops(
+            (0..self.count)
+                .map(|index| state.heights.get(&key(index)).copied().unwrap_or(estimate)),
+        );
+        if state.heights.len() > self.count.saturating_mul(2) + 64 {
+            let keep: std::collections::HashSet<u64> = (0..self.count).map(key).collect();
+            state.heights.retain(|row, _| keep.contains(row));
+        }
+    }
+
+    /// Remembers the heights the built rows laid out at. Returns whether
+    /// any changed.
+    fn remember(&self, state: &mut State, range: &Range<usize>, node: &layout::Node) -> bool {
+        let Some(key) = &self.key else {
+            return false;
+        };
+        let mut changed = false;
+        for (index, child) in range.clone().zip(node.children()) {
+            let height = child.size().height;
+            let previous = state.heights.insert(key(index), height);
+            changed |= previous.is_none_or(|previous| (previous - height).abs() > 0.5);
+        }
+        changed
+    }
+
+    /// Prepares measured rows for a layout `width` wide. They always leave
+    /// room for the scrollbar, so their width, and with it their heights,
+    /// never flips as the scrollbar comes and goes.
+    fn prepare(&self, state: &mut State, width: f32) {
+        if !self.is_measured() {
+            return;
+        }
+        let inner = (width - GUTTER).max(0.0);
+        if (inner - state.measured_width).abs() > 0.5 {
+            state.heights.clear();
+            state.measured_width = inner;
+        }
+        self.measure_tops(state);
+    }
+
+    /// Measured rows may come out taller or shorter than estimated. Keeps
+    /// the row just revealed, or else the first row in view, where it was,
+    /// with a revealed row wholly in view, and builds again while the rows
+    /// in view are not the ones built.
+    fn settle(
+        &mut self,
+        tree: &mut Tree,
+        renderer: &Renderer,
+        inner: f32,
+        viewport: f32,
+        revealed: Option<usize>,
+        built: (Range<usize>, layout::Node),
+    ) -> (Range<usize>, layout::Node) {
+        /// Passes before giving up on rows that keep changing height.
+        const PASSES: usize = 3;
+        let (mut range, mut node) = built;
+        for _ in 0..PASSES {
+            let state = tree.state.downcast_mut::<State>();
+            if !self.remember(state, &range, &node) {
+                return (range, node);
+            }
+            let before = self.geometry(state);
+            let anchor = revealed.unwrap_or_else(|| before.row_at(state.offset));
+            let within = state.offset - before.top(anchor);
+            self.measure_tops(state);
+            let after = self.geometry(state);
+            let content = after.content();
+            let follows = self.follows(state);
+            let mut offset = if follows {
+                content - viewport
+            } else {
+                after.top(anchor) + within
+            };
+            if let Some(index) = revealed.filter(|_| !follows) {
+                offset = reveal_span(offset, after.top(index), after.top(index + 1), viewport);
+            }
+            let offset = clamp_offset(offset, content, viewport);
+            let needed = after.window(offset, viewport);
+            state.offset = offset;
+            if needed.start >= range.start && needed.end <= range.end {
+                return (range, node);
+            }
+            self.build(tree, &needed);
+            node = self.layout_rows(tree, renderer, inner);
+            range = needed;
+        }
+        let state = tree.state.downcast_mut::<State>();
+        if self.remember(state, &range, &node) {
+            self.measure_tops(state);
+        }
+        (range, node)
+    }
+}
+
+/// Where rows sit: equally tall, or measured.
+#[derive(Debug, Clone, Copy)]
+enum Geometry<'a> {
+    Fixed { row: f32, count: usize },
+    Measured(&'a [f32]),
+}
+
+impl Geometry<'_> {
+    fn content(self) -> f32 {
+        match self {
+            Geometry::Fixed { row, count } => count as f32 * row,
+            Geometry::Measured(tops) => tops.last().copied().unwrap_or(0.0),
+        }
+    }
+
+    /// Where row `index` starts. The row after the last starts at the end.
+    fn top(self, index: usize) -> f32 {
+        match self {
+            Geometry::Fixed { row, count } => index.min(count) as f32 * row,
+            Geometry::Measured(tops) => tops.get(index).or(tops.last()).copied().unwrap_or(0.0),
+        }
+    }
+
+    fn window(self, offset: f32, viewport: f32) -> Range<usize> {
+        match self {
+            Geometry::Fixed { row, count } => window(offset, viewport, row, count),
+            Geometry::Measured(tops) => measured_window(tops, offset, viewport),
+        }
+    }
+
+    /// The row the offset falls in.
+    #[cfg(feature = "log-viewer")]
+    fn row_at(self, offset: f32) -> usize {
+        match self {
+            Geometry::Fixed { row, .. } if row > 0.0 => (offset / row).floor() as usize,
+            Geometry::Fixed { .. } => 0,
+            Geometry::Measured(tops) => {
+                tops.partition_point(|&top| top <= offset).saturating_sub(1)
+            }
+        }
     }
 }
 
 #[derive(Debug, Default)]
 struct State {
     offset: f32,
-    highlight: Option<usize>,
+    /// The token of the row last revealed.
+    revealed: Option<u64>,
     /// Where the pointer holds the thumb, from its top, while dragging.
     drag: Option<f32>,
     /// A finger scrolling the list: which one, where it started and the
     /// offset then.
     touch: Option<(Finger, f32, f32)>,
+    /// Rows dropped from the front, as of the last layout.
+    origin: u64,
+    /// The user scrolled away from the end while the list followed it.
+    left_end: bool,
+    /// The content height, as of the last layout.
+    content: f32,
+    /// Rows that fit in the view, and the count last reported.
+    page: usize,
+    reported_page: usize,
+    /// Where each measured row starts, followed by the content height.
+    tops: Vec<f32>,
+    /// Measured heights by row key, at the width they were measured.
+    #[cfg(feature = "log-viewer")]
+    heights: HashMap<u64, f32>,
+    #[cfg(feature = "log-viewer")]
+    measured_width: f32,
 }
 
 /// Where the rows show: the bounds below the header.
@@ -201,7 +564,6 @@ impl<Message> Widget<Message, Theme, Renderer> for Rows<'_, Message> {
         renderer: &Renderer,
         limits: &layout::Limits,
     ) -> layout::Node {
-        let content = self.content_height();
         let width = limits.max().width;
         let header_height = match (&mut self.header, tree.children.get_mut(1)) {
             (Some(header), Some(header_tree)) => {
@@ -214,6 +576,27 @@ impl<Message> Widget<Message, Theme, Renderer> for Rows<'_, Message> {
             }
             _ => 0.0,
         };
+
+        let state = tree.state.downcast_mut::<State>();
+        // The height of rows dropped from the front since the last layout,
+        // from the heights they had then.
+        let dropped = self.origin.saturating_sub(state.origin);
+        let dropped_height = if dropped == 0 {
+            0.0
+        } else if self.is_measured() {
+            let index = usize::try_from(dropped).unwrap_or(usize::MAX);
+            Geometry::Measured(&state.tops).top(index)
+        } else {
+            dropped as f32 * self.row_height
+        };
+        state.origin = self.origin;
+        if !self.follow {
+            state.left_end = false;
+        }
+        #[cfg(feature = "log-viewer")]
+        self.prepare(state, width);
+        let content = self.geometry(state).content();
+
         let size = limits.resolve(
             Length::Fill,
             self.height,
@@ -225,46 +608,31 @@ impl<Message> Widget<Message, Theme, Renderer> for Rows<'_, Message> {
             content
         };
         let size = Size::new(size.width, viewport + header_height);
-        let inner = if content > viewport + 0.5 {
+        let inner = if self.is_measured() || content > viewport + 0.5 {
             (size.width - GUTTER).max(0.0)
         } else {
             size.width
         };
+        state.page = page(viewport, self.row_height);
+
+        let revealed = self.place(state, viewport, dropped_height);
+        let range = self.geometry(state).window(state.offset, viewport);
+        self.build(tree, &range);
+        let node = self.layout_rows(tree, renderer, inner);
+        #[cfg(feature = "log-viewer")]
+        let (range, node) = self.settle(tree, renderer, inner, viewport, revealed, (range, node));
+        #[cfg(not(feature = "log-viewer"))]
+        let _ = revealed;
 
         let state = tree.state.downcast_mut::<State>();
-        if self.highlight != state.highlight {
-            if let Some(index) = self.highlight {
-                state.offset = reveal(state.offset, index, self.row_height, viewport);
-            }
-            state.highlight = self.highlight;
-        }
+        let geometry = self.geometry(state);
+        let (content, first_top) = (geometry.content(), geometry.top(range.start));
+        state.content = content;
         state.offset = clamp_offset(state.offset, content, viewport);
-        let offset = state.offset;
-
-        let range = window(offset, viewport, self.row_height, self.count);
-        let stale = self.built.as_ref().is_none_or(|(built, _)| *built != range);
-        if stale {
-            let element = (self.build)(range.clone());
-            tree.children[0].diff(&element);
-            self.built = Some((range.clone(), element));
-        }
+        let top = header_height + first_top - state.offset;
 
         let mut nodes = Vec::with_capacity(2);
-        let height = range.len() as f32 * self.row_height;
-        nodes.push(match self.built.as_mut() {
-            Some((_, element)) => element
-                .as_widget_mut()
-                .layout(
-                    &mut tree.children[0],
-                    renderer,
-                    &layout::Limits::new(Size::new(inner, 0.0), Size::new(inner, height)),
-                )
-                .move_to(Point::new(
-                    0.0,
-                    header_height + range.start as f32 * self.row_height - offset,
-                )),
-            None => layout::Node::new(Size::ZERO),
-        });
+        nodes.push(node.move_to(Point::new(0.0, top)));
         if let (Some(header), Some(header_tree)) = (&mut self.header, tree.children.get_mut(1)) {
             let limits =
                 layout::Limits::new(Size::new(inner, 0.0), Size::new(inner, f32::INFINITY));
@@ -321,12 +689,8 @@ impl<Message> Widget<Message, Theme, Renderer> for Rows<'_, Message> {
         }
 
         let track = track(rows);
-        let Some((top, height)) = thumb(
-            state.offset,
-            self.content_height(),
-            rows.height,
-            track.height,
-        ) else {
+        let Some((top, height)) = thumb(state.offset, state.content, rows.height, track.height)
+        else {
             return;
         };
         let interaction = if dragging {
@@ -399,15 +763,28 @@ impl<Message> Widget<Message, Theme, Renderer> for Rows<'_, Message> {
         viewport: &Rectangle,
     ) {
         let rows = self::viewport(layout);
-        let content = self.content_height();
-        if scroll(
-            tree.state.downcast_mut::<State>(),
-            event,
-            cursor,
-            rows,
-            content,
-            shell,
-        ) {
+        let state = tree.state.downcast_mut::<State>();
+        if state.page != state.reported_page
+            && let Some(on_page) = &self.on_page
+        {
+            state.reported_page = state.page;
+            shell.publish(on_page(state.page));
+        }
+        let content = state.content;
+        let scrolled = scroll(state, event, cursor, rows, content, shell);
+        if scrolled.moved {
+            let at_end = at_end(state.offset, content, rows.height);
+            if at_end {
+                state.left_end = false;
+            }
+            if at_end != self.follow
+                && let Some(on_follow) = &self.on_follow
+            {
+                state.left_end = !at_end;
+                shell.publish(on_follow(at_end));
+            }
+        }
+        if scrolled.used {
             shell.capture_event();
             return;
         }
@@ -483,7 +860,7 @@ impl<Message> Widget<Message, Theme, Renderer> for Rows<'_, Message> {
         if !cursor.is_over(rows) {
             return mouse::Interaction::None;
         }
-        let overflows = self.content_height() > rows.height;
+        let overflows = state.content > rows.height;
         if overflows && cursor.is_over(track(rows).expand(MARGIN)) {
             return mouse::Interaction::Idle;
         }
@@ -535,8 +912,33 @@ impl<Message> Widget<Message, Theme, Renderer> for Rows<'_, Message> {
     }
 }
 
-/// Handles the wheel, the scrollbar and touch drags over the rows. Returns
-/// whether the event was used up, so the rows must not see it.
+/// What [`scroll`] did with an event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+struct Scrolled {
+    /// The offset moved.
+    moved: bool,
+    /// The event was used up, so the rows must not see it.
+    used: bool,
+}
+
+impl Scrolled {
+    const IGNORED: Self = Self {
+        moved: false,
+        used: false,
+    };
+
+    fn used(moved: bool) -> Self {
+        Self { moved, used: true }
+    }
+
+    /// A finger drag moves the offset but still reaches the rows, so a
+    /// row under the finger can tell a swipe from a tap.
+    fn passed_on(moved: bool) -> Self {
+        Self { moved, used: false }
+    }
+}
+
+/// Handles the wheel, the scrollbar and touch drags over the rows.
 fn scroll<Message>(
     state: &mut State,
     event: &Event,
@@ -544,7 +946,7 @@ fn scroll<Message>(
     rows: Rectangle,
     content: f32,
     shell: &mut Shell<'_, Message>,
-) -> bool {
+) -> Scrolled {
     let track = track(rows);
     let mut scroll_to = |state: &mut State, offset: f32| {
         let offset = clamp_offset(offset, content, rows.height);
@@ -573,14 +975,18 @@ fn scroll<Message>(
                 ScrollDelta::Lines { y, .. } => y * LINE,
                 ScrollDelta::Pixels { y, .. } => *y,
             };
-            scroll_to(state, state.offset - dy)
+            if scroll_to(state, state.offset - dy) {
+                Scrolled::used(true)
+            } else {
+                Scrolled::IGNORED
+            }
         }
         Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
             let (Some((top, height)), Some(position)) = (thumb, cursor.position()) else {
-                return false;
+                return Scrolled::IGNORED;
             };
             if !track.expand(MARGIN).contains(position) {
-                return false;
+                return Scrolled::IGNORED;
             }
             let grab = position.y - track.y - top;
             let grab = if (0.0..=height).contains(&grab) {
@@ -590,37 +996,39 @@ fn scroll<Message>(
             };
             state.drag = Some(grab);
             let _ = scroll_to(state, dragged_to(grab, position.y, height));
-            true
+            Scrolled::used(true)
         }
         Event::Mouse(mouse::Event::CursorMoved { position }) => {
             let (Some(grab), Some((_, height))) = (state.drag, thumb) else {
-                return false;
+                return Scrolled::IGNORED;
             };
             let _ = scroll_to(state, dragged_to(grab, position.y, height));
-            true
+            Scrolled::used(true)
         }
         Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
-            state.drag.take().is_some()
+            if state.drag.take().is_some() {
+                Scrolled::used(true)
+            } else {
+                Scrolled::IGNORED
+            }
         }
         Event::Touch(touch::Event::FingerPressed { id, position }) => {
             if cursor.is_over(rows) {
                 state.touch = Some((*id, position.y, state.offset));
             }
-            false
+            Scrolled::IGNORED
         }
         Event::Touch(touch::Event::FingerMoved { id, position }) => {
-            if let Some((finger, start, offset)) = state.touch
-                && finger == *id
-            {
-                let _ = scroll_to(state, offset - (position.y - start));
-            }
-            false
+            let Some((_, start, offset)) = state.touch.filter(|(finger, ..)| finger == id) else {
+                return Scrolled::IGNORED;
+            };
+            Scrolled::passed_on(scroll_to(state, offset - (position.y - start)))
         }
         Event::Touch(touch::Event::FingerLifted { .. } | touch::Event::FingerLost { .. }) => {
             state.touch = None;
-            false
+            Scrolled::IGNORED
         }
-        _ => false,
+        _ => Scrolled::IGNORED,
     }
 }
 
@@ -653,14 +1061,14 @@ mod tests {
 
     #[test]
     fn reveal_moves_as_little_as_possible() {
-        assert_eq!(reveal(0.0, 2, 32.0, 100.0), 0.0, "already in view");
+        assert_eq!(reveal_span(0.0, 64.0, 96.0, 100.0), 0.0, "already in view");
         assert_eq!(
-            reveal(0.0, 5, 32.0, 100.0),
+            reveal_span(0.0, 160.0, 192.0, 100.0),
             92.0,
             "below: its bottom edge meets the view's"
         );
         assert_eq!(
-            reveal(200.0, 3, 32.0, 100.0),
+            reveal_span(200.0, 96.0, 128.0, 100.0),
             96.0,
             "above: its top meets the view's"
         );
@@ -676,6 +1084,74 @@ mod tests {
         assert_eq!(window(0.0, 100.0, 32.0, 2), 0..2);
         assert_eq!(window(0.0, 100.0, 32.0, 0), 0..0);
         assert_eq!(window(0.0, 100.0, 0.0, 10), 0..0);
+    }
+
+    #[cfg(feature = "log-viewer")]
+    #[test]
+    fn tops_accumulate_the_heights() {
+        let tops = tops([20.0, 60.0, 20.0].into_iter());
+        assert_eq!(tops, [0.0, 20.0, 80.0, 100.0]);
+        assert_eq!(super::tops(std::iter::empty()), [0.0]);
+    }
+
+    #[test]
+    fn measured_rows_find_their_window_from_their_tops() {
+        let tops = [0.0, 20.0, 80.0, 100.0, 120.0, 220.0, 240.0];
+        assert_eq!(measured_window(&tops, 0.0, 50.0), 0..6, "overscan below");
+        let deep: Vec<f32> = (0..=100).map(|row| row as f32 * 10.0).collect();
+        assert_eq!(
+            measured_window(&deep, 500.0, 50.0),
+            50 - OVERSCAN..55 + OVERSCAN
+        );
+        assert_eq!(measured_window(&[0.0], 0.0, 50.0), 0..0, "no rows");
+    }
+
+    #[test]
+    fn geometry_reads_where_measured_and_fixed_rows_start() {
+        let tops = [0.0, 20.0, 80.0, 100.0];
+        let geometry = Geometry::Measured(&tops);
+        assert_eq!(geometry.content(), 100.0);
+        assert_eq!(geometry.top(1), 20.0);
+        assert_eq!(geometry.top(9), 100.0, "past the end is the end");
+        let fixed = Geometry::Fixed {
+            row: 10.0,
+            count: 5,
+        };
+        assert_eq!(fixed.content(), 50.0);
+        assert_eq!(fixed.top(9), 50.0);
+    }
+
+    #[cfg(feature = "log-viewer")]
+    #[test]
+    fn the_row_at_an_offset_is_the_one_containing_it() {
+        let tops = [0.0, 20.0, 80.0, 100.0];
+        let geometry = Geometry::Measured(&tops);
+        assert_eq!(geometry.row_at(0.0), 0);
+        assert_eq!(geometry.row_at(50.0), 1);
+        assert_eq!(geometry.row_at(80.0), 2);
+        assert_eq!(
+            Geometry::Fixed {
+                row: 10.0,
+                count: 5
+            }
+            .row_at(25.0),
+            2
+        );
+    }
+
+    #[test]
+    fn the_end_counts_within_a_pixel() {
+        assert!(at_end(400.0, 500.0, 100.0));
+        assert!(at_end(399.5, 500.0, 100.0));
+        assert!(!at_end(390.0, 500.0, 100.0));
+        assert!(at_end(0.0, 50.0, 100.0), "content that fits is at its end");
+    }
+
+    #[test]
+    fn a_page_is_the_whole_rows_in_view() {
+        assert_eq!(page(100.0, 32.0), 3);
+        assert_eq!(page(10.0, 32.0), 1, "at least one");
+        assert_eq!(page(100.0, 0.0), 1);
     }
 
     #[test]

@@ -202,7 +202,9 @@ impl keys::Action for Action {
 /// Shortcuts are app-wide, not tied to focus. Arrow keys, Home and End
 /// only reach the keymap when no widget captures them, but an app with
 /// text inputs or other arrow-driven components may still want to unbind
-/// them and keep only `Ctrl+Tab`.
+/// them and keep only `Ctrl+Tab`. Document tabs bind `Ctrl+Tab` and
+/// `Ctrl+Shift+Tab` too, so an app showing both should unbind them here
+/// or there.
 pub fn default_keymap() -> Keymap<Action> {
     Keymap::new()
         .bind(Chord::named(Named::Tab).ctrl(), Action::Next)

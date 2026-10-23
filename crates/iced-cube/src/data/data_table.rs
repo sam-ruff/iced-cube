@@ -28,7 +28,7 @@ use iced::widget::{self, Space, container, responsive, row, space as spacer, tex
 use iced::{Alignment, Background, Border, Color, Element, Length, Padding, Theme};
 
 use crate::data::ellipsis::ellipsis;
-use crate::data::interaction::{Look, RowMenu, pressable, row_menu, scope};
+use crate::data::interaction::{Look, RowMenu, pressable, ringed, row_menu, scope};
 use crate::data::rows::rows;
 use crate::forms::select::select;
 use crate::icon::{Glyph, themed};
@@ -1619,10 +1619,15 @@ where
 
     fn row_status(&self, key: &Key) -> Status {
         let state = self.state;
+        let target = self.menu.as_ref().and_then(RowMenu::target);
         Status {
             selected: state.is_selectable() && state.is_selected(key),
             hovered: false,
-            highlighted: state.is_focused() && state.highlighted() == Some(key),
+            highlighted: ringed(
+                target.as_ref(),
+                key,
+                state.is_focused() && state.highlighted() == Some(key),
+            ),
         }
     }
 

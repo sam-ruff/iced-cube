@@ -36,7 +36,7 @@ api:
   - name: ".width(length) / .height(length)"
     description: "A fixed or filling height scrolls the rows. Only the rows in view are built."
   - name: ".context_menu(&menu, f)"
-    description: "Gives every node the same context menu, keyed by node id, opened by a right-click, a long press or Shift+F10 on the highlighted node."
+    description: "Gives every node the same context menu, keyed by node id, opened by a right-click, a long press or Shift+F10 on the highlighted node. The node it opened on carries the ring while it is open."
   - name: ".keymap(keymap) / .context_menu_keymap(keymap)"
     description: "Replaces the tree's or the context menu's default keymap."
   - name: "tree::default_keymap() / action.event(&state)"

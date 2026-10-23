@@ -229,9 +229,10 @@ pub struct Colours {
     pub foreground: Color,
 }
 
-/// Resolves the colours of a toggle. Off, it is muted and fills on hover;
-/// on, it takes the accent and darkens a little on hover, so it reads as
-/// on in every state.
+/// Resolves the colours of a toggle. Off, it is muted and takes a fill
+/// halfway to the accent on hover, keeping its muted text; on, it takes
+/// the accent with full-strength text and darkens a little on hover, so
+/// a hovered toggle never looks pressed.
 pub fn colours(tokens: &Tokens, pressed: bool, status: Status) -> Colours {
     let hover = matches!(status, Status::Hovered | Status::Pressed);
     let colours = match (pressed, hover) {
@@ -244,8 +245,8 @@ pub fn colours(tokens: &Tokens, pressed: bool, status: Status) -> Colours {
             foreground: tokens.accent_foreground,
         },
         (false, true) => Colours {
-            background: Some(tokens.muted),
-            foreground: tokens.foreground,
+            background: Some(mix(tokens.background, tokens.accent, 0.5)),
+            foreground: tokens.muted_foreground,
         },
         (false, false) => Colours {
             background: None,
@@ -416,6 +417,29 @@ mod tests {
                     assert!(hovered.background.is_some());
                 }
             }
+        }
+    }
+
+    fn distance(a: Color, b: Color) -> f32 {
+        (a.r - b.r).abs() + (a.g - b.g).abs() + (a.b - b.b).abs()
+    }
+
+    #[test]
+    fn hovering_an_off_toggle_is_lighter_than_pressing_it() {
+        for theme in [light(), dark()] {
+            let tokens = Tokens::of(&theme);
+            let pressed = colours(&tokens, true, Status::Active);
+            let hovered = colours(&tokens, false, Status::Hovered);
+            let (Some(pressed_fill), Some(hovered_fill)) = (pressed.background, hovered.background)
+            else {
+                panic!("both fill");
+            };
+            let pressed_lift = distance(pressed_fill, tokens.background);
+            let hovered_lift = distance(hovered_fill, tokens.background);
+            assert!(hovered_lift > 0.0, "{}", tokens.is_dark);
+            assert!(hovered_lift < pressed_lift * 0.6, "{}", tokens.is_dark);
+            assert_ne!(hovered.foreground, pressed.foreground);
+            assert_eq!(hovered.foreground, tokens.muted_foreground);
         }
     }
 

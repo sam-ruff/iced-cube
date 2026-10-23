@@ -18,14 +18,18 @@ pub mod command_palette;
 pub mod context_menu;
 pub mod data_table;
 pub mod dialog;
+pub mod document_tabs;
 pub mod dropdown_menu;
 pub mod icon_button;
 pub mod input;
+pub mod json_viewer;
 pub mod label;
+pub mod log_viewer;
 pub mod menubar;
 pub mod pagination;
 pub mod popover;
 pub mod progress;
+pub mod property_grid;
 pub mod radio;
 pub mod resizable_panel;
 pub mod scroll_area;
@@ -48,6 +52,7 @@ pub mod toggle_group;
 pub mod toolbar;
 pub mod tooltip;
 pub mod tree;
+pub mod virtual_list;
 
 crate::stories! {
     ButtonVariants => button::variants {
@@ -470,6 +475,26 @@ crate::stories! {
         description: "The sidebar fills a collapsible panel beside the page. Dragging the panel below its minimum snaps it to the width of the rail.",
         file: "sidebar/resizable.rs", height: 360, edge: true,
     }
+    DocumentTabsEditor => document_tabs::editor {
+        id: "document-tabs/editor", component: "document-tabs", title: "Editor",
+        description: "Open files with icons, a pinned README, unsaved changes shown as dots and a new tab button. Drag a tab to move it, middle-click to close it, or right-click for more, including an app item that copies the path.",
+        file: "document_tabs/editor.rs", height: 320,
+    }
+    DocumentTabsOverflow => document_tabs::overflow {
+        id: "document-tabs/overflow", component: "document-tabs", title: "Many tabs",
+        description: "Tabs that do not fit scroll sideways, keeping the active one in view, and a button at the end lists them all.",
+        file: "document_tabs/overflow.rs", height: 200,
+    }
+    DocumentTabsConfirmClose => document_tabs::confirm_close {
+        id: "document-tabs/confirm-close", component: "document-tabs", title: "Confirm before closing",
+        description: "Closing only asks. The app checks for unsaved changes, confirms with an alert dialog, then closes the tabs itself.",
+        file: "document_tabs/confirm_close.rs", height: 360, edge: true,
+    }
+    DocumentTabsKeyboard => document_tabs::keyboard {
+        id: "document-tabs/keyboard", component: "document-tabs", title: "Keyboard shortcuts",
+        description: "The default keymap with extra chords that reach a web page, since browsers keep Ctrl+Tab, Ctrl+W and Ctrl+PageDown for themselves. Closing a modified tab asks first. Releasing every modifier ends a walk through recent tabs.",
+        file: "document_tabs/keyboard.rs", height: 280, subscription: true,
+    }
     AccordionSingle => accordion::single {
         id: "accordion/single", component: "accordion", title: "Single",
         description: "Opening a section closes the others.",
@@ -684,6 +709,86 @@ crate::stories! {
         id: "data-table/keyboard", component: "data-table", title: "Keyboard shortcuts",
         description: "The default keymap with J and K added. The table resolves keys only while it has focus, and the highlight moves on to the next page after the last row.",
         file: "data_table/keyboard.rs", height: 440,
+    }
+    PropertyGridInspector => property_grid::inspector {
+        id: "property-grid/inspector", component: "property-grid", title: "Shape inspector",
+        description: "The properties of a selected shape under collapsible categories: numbers with units, colours, a choice, switches and checkboxes, a read-only id and an opacity slider the app draws itself. A dot and a bold name mark values that differ from their default, with a button to reset them. Right-click or press and hold a row, or press Shift+F10, to copy or reset its value.",
+        file: "property_grid/inspector.rs", height: 420, task: true,
+    }
+    PropertyGridFilterSort => property_grid::filter_sort {
+        id: "property-grid/filter-sort", component: "property-grid", title: "Filter and sort",
+        description: "The box filters properties by name and the buttons switch between categories and one alphabetical list. This one starts sorted by name and filtered to colours.",
+        file: "property_grid/filter_sort.rs", height: 360,
+    }
+    PropertyGridValidation => property_grid::validation {
+        id: "property-grid/validation", component: "property-grid", title: "Validation and reset",
+        description: "An invalid port keeps its draft and shows why under the rows, without changing the value. Escape puts back the old value, and the reset buttons go back to the defaults.",
+        file: "property_grid/validation.rs", height: 360,
+    }
+    PropertyGridKeyboard => property_grid::keyboard {
+        id: "property-grid/keyboard", component: "property-grid", title: "Keyboard shortcuts",
+        description: "The default keymap with J and K added. The grid resolves keys only while it has focus.",
+        file: "property_grid/keyboard.rs", height: 480,
+    }
+    JsonViewerApiResponse => json_viewer::api_response {
+        id: "json-viewer/api-response", component: "json-viewer", title: "API response",
+        description: "A response opened two levels deep, with values coloured by type, a link too long to fit and a context menu on every row.",
+        file: "json_viewer/api_response.rs", height: 400, task: true,
+    }
+    JsonViewerSearch => json_viewer::search {
+        id: "json-viewer/search", component: "json-viewer", title: "Search",
+        description: "Searching keys and values highlights every match and opens its parents. The arrows step through matches, and the filter shows only them.",
+        file: "json_viewer/search.rs", height: 360, task: true,
+    }
+    JsonViewerCopy => json_viewer::copy {
+        id: "json-viewer/copy", component: "json-viewer", title: "Copy values and paths",
+        description: "The highlighted row has buttons to copy its value as JSON or its path, and the context menu does the same. The app writes the text to the clipboard.",
+        file: "json_viewer/copy.rs", height: 440, task: true,
+    }
+    JsonViewerKeyboard => json_viewer::keyboard {
+        id: "json-viewer/keyboard", component: "json-viewer", title: "Keyboard shortcuts",
+        description: "The default keymap with J and K added. The viewer resolves keys only while it has focus.",
+        file: "json_viewer/keyboard.rs", height: 440, task: true,
+    }
+    JsonViewerLargeDocument => json_viewer::large_document {
+        id: "json-viewer/large-document", component: "json-viewer", title: "Large document",
+        description: "1,500 orders, over 15,000 nodes. Only the rows in view are built, so expanding everything stays quick.",
+        file: "json_viewer/large_document.rs", height: 440, task: true,
+    }
+    JsonViewerParseErrors => json_viewer::parse_errors {
+        id: "json-viewer/parse-errors", component: "json-viewer", title: "Parse errors",
+        description: "JSON text is parsed as it is typed. Invalid text shows the problem and where it is in place of the rows.",
+        file: "json_viewer/parse_errors.rs", height: 200, task: true,
+    }
+    VirtualListLarge => virtual_list::large {
+        id: "virtual-list/large", component: "virtual-list", title: "100,000 rows",
+        description: "A hundred thousand orders in a multiple selection. Only the rows in view are built, so scrolling stays smooth.",
+        file: "virtual_list/large.rs", height: 340,
+    }
+    VirtualListStreaming => virtual_list::streaming {
+        id: "virtual-list/streaming", component: "virtual-list", title: "Streaming feed",
+        description: "Simulated sensors send readings through the list's channel, using futures-timer so they also run in the browser. The list follows the newest reading until you scroll up, and keeps the newest thousand.",
+        file: "virtual_list/streaming.rs", height: 340, subscription: true,
+    }
+    VirtualListKeyboard => virtual_list::keyboard {
+        id: "virtual-list/keyboard", component: "virtual-list", title: "Keyboard shortcuts",
+        description: "The default keymap with J and K added, and a context menu on every row. The list resolves keys only while it has focus.",
+        file: "virtual_list/keyboard.rs", height: 400, task: true,
+    }
+    LogViewerLive => log_viewer::live {
+        id: "log-viewer/live", component: "log-viewer", title: "Live log",
+        description: "A simulated server writes lines through the log's channel, using futures-timer so it also runs in the browser. Scroll up to stop following, then jump back to the newest line.",
+        file: "log_viewer/live.rs", height: 420, subscription: true, task: true,
+    }
+    LogViewerFiltering => log_viewer::filtering {
+        id: "log-viewer/filtering", component: "log-viewer", title: "Levels and search",
+        description: "Trace and debug lines are hidden and long lines wrap. The search marks every match, and Enter in the field, F3 or the arrows move between them.",
+        file: "log_viewer/filtering.rs", height: 420, task: true,
+    }
+    LogViewerKeyboard => log_viewer::keyboard {
+        id: "log-viewer/keyboard", component: "log-viewer", title: "Keyboard shortcuts",
+        description: "The default keymap with J and K added, and a context menu on every line. The log resolves keys while any part of it has focus, and copying hands the text to the app.",
+        file: "log_viewer/keyboard.rs", height: 480, task: true,
     }
     ThemeCustom => theme::custom {
         id: "theme/custom", component: "theme", title: "Custom palette",

@@ -706,6 +706,20 @@ mod tests {
     }
 
     #[test]
+    fn a_hovered_item_never_looks_selected() {
+        for theme in [light(), dark()] {
+            let tokens = Tokens::of(&theme);
+            for variant in Variant::ALL {
+                let hovered =
+                    item_style(&tokens, variant, Position::Middle, false, Status::Hovered);
+                let selected = item_style(&tokens, variant, Position::Middle, true, Status::Active);
+                assert_ne!(hovered.background, selected.background, "{variant:?}");
+                assert_ne!(hovered.text_color, selected.text_color, "{variant:?}");
+            }
+        }
+    }
+
+    #[test]
     fn only_the_outline_group_has_a_border_and_it_fades_when_disabled() {
         let tokens = Tokens::of(&dark());
         assert_eq!(

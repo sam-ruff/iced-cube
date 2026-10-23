@@ -1,8 +1,15 @@
-//! What the tree and the data table share: a [`Scope`] that takes focus
+//! What the data views share: a [`Scope`] that takes focus
 //! when pressed and resolves keys only while it has it, a [`Pressable`] row
 //! that reports clicks with the modifiers held, and a [`RowMenu`] that
 //! gives every row the same context menu.
 
+#[cfg(any(
+    feature = "data-table",
+    feature = "json-viewer",
+    feature = "property-grid",
+    feature = "tree",
+    feature = "virtual-list"
+))]
 use std::rc::Rc;
 
 use iced::advanced::layout::{self, Layout};
@@ -14,12 +21,28 @@ use iced::advanced::widget::{Operation, Tree, Widget, tree};
 use iced::advanced::{Clipboard, Renderer as _, Shell};
 use iced::keyboard::{self, Modifiers};
 use iced::touch::{self, Finger};
+use iced::widget;
 use iced::{
     Background, Border, Color, Element, Event, Length, Point, Rectangle, Renderer, Shadow, Size,
     Theme, Vector, mouse,
 };
 
-use crate::keys::{self, Keymap};
+use crate::keys;
+#[cfg(any(
+    feature = "data-table",
+    feature = "json-viewer",
+    feature = "property-grid",
+    feature = "tree",
+    feature = "virtual-list"
+))]
+use crate::keys::Keymap;
+#[cfg(any(
+    feature = "data-table",
+    feature = "json-viewer",
+    feature = "property-grid",
+    feature = "tree",
+    feature = "virtual-list"
+))]
 use crate::overlay::context_menu;
 
 type OnKey<'a, Message> = Box<dyn Fn(&keys::Event) -> Option<Message> + 'a>;
@@ -32,6 +55,7 @@ pub(crate) struct Scope<'a, Message> {
     content: Element<'a, Message>,
     on_key: Option<OnKey<'a, Message>>,
     on_focus: Option<OnFocus<'a, Message>>,
+    escapes: Vec<(widget::Id, Box<dyn Fn() -> Message + 'a>)>,
 }
 
 pub(crate) fn scope<'a, Message>(content: impl Into<Element<'a, Message>>) -> Scope<'a, Message> {
@@ -39,6 +63,7 @@ pub(crate) fn scope<'a, Message>(content: impl Into<Element<'a, Message>>) -> Sc
         content: content.into(),
         on_key: None,
         on_focus: None,
+        escapes: Vec::new(),
     }
 }
 
@@ -52,6 +77,53 @@ impl<'a, Message> Scope<'a, Message> {
         self.on_focus = Some(Box::new(on_focus));
         self
     }
+
+    /// Sends `message` for Escape while the text field `id` has focus,
+    /// before the field can take the key and lose focus. Without a message
+    /// Escape reaches the field as usual.
+    #[cfg(feature = "property-grid")]
+    pub(crate) fn escape(mut self, id: widget::Id, message: Option<Message>) -> Self
+    where
+        Message: Clone + 'a,
+    {
+        if let Some(message) = message {
+            self.escapes.push((id, Box::new(move || message.clone())));
+        }
+        self
+    }
+}
+
+/// Finds whether the field with an id has focus.
+struct Probe<'a> {
+    target: &'a widget::Id,
+    focused: bool,
+}
+
+impl Operation for Probe<'_> {
+    fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation)) {
+        operate(self);
+    }
+
+    fn focusable(
+        &mut self,
+        id: Option<&widget::Id>,
+        _bounds: Rectangle,
+        state: &mut dyn Focusable,
+    ) {
+        if id == Some(self.target) && state.is_focused() {
+            self.focused = true;
+        }
+    }
+}
+
+fn is_escape(event: &Event) -> bool {
+    matches!(
+        event,
+        Event::Keyboard(keyboard::Event::KeyPressed {
+            key: keyboard::Key::Named(keyboard::key::Named::Escape),
+            ..
+        })
+    )
 }
 
 /// Whether a scope has focus, and what it last told the app.
@@ -194,6 +266,25 @@ impl<Message> Widget<Message, Theme, Renderer> for Scope<'_, Message> {
                 shell.publish(on_focus(focus.focused));
             }
         }
+        if is_escape(event) {
+            for (id, message) in &self.escapes {
+                let mut probe = Probe {
+                    target: id,
+                    focused: false,
+                };
+                self.content.as_widget_mut().operate(
+                    &mut children[0],
+                    layout,
+                    renderer,
+                    &mut probe,
+                );
+                if probe.focused {
+                    shell.publish(message());
+                    shell.capture_event();
+                    return;
+                }
+            }
+        }
 
         self.content.as_widget_mut().update(
             &mut children[0],
@@ -259,19 +350,48 @@ impl<'a, Message: 'a> From<Scope<'a, Message>> for Element<'a, Message> {
     }
 }
 
+#[cfg(any(
+    feature = "data-table",
+    feature = "json-viewer",
+    feature = "property-grid",
+    feature = "tree",
+    feature = "virtual-list"
+))]
 type Wrap<'a, Key, Message> = dyn Fn(Key, Element<'a, Message>) -> Element<'a, Message> + 'a;
+#[cfg(any(
+    feature = "data-table",
+    feature = "json-viewer",
+    feature = "property-grid",
+    feature = "tree",
+    feature = "virtual-list"
+))]
 type MenuKey<'a, Key, Message> = dyn Fn(&keys::Event, Key) -> Option<Message> + 'a;
 #[cfg(feature = "data-table")]
 type Open<'a, Key, Message> = dyn Fn(Key) -> Message + 'a;
 
 /// One context menu shared by every row, told apart by the row's key.
+#[cfg(any(
+    feature = "data-table",
+    feature = "json-viewer",
+    feature = "property-grid",
+    feature = "tree",
+    feature = "virtual-list"
+))]
 pub(crate) struct RowMenu<'a, Key, Message> {
     wrap: Box<Wrap<'a, Key, Message>>,
     key: Box<MenuKey<'a, Key, Message>>,
+    target: Box<dyn Fn() -> Option<Key> + 'a>,
     #[cfg(feature = "data-table")]
     open: Box<Open<'a, Key, Message>>,
 }
 
+#[cfg(any(
+    feature = "data-table",
+    feature = "json-viewer",
+    feature = "property-grid",
+    feature = "tree",
+    feature = "virtual-list"
+))]
 impl<'a, Key, Message> RowMenu<'a, Key, Message> {
     /// Makes a row an area of the menu.
     pub(crate) fn wrap(&self, key: Key, row: Element<'a, Message>) -> Element<'a, Message> {
@@ -288,8 +408,40 @@ impl<'a, Key, Message> RowMenu<'a, Key, Message> {
     pub(crate) fn open(&self, key: Key) -> Message {
         (self.open)(key)
     }
+
+    /// The row the menu is open on, if it is open.
+    pub(crate) fn target(&self) -> Option<Key> {
+        (self.target)()
+    }
 }
 
+/// Whether the row `key` carries the ring: the row a context menu is open
+/// on, or else the keyboard highlight.
+#[cfg(any(
+    feature = "data-table",
+    feature = "json-viewer",
+    feature = "property-grid",
+    feature = "tree",
+    feature = "virtual-list"
+))]
+pub(crate) fn ringed<Key: PartialEq>(
+    menu_target: Option<&Key>,
+    key: &Key,
+    highlighted: bool,
+) -> bool {
+    match menu_target {
+        Some(target) => target == key,
+        None => highlighted,
+    }
+}
+
+#[cfg(any(
+    feature = "data-table",
+    feature = "json-viewer",
+    feature = "property-grid",
+    feature = "tree",
+    feature = "virtual-list"
+))]
 pub(crate) fn row_menu<'a, Id, Key, Message>(
     state: &'a context_menu::State<Id, Key>,
     keymap: Keymap<context_menu::Action>,
@@ -322,9 +474,361 @@ where
     RowMenu {
         wrap: Box::new(wrap),
         key: Box::new(key),
+        target: Box::new(move || state.target().filter(|_| state.is_open()).cloned()),
         #[cfg(feature = "data-table")]
         open: Box::new(move |key| on_event(context_menu::Event::OpenFromKeyboard(key))),
     }
+}
+
+/// What a key press means to a focused search field.
+#[cfg(any(
+    feature = "json-viewer",
+    feature = "log-viewer",
+    feature = "property-grid"
+))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SearchKey {
+    /// Escape: clear the text, or leave the field when it is empty.
+    Clear,
+    /// Enter or F3.
+    Next,
+    /// Shift+Enter or Shift+F3.
+    Previous,
+    /// Ctrl+F, or Cmd+F on macOS: select the text rather than type.
+    SelectAll,
+}
+
+#[cfg(any(
+    feature = "json-viewer",
+    feature = "log-viewer",
+    feature = "property-grid"
+))]
+fn search_key(press: &keys::Event) -> Option<SearchKey> {
+    use keyboard::key::Named;
+
+    let shift = press.modifiers.shift();
+    match &press.key {
+        keyboard::Key::Named(Named::Escape) => Some(SearchKey::Clear),
+        keyboard::Key::Named(Named::Enter | Named::F3) if shift => Some(SearchKey::Previous),
+        keyboard::Key::Named(Named::Enter | Named::F3) => Some(SearchKey::Next),
+        keyboard::Key::Character(c) if press.modifiers.command() && c.eq_ignore_ascii_case("f") => {
+            Some(SearchKey::SelectAll)
+        }
+        _ => None,
+    }
+}
+
+/// Wraps a search field so it follows the search convention every data
+/// view shares while it has focus:
+///
+/// - Escape clears the text, and on an empty field leaves it.
+/// - Enter and F3 step to the next match, Shift+Enter and Shift+F3 to the
+///   previous one, where the view steps through matches.
+/// - Ctrl+F, or Cmd+F on macOS, selects the text instead of typing it.
+///
+/// A key without a message reaches the field as usual.
+#[cfg(any(
+    feature = "json-viewer",
+    feature = "log-viewer",
+    feature = "property-grid"
+))]
+pub(crate) struct SearchKeys<'a, Message> {
+    content: Element<'a, Message>,
+    id: widget::Id,
+    clear: Option<Message>,
+    next: Option<Message>,
+    previous: Option<Message>,
+}
+
+#[cfg(any(
+    feature = "json-viewer",
+    feature = "log-viewer",
+    feature = "property-grid"
+))]
+pub(crate) fn search_keys<'a, Message>(
+    content: impl Into<Element<'a, Message>>,
+    id: widget::Id,
+) -> SearchKeys<'a, Message> {
+    SearchKeys {
+        content: content.into(),
+        id,
+        clear: None,
+        next: None,
+        previous: None,
+    }
+}
+
+#[cfg(any(
+    feature = "json-viewer",
+    feature = "log-viewer",
+    feature = "property-grid"
+))]
+impl<Message> SearchKeys<'_, Message> {
+    /// Sent for Escape. `None`, as for an empty field, leaves Escape to the
+    /// field, which then loses focus.
+    pub(crate) fn on_clear(mut self, message: Option<Message>) -> Self {
+        self.clear = message;
+        self
+    }
+
+    /// Sent for Enter and F3.
+    #[cfg(any(feature = "json-viewer", feature = "log-viewer"))]
+    pub(crate) fn on_next(mut self, message: Option<Message>) -> Self {
+        self.next = message;
+        self
+    }
+
+    /// Sent for Shift+Enter and Shift+F3.
+    #[cfg(any(feature = "json-viewer", feature = "log-viewer"))]
+    pub(crate) fn on_previous(mut self, message: Option<Message>) -> Self {
+        self.previous = message;
+        self
+    }
+
+    fn message(&self, key: SearchKey) -> Option<&Message> {
+        match key {
+            SearchKey::Clear => self.clear.as_ref(),
+            SearchKey::Next => self.next.as_ref(),
+            SearchKey::Previous => self.previous.as_ref(),
+            SearchKey::SelectAll => None,
+        }
+    }
+
+    /// Whether the field has focus.
+    fn is_focused(&mut self, tree: &mut Tree, layout: Layout<'_>, renderer: &Renderer) -> bool {
+        let mut probe = Probe {
+            target: &self.id,
+            focused: false,
+        };
+        self.content
+            .as_widget_mut()
+            .operate(&mut tree.children[0], layout, renderer, &mut probe);
+        probe.focused
+    }
+}
+
+#[cfg(any(
+    feature = "json-viewer",
+    feature = "log-viewer",
+    feature = "property-grid"
+))]
+impl<Message: Clone> Widget<Message, Theme, Renderer> for SearchKeys<'_, Message> {
+    fn children(&self) -> Vec<Tree> {
+        vec![Tree::new(&self.content)]
+    }
+
+    fn diff(&self, tree: &mut Tree) {
+        tree.diff_children(std::slice::from_ref(&self.content));
+    }
+
+    fn size(&self) -> Size<Length> {
+        self.content.as_widget().size()
+    }
+
+    fn size_hint(&self) -> Size<Length> {
+        self.content.as_widget().size_hint()
+    }
+
+    fn layout(
+        &mut self,
+        tree: &mut Tree,
+        renderer: &Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
+        self.content
+            .as_widget_mut()
+            .layout(&mut tree.children[0], renderer, limits)
+    }
+
+    fn draw(
+        &self,
+        tree: &Tree,
+        renderer: &mut Renderer,
+        theme: &Theme,
+        style: &renderer::Style,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+    ) {
+        self.content.as_widget().draw(
+            &tree.children[0],
+            renderer,
+            theme,
+            style,
+            layout,
+            cursor,
+            viewport,
+        );
+    }
+
+    fn operate(
+        &mut self,
+        tree: &mut Tree,
+        layout: Layout<'_>,
+        renderer: &Renderer,
+        operation: &mut dyn Operation,
+    ) {
+        self.content
+            .as_widget_mut()
+            .operate(&mut tree.children[0], layout, renderer, operation);
+    }
+
+    fn update(
+        &mut self,
+        tree: &mut Tree,
+        event: &Event,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        renderer: &Renderer,
+        clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, Message>,
+        viewport: &Rectangle,
+    ) {
+        let key = key_press(event).as_ref().and_then(search_key);
+        let handled = key.filter(|&key| key == SearchKey::SelectAll || self.message(key).is_some());
+        if let Some(key) = handled
+            && self.is_focused(tree, layout, renderer)
+        {
+            match self.message(key).cloned() {
+                Some(message) => shell.publish(message),
+                None => {
+                    let mut select = iced::advanced::widget::operation::text_input::select_all::<()>(
+                        self.id.clone(),
+                    );
+                    self.content.as_widget_mut().operate(
+                        &mut tree.children[0],
+                        layout,
+                        renderer,
+                        &mut select,
+                    );
+                    shell.request_redraw();
+                }
+            }
+            shell.capture_event();
+            return;
+        }
+        self.content.as_widget_mut().update(
+            &mut tree.children[0],
+            event,
+            layout,
+            cursor,
+            renderer,
+            clipboard,
+            shell,
+            viewport,
+        );
+    }
+
+    fn mouse_interaction(
+        &self,
+        tree: &Tree,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+        renderer: &Renderer,
+    ) -> mouse::Interaction {
+        self.content.as_widget().mouse_interaction(
+            &tree.children[0],
+            layout,
+            cursor,
+            viewport,
+            renderer,
+        )
+    }
+
+    fn overlay<'b>(
+        &'b mut self,
+        tree: &'b mut Tree,
+        layout: Layout<'b>,
+        renderer: &Renderer,
+        viewport: &Rectangle,
+        translation: Vector,
+    ) -> Option<overlay::Element<'b, Message, Theme, Renderer>> {
+        self.content.as_widget_mut().overlay(
+            &mut tree.children[0],
+            layout,
+            renderer,
+            viewport,
+            translation,
+        )
+    }
+}
+
+#[cfg(any(
+    feature = "json-viewer",
+    feature = "log-viewer",
+    feature = "property-grid"
+))]
+impl<'a, Message: Clone + 'a> From<SearchKeys<'a, Message>> for Element<'a, Message> {
+    fn from(keys: SearchKeys<'a, Message>) -> Self {
+        Element::new(keys)
+    }
+}
+
+/// The count beside a search that steps through matches: "3 of 12" once a
+/// match is current, counted from one, "12 found" before that, "None" when
+/// nothing matches, and nothing without a search.
+#[cfg(any(feature = "json-viewer", feature = "log-viewer"))]
+pub(crate) fn match_count_label(query: &str, total: usize, current: Option<usize>) -> String {
+    if query.trim().is_empty() {
+        return String::new();
+    }
+    match (total, current) {
+        (0, _) => NO_MATCHES.to_owned(),
+        (_, Some(position)) => format!("{position} of {total}"),
+        (_, None) => format!("{total} found"),
+    }
+}
+
+/// The count beside a search that filters rows: "3 shown", "None" when
+/// nothing passes, and nothing without a search.
+#[cfg(feature = "property-grid")]
+pub(crate) fn shown_label(query: &str, shown: usize) -> String {
+    if query.trim().is_empty() {
+        return String::new();
+    }
+    match shown {
+        0 => NO_MATCHES.to_owned(),
+        shown => format!("{shown} shown"),
+    }
+}
+
+/// The count when nothing matches a search.
+#[cfg(any(
+    feature = "json-viewer",
+    feature = "log-viewer",
+    feature = "property-grid"
+))]
+const NO_MATCHES: &str = "None";
+
+/// The room kept beside a search box for its count, such as "3 of 12", so
+/// the box keeps its width when the count appears.
+#[cfg(any(
+    feature = "json-viewer",
+    feature = "log-viewer",
+    feature = "property-grid"
+))]
+pub(crate) const COUNT_WIDTH: f32 = 64.0;
+
+/// A search box's count in its fixed slot, ending in an ellipsis when it
+/// does not fit.
+#[cfg(any(
+    feature = "json-viewer",
+    feature = "log-viewer",
+    feature = "property-grid"
+))]
+pub(crate) fn search_count<'a, Message: 'a>(label: String) -> Element<'a, Message> {
+    use crate::data::ellipsis::ellipsis;
+    use crate::theme::{Tokens, text_size};
+
+    iced::widget::container(
+        ellipsis(label)
+            .size(text_size::XS, 16.0)
+            .align_x(iced::widget::text::Alignment::Center)
+            .colour(|theme| Tokens::of(theme).muted_foreground),
+    )
+    .width(COUNT_WIDTH)
+    .into()
 }
 
 /// How far, in logical pixels, a finger may drift before a tap on a row
@@ -644,6 +1148,82 @@ mod tests {
         assert_eq!(press_at(&pressed, mouse::Cursor::Unavailable), None);
         let moved = Event::Mouse(mouse::Event::CursorMoved { position: at });
         assert_eq!(press_at(&moved, mouse::Cursor::Available(at)), None);
+    }
+
+    #[cfg(any(
+        feature = "json-viewer",
+        feature = "log-viewer",
+        feature = "property-grid"
+    ))]
+    #[test]
+    fn search_fields_share_one_set_of_keys() {
+        use keyboard::key::Named;
+
+        let named = |name, modifiers| keys::Event {
+            key: keyboard::Key::Named(name),
+            modifiers,
+        };
+        let character = |c: &str, modifiers| keys::Event {
+            key: keyboard::Key::Character(c.into()),
+            modifiers,
+        };
+        let none = Modifiers::empty();
+        assert_eq!(
+            search_key(&named(Named::Escape, none)),
+            Some(SearchKey::Clear)
+        );
+        assert_eq!(
+            search_key(&named(Named::Enter, none)),
+            Some(SearchKey::Next)
+        );
+        assert_eq!(search_key(&named(Named::F3, none)), Some(SearchKey::Next));
+        assert_eq!(
+            search_key(&named(Named::Enter, Modifiers::SHIFT)),
+            Some(SearchKey::Previous)
+        );
+        assert_eq!(
+            search_key(&named(Named::F3, Modifiers::SHIFT)),
+            Some(SearchKey::Previous)
+        );
+        assert_eq!(
+            search_key(&character("f", Modifiers::COMMAND)),
+            Some(SearchKey::SelectAll)
+        );
+        assert_eq!(
+            search_key(&character("F", Modifiers::COMMAND | Modifiers::SHIFT)),
+            Some(SearchKey::SelectAll)
+        );
+        assert_eq!(search_key(&character("f", none)), None, "typing");
+        assert_eq!(search_key(&named(Named::Home, none)), None);
+    }
+
+    #[cfg(any(feature = "json-viewer", feature = "log-viewer"))]
+    #[test]
+    fn stepping_search_counts_read_the_same_everywhere() {
+        assert_eq!(match_count_label("", 4, None), "");
+        assert_eq!(match_count_label("  ", 4, None), "");
+        assert_eq!(match_count_label("a", 12, None), "12 found");
+        assert_eq!(match_count_label("a", 12, Some(3)), "3 of 12");
+        assert_eq!(match_count_label("a", 0, None), "None");
+    }
+
+    #[cfg(feature = "property-grid")]
+    #[test]
+    fn filtering_search_counts_say_how_many_are_shown() {
+        assert_eq!(shown_label("", 4), "");
+        assert_eq!(shown_label("a", 3), "3 shown");
+        assert_eq!(shown_label("a", 0), "None");
+    }
+
+    #[test]
+    fn an_open_menu_moves_the_ring_to_its_row() {
+        assert!(ringed(None, &1, true), "the keyboard highlight");
+        assert!(!ringed(None, &1, false));
+        assert!(ringed(Some(&2), &2, false), "the row the menu opened on");
+        assert!(
+            !ringed(Some(&2), &1, true),
+            "the highlight gives way while the menu is open elsewhere"
+        );
     }
 
     #[test]

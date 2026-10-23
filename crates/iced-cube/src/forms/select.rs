@@ -16,7 +16,7 @@ use iced::widget::pick_list::{self, Status};
 use iced::widget::text::LineHeight;
 use iced::widget::{self, Column, row, text};
 use iced::{
-    Alignment, Background, Border, Element, Event, Length, Rectangle, Renderer, Size, Theme,
+    Alignment, Background, Border, Color, Element, Event, Length, Rectangle, Renderer, Size, Theme,
     Vector, mouse, touch,
 };
 
@@ -403,7 +403,8 @@ pub fn style(tokens: &Tokens, status: Status, enabled: bool) -> pick_list::Style
         text_color: tokens.foreground,
         placeholder_color: tokens.muted_foreground,
         handle_color: tokens.muted_foreground,
-        background: Background::Color(tokens.background),
+        // Transparent so the trigger takes the colour of its surface.
+        background: Background::Color(Color::TRANSPARENT),
         border: Border {
             color: border,
             width: 1.0,
@@ -599,6 +600,17 @@ mod tests {
                     disabled.background,
                     Background::Color(tokens.disabled_field())
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn an_enabled_trigger_takes_the_colour_of_its_surface() {
+        for theme in [light(), dark()] {
+            let tokens = Tokens::of(&theme);
+            for status in STATES {
+                let enabled = style(&tokens, status, true);
+                assert_eq!(enabled.background, Background::Color(Color::TRANSPARENT));
             }
         }
     }

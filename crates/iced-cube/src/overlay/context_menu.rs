@@ -469,6 +469,7 @@ where
         let mut anchored = anchored(Element::new(area))
             .content(panel)
             .placement(placement(state.position()))
+            .fit_height(true)
             .dismiss_on_anchor_press(true)
             .dismiss_keys([]);
         if let Some(position) = state.position() {

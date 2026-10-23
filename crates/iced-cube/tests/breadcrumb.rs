@@ -85,8 +85,30 @@ fn a_collapsed_trail_hides_the_middle_and_expands_through_the_ellipsis() {
 }
 
 #[test]
+fn a_trail_too_wide_for_one_line_collapses_its_middle() {
+    let element: Element<'_, Message> = column![breadcrumb(trail())].width(220).into();
+    let mut ui = simulator(element);
+    let home = ui.find("Home").expect("Home").bounds();
+    let pricing = ui.find("Pricing").expect("Pricing").bounds();
+    assert_eq!(pricing.y, home.y, "the trail stays on one line");
+    assert!(pricing.x + pricing.width <= 220.5);
+    assert!(ui.find("Projects").is_err(), "the middle collapses");
+}
+
+#[test]
+fn a_trail_that_fits_shows_every_crumb() {
+    let element: Element<'_, Message> = column![breadcrumb(trail())].width(600).into();
+    let mut ui = simulator(element);
+    for label in TRAIL {
+        assert!(ui.find(label).is_ok(), "{label}");
+    }
+}
+
+#[test]
 fn a_long_trail_wraps_rather_than_squeezing_its_labels() {
-    let element: Element<'_, Message> = column![breadcrumb(trail())].width(160).into();
+    let element: Element<'_, Message> = column![breadcrumb(trail()).collapse_to_fit(false)]
+        .width(160)
+        .into();
     let mut ui = simulator(element);
     let home = ui.find("Home").expect("Home").bounds();
     let pricing = ui.find("Pricing").expect("Pricing").bounds();

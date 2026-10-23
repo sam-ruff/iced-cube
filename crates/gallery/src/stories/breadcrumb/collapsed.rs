@@ -36,9 +36,11 @@ impl Example {
             .map(|(index, name)| crumb(*name).on_press(Message::Open(index)));
 
         let mut trail = breadcrumb(crumbs).separator(Separator::Slash);
-        if !self.expanded {
-            trail = trail.max_items(3).on_expand(Message::Expand);
-        }
+        trail = if self.expanded {
+            trail.collapse_to_fit(false)
+        } else {
+            trail.max_items(3).on_expand(Message::Expand)
+        };
 
         column![trail].width(Length::Fill).max_width(420).into()
     }

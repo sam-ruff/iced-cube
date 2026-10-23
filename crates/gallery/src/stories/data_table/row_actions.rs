@@ -78,7 +78,8 @@ impl Default for Example {
         Self {
             deploys: State::new(columns, DEPLOYS, |d| d.id),
             menu,
-            last: "Right-click a row, press its menu button, or press Shift+F10.".into(),
+            last: "Right-click or press and hold a row, press its menu button, or press Shift+F10."
+                .into(),
         }
     }
 }

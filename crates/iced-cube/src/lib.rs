@@ -29,6 +29,8 @@
 pub mod application;
 pub mod data;
 pub mod feedback;
+#[cfg(feature = "breadcrumb")]
+mod fit;
 pub mod forms;
 pub mod icon;
 #[cfg(feature = "slider")]
@@ -62,8 +64,16 @@ pub use application::toolbar;
 
 #[cfg(feature = "data-table")]
 pub use data::data_table;
+#[cfg(feature = "json-viewer")]
+pub use data::json_viewer;
+#[cfg(feature = "log-viewer")]
+pub use data::log_viewer;
+#[cfg(feature = "property-grid")]
+pub use data::property_grid;
 #[cfg(feature = "tree")]
 pub use data::tree;
+#[cfg(feature = "virtual-list")]
+pub use data::virtual_list;
 
 #[cfg(feature = "alert")]
 pub use feedback::alert;
@@ -98,6 +108,8 @@ pub use layout::{hstack, vstack};
 
 #[cfg(feature = "command")]
 pub use navigation::command;
+#[cfg(feature = "document-tabs")]
+pub use navigation::document_tabs;
 #[cfg(feature = "pagination")]
 pub use navigation::pagination;
 #[cfg(feature = "sidebar")]

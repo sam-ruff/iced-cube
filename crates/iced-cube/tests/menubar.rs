@@ -1,9 +1,10 @@
 #![cfg(feature = "menubar")]
 
-use iced::keyboard::{Key, key::Named};
+use iced::keyboard::{self, Key, Modifiers, key::Named};
 use iced::widget::{button, column, container, text};
 use iced::{Element, Length, Point, event};
 use iced_cube::dropdown_menu::{self, checkbox_item, item, separator, submenu};
+use iced_cube::keys::Tracker;
 use iced_cube::menubar::{Event, Output, State, menu, menubar};
 use iced_test::simulator::{self, Simulator};
 
@@ -262,6 +263,98 @@ fn keys_routed_by_the_app_focus_move_and_open() {
 
     let mut ui = simulator::simulator(view(&state));
     assert!(ui.find("Show grid").is_ok());
+}
+
+fn raw_key(key: Key, modifiers: Modifiers, pressed: bool) -> iced::Event {
+    let physical = keyboard::key::Physical::Unidentified(keyboard::key::NativeCode::Unidentified);
+    let event = if pressed {
+        keyboard::Event::KeyPressed {
+            key: key.clone(),
+            modified_key: key,
+            physical_key: physical,
+            location: keyboard::Location::Standard,
+            modifiers,
+            text: None,
+            repeat: false,
+        }
+    } else {
+        keyboard::Event::KeyReleased {
+            key: key.clone(),
+            modified_key: key,
+            physical_key: physical,
+            location: keyboard::Location::Standard,
+            modifiers,
+        }
+    };
+    iced::Event::Keyboard(event)
+}
+
+/// Sends raw key events to the rendered bar, then routes what
+/// `keys::subscription` would deliver through the app's keymaps.
+fn route(state: &mut State<u8>, raw: Vec<iced::Event>) {
+    let mut tracker = Tracker::new();
+    for event in raw {
+        let captured = {
+            let mut ui = simulator::simulator(view(state));
+            let status = ui.simulate([event.clone()]);
+            status.first() == Some(&event::Status::Captured)
+        };
+        let Some(key) = tracker.update(&event, captured) else {
+            continue;
+        };
+        let menus = dropdown_menu::default_keymap();
+        let routed = state.key_event(&iced_cube::menubar::default_keymap(), &menus, &key);
+        if let Some(routed) = routed {
+            let _ = state.update(routed);
+        }
+    }
+}
+
+#[test]
+fn alt_pressed_and_released_alone_focuses_the_bar() {
+    let mut state = state();
+    let alt = Key::Named(Named::Alt);
+    route(
+        &mut state,
+        vec![
+            raw_key(alt.clone(), Modifiers::ALT, true),
+            raw_key(alt, Modifiers::empty(), false),
+        ],
+    );
+    assert!(state.is_focused());
+
+    route(
+        &mut state,
+        vec![
+            raw_key(Key::Named(Named::ArrowDown), Modifiers::empty(), true),
+            raw_key(Key::Named(Named::ArrowDown), Modifiers::empty(), false),
+        ],
+    );
+    let mut ui = simulator::simulator(view(&state));
+    assert!(ui.find("New file").is_ok(), "Down opens the focused menu");
+}
+
+#[test]
+fn an_alt_chord_leaves_the_bar_alone() {
+    let mut state = state();
+    let alt = Key::Named(Named::Alt);
+    let up = Key::Named(Named::ArrowUp);
+    let down = Key::Named(Named::ArrowDown);
+    route(
+        &mut state,
+        vec![
+            raw_key(alt.clone(), Modifiers::ALT, true),
+            raw_key(up.clone(), Modifiers::ALT, true),
+            raw_key(up, Modifiers::ALT, false),
+            raw_key(alt, Modifiers::empty(), false),
+            raw_key(down.clone(), Modifiers::empty(), true),
+            raw_key(down, Modifiers::empty(), false),
+        ],
+    );
+    assert!(!state.is_focused());
+    assert!(!state.is_open());
+    let mut ui = simulator::simulator(view(&state));
+    assert!(ui.find("New file").is_err());
 }
 
 #[test]

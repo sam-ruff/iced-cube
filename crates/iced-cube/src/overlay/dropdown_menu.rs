@@ -23,6 +23,7 @@ use crate::icon::Glyph;
 use crate::keys::{self, Chord, Keymap};
 use crate::overlay::anchored::{Align, Placement, Side, anchored};
 use crate::overlay::menu::{self, Leading, Parts, RowStatus, Trailing};
+use crate::overlay::scrolling::scrolling;
 use crate::theme::space;
 
 /// Default menu width in logical pixels.
@@ -848,6 +849,7 @@ where
         let anchored = anchored(trigger)
             .content(panel)
             .placement(placement)
+            .fit_height(true)
             .dismiss_keys([]);
         let Some(on_event) = on_event.filter(|_| state.is_open()) else {
             return anchored.into();
@@ -903,7 +905,8 @@ where
                     return row;
                 };
                 // The root menu dismisses everything, so a submenu lets
-                // outside presses through to it.
+                // outside presses through to it. Without room on either
+                // side of its row, the submenu drops below or above the row.
                 anchored(row)
                     .content(Some(level(state, children, depth + 1, on_event, width)))
                     .placement(
@@ -911,12 +914,16 @@ where
                             .gap(space::XS)
                             .offset(-(space::XS + 1.0)),
                     )
+                    .fit_height(true)
                     .pass_through(true)
                     .into()
             }
         });
 
-    menu::surface(column(rows).width(width)).into()
+    // Each level scrolls when it is taller than the room beside its
+    // trigger or row, following the keyboard highlight.
+    let rows = column(rows).width(width);
+    menu::surface(scrolling(rows, highlighted)).into()
 }
 
 /// Whether a menu level has checkbox or radio items, whose group labels

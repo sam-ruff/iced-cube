@@ -346,8 +346,55 @@ fn alert_dialog_ignores_the_scrim_and_cancels_on_escape() {
 }
 
 #[test]
-fn enter_confirms_an_alert_dialog() {
+fn enter_does_not_run_the_destructive_action_by_default() {
     let mut ui = simulator(confirmation(true));
+    assert_eq!(ui.tap_key(Named::Enter), event::Status::Captured);
+    assert!(messages(ui).is_empty());
+}
+
+#[test]
+fn tab_reaches_the_alert_buttons_and_enter_or_space_presses_them() {
+    let mut ui = simulator(confirmation(true));
+    nudge(&mut ui);
+    assert_eq!(focused(&mut ui), None, "nothing focused on open");
+
+    press(&mut ui, Named::Tab, Modifiers::empty());
+    assert!(focused(&mut ui).is_some(), "Tab focuses Cancel");
+    let _ = ui.tap_key(Named::Enter);
+
+    press(&mut ui, Named::Tab, Modifiers::empty());
+    let _ = ui.tap_key(Named::Space);
+
+    press(&mut ui, Named::Tab, Modifiers::SHIFT);
+    let _ = ui.tap_key(Named::Space);
+    assert_eq!(
+        messages(ui),
+        vec![Message::Dismiss, Message::Delete, Message::Dismiss]
+    );
+}
+
+#[test]
+fn a_pointer_press_clears_the_focused_alert_button() {
+    let mut ui = simulator(confirmation(true));
+    nudge(&mut ui);
+    press(&mut ui, Named::Tab, Modifiers::empty());
+    press(&mut ui, Named::Tab, Modifiers::empty());
+    click_at(&mut ui, SCRIM);
+    assert_eq!(focused(&mut ui), None);
+    let _ = ui.tap_key(Named::Enter);
+    assert!(messages(ui).is_empty());
+}
+
+#[test]
+fn enter_confirms_an_alert_dialog_that_opts_in() {
+    let element: Element<'_, Message> =
+        alert_dialog(base(), "Delete project?", "This cannot be undone.")
+            .open(true)
+            .on_cancel(Message::Dismiss)
+            .on_confirm(Message::Delete)
+            .confirm_on_enter(true)
+            .into();
+    let mut ui = simulator(element);
     assert_eq!(ui.tap_key(Named::Enter), event::Status::Captured);
     assert_eq!(messages(ui), vec![Message::Delete]);
 }
@@ -359,6 +406,7 @@ fn enter_follows_the_keymap() {
             .open(true)
             .on_cancel(Message::Dismiss)
             .on_confirm(Message::Delete)
+            .confirm_on_enter(true)
             .keymap(
                 dialog::default_keymap()
                     .unbind(&iced_cube::Chord::named(Named::Enter))

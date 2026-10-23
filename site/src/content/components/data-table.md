@@ -53,7 +53,7 @@ Pressing a header sorts by that column, then reverses the order, then restores t
 
 With selection on, every row has a checkbox and the header has one that selects or clears the rows on the current page only. The selection belongs to row keys, so it survives sorting, filtering and turning pages. Build bulk actions from `state.selected()` next to the table, as the selection example does.
 
-For actions on one row, pass one `context_menu::State` for every row with `.context_menu`. It opens on a right-click or a long press, and `.row_actions(true)` adds a visible button for touch screens. While the table has focus, Shift+F10 opens the menu on the highlighted row.
+For actions on one row, pass one `context_menu::State` for every row with `.context_menu`. It opens on a right-click or a long press, and `.row_actions(true)` adds a visible button for touch screens. While the table has focus, Shift+F10 opens the menu on the highlighted row. The row the menu opened on carries the ring while it is open.
 
 The table takes focus when pressed and resolves its keys only then, so its arrow keys, Space and Escape never clash with other components. The highlight moves on to the next page after the last row, and scrolls into view in a table with a fixed height.
 

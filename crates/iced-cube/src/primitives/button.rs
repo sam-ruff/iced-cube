@@ -283,12 +283,10 @@ pub fn colours(tokens: &Tokens, variant: Variant, status: Status) -> Colours {
             foreground: tokens.destructive_foreground,
             border: None,
         },
+        // Transparent at rest, so it takes the colour of whatever surface
+        // it sits on, such as a dialog or popover.
         Variant::Outline => Colours {
-            background: Some(if hover {
-                tokens.accent
-            } else {
-                tokens.background
-            }),
+            background: hover.then_some(tokens.accent),
             foreground: tokens.foreground,
             border: Some(tokens.border),
         },
@@ -429,17 +427,15 @@ mod tests {
     }
 
     #[test]
-    fn ghost_and_link_are_transparent_at_rest() {
-        let tokens = Tokens::of(&light());
-        assert!(
-            colours(&tokens, Variant::Ghost, Status::Active)
-                .background
-                .is_none()
-        );
-        assert!(
-            colours(&tokens, Variant::Link, Status::Active)
-                .background
-                .is_none()
-        );
+    fn outline_ghost_and_link_are_transparent_at_rest() {
+        for theme in [light(), dark()] {
+            let tokens = Tokens::of(&theme);
+            for variant in [Variant::Outline, Variant::Ghost, Variant::Link] {
+                for status in [Status::Active, Status::Disabled] {
+                    let background = colours(&tokens, variant, status).background;
+                    assert!(background.is_none(), "{variant:?} {status:?}");
+                }
+            }
+        }
     }
 }

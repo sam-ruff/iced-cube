@@ -150,6 +150,135 @@ fn a_long_file_name_ends_in_an_ellipsis_on_a_phone() {
     assert!(name.height <= 20.0, "one line, got {}", name.height);
 }
 
+/// Asserts each label sits inside the phone preview on one line.
+fn fits_on_one_line(ui: &mut iced_test::Simulator<'_, gallery::Message>, labels: &[&str]) {
+    for &label in labels {
+        let bounds = ui
+            .find(label)
+            .unwrap_or_else(|error| panic!("{label}: {error}"))
+            .bounds();
+        assert!(
+            bounds.x >= 0.0 && bounds.x + bounds.width <= PHONE.width,
+            "{label} runs off the edge: {bounds:?}"
+        );
+        assert!(bounds.height < 24.0, "{label} wraps: {bounds:?}");
+    }
+}
+
+#[test]
+fn a_long_list_fits_a_phone() {
+    let gallery = open("virtual-list/large");
+    let mut ui = render(&gallery);
+    fits_on_one_line(&mut ui, &["#10000", "Avery", "$12.00", "#10003"]);
+}
+
+#[test]
+fn the_shape_inspector_fits_a_phone_on_one_line_per_row() {
+    for choice in [ThemeChoice::Light, ThemeChoice::Dark] {
+        iced_cube::theme::set_font(FONT);
+        let gallery = Gallery::new(Mode::Single, Some("property-grid/inspector"), choice);
+        let mut ui = render(&gallery);
+        for label in [
+            "Id", "rect-12", "Layout", "Width", "160px", "Height", "96px",
+        ] {
+            let bounds = ui.find(label).expect(label).bounds();
+            assert!(
+                bounds.x >= 0.0 && bounds.x + bounds.width <= PHONE.width,
+                "{label} runs off the edge: {bounds:?}"
+            );
+            assert!(bounds.height <= 20.0, "{label} wraps: {bounds:?}");
+        }
+        let name = ui.find("Width").expect("name").bounds();
+        let value = ui.find("160px").expect("value").bounds();
+        assert_eq!(
+            name.center_y().round(),
+            value.center_y().round(),
+            "name and value share a row"
+        );
+        let description = ui
+            .find("Width of the bounding box, before rotation.")
+            .expect("description")
+            .bounds();
+        assert!(
+            description.x + description.width <= PHONE.width,
+            "the description wraps inside the grid: {description:?}"
+        );
+    }
+}
+
+#[test]
+fn a_long_json_value_ends_in_an_ellipsis_beside_the_copy_buttons_on_a_phone() {
+    let gallery = open("json-viewer/copy");
+    let mut ui = render(&gallery);
+    let url = ui
+        .find("\"postgres://billing@db:5432/billing\"")
+        .expect("the full value is reported")
+        .bounds();
+    assert!(
+        url.x + url.width <= PHONE.width,
+        "ends at {}",
+        url.x + url.width
+    );
+    assert!(url.height <= 20.0, "one line, got {}", url.height);
+    let key = ui.find("env").expect("highlighted row").bounds();
+    assert!(key.height <= 20.0, "one line, got {}", key.height);
+}
+
+#[test]
+fn the_json_search_bar_fits_a_phone() {
+    let gallery = open("json-viewer/search");
+    let mut ui = render(&gallery);
+    let count = ui.find("1 of 2").expect("match count").bounds();
+    assert!(count.height <= 18.0, "one line, got {}", count.height);
+    assert!(
+        count.x + count.width < PHONE.width - 3.0 * 32.0,
+        "room for the buttons, ends at {}",
+        count.x + count.width
+    );
+    let field = ui.find("america").expect("search text").bounds();
+    assert!(field.width > 40.0 && field.x >= 0.0, "{field:?}");
+}
+
+#[test]
+fn document_tabs_scroll_to_the_active_tab_on_a_phone() {
+    let gallery = open("document-tabs/editor");
+    let mut ui = render(&gallery);
+    for label in ["main.rs", "parser.rs", "notes.md"] {
+        let bounds = ui.find(label).expect("tab label").bounds();
+        assert!(bounds.height < 24.0, "{label} on one line");
+    }
+    let found = ui.find("parser.rs").expect("active tab");
+    let active = found.visible_bounds().expect("the active tab is visible");
+    assert_eq!(active.width, found.bounds().width, "shown in full");
+    assert!(active.x >= 0.0, "starts at {}", active.x);
+    assert!(
+        active.x + active.width <= PHONE.width,
+        "ends at {}",
+        active.x + active.width
+    );
+}
+
+#[test]
+fn the_log_toolbar_stacks_and_its_lines_fit_a_phone() {
+    let gallery = open("log-viewer/live");
+    let mut ui = render(&gallery);
+    fits_on_one_line(
+        &mut ui,
+        &[
+            "Trace 2",
+            "Debug 3",
+            "Info 7",
+            "Warn 1",
+            "Error 1",
+            "09:41:03.900",
+        ],
+    );
+    let search = ui.find("Search messages").expect("search").bounds();
+    assert!(search.x + search.width <= PHONE.width, "search: {search:?}");
+    let trace = ui.find("Trace 2").expect("filter").bounds();
+    assert!(trace.y > search.y, "the filters sit below the search");
+}
+
 #[test]
 fn every_theme_token_remains_readable_in_two_columns_on_a_phone() {
     for width in [328.0, 358.0] {
@@ -245,6 +374,45 @@ fn the_editor_and_preview_stack_on_a_phone() {
         heading.y
     );
     assert!(heading.width < PHONE.width, "preview fits the frame");
+}
+
+#[test]
+fn a_submenu_never_covers_its_parent_row_on_a_phone() {
+    iced_cube::theme::set_font(FONT);
+    for width in [328.0, 358.0, 720.0] {
+        let gallery = Gallery::new(
+            Mode::Single,
+            Some("dropdown-menu/submenu"),
+            ThemeChoice::Light,
+        );
+        let settings = iced::Settings {
+            default_font: FONT,
+            fonts: FONT_FILES.iter().map(|font| (*font).into()).collect(),
+            ..iced::Settings::default()
+        };
+        let mut ui = Simulator::with_size(settings, Size::new(width, 340.0), gallery.view());
+        let parent = ui.find("More tools").expect("parent row").bounds();
+        let child = ui.find("Save page as").expect("open submenu").bounds();
+        assert!(child.x + child.width <= width, "{width}: submenu fits");
+        if width >= 720.0 {
+            assert!(child.x >= parent.x + parent.width, "beside its row");
+        }
+        // A press on the parent label reaches the parent row only when no
+        // submenu covers it.
+        for x in [
+            parent.x + 2.0,
+            parent.center_x(),
+            parent.x + parent.width - 2.0,
+        ] {
+            ui.point_at(iced::Point::new(x, parent.center_y()));
+            let _ = ui.simulate(iced_test::simulator::click());
+        }
+        let messages = format!("{:?}", ui.into_messages().collect::<Vec<_>>());
+        assert!(messages.contains("MoreTools"), "{width}: {messages}");
+        for covered in ["SavePage", "Shortcut", "NameWindow", "DevTools"] {
+            assert!(!messages.contains(covered), "{width}: {messages}");
+        }
+    }
 }
 
 #[test]

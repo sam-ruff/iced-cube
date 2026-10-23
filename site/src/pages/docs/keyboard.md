@@ -21,9 +21,19 @@ A closed menu claims no keys, so the arrow keys, Enter and Space stay free for t
 
 The same words mean the same thing everywhere. Highlight moves the highlight to a row, Activate chooses it, Close closes a menu or list, and an overlay the app opens with a flag, such as a popover or dialog, reports that it wants to close through `on_dismiss`.
 
+## Several components on one screen
+
+When components share a screen, the order above decides who gets a key: the innermost open overlay or focused component first, then whatever keymaps your app resolves from `keys::subscription()`. A focused list, tree, data table or log viewer keeps the keys it uses, so app-wide keymaps only see them while nothing has focus.
+
+A few defaults overlap. Each has a simple fix:
+
+- **`Ctrl+Tab` and `Ctrl+Shift+Tab`**: [Tabs](../components/tabs/) and [Document tabs](../components/document-tabs/) both bind them, and both are resolved by your app. With both on screen, unbind them from one keymap, usually the segmented tabs, which still have their arrow keys.
+- **`PageUp` and `PageDown`**: [Pagination](../components/pagination/) binds them app-wide, while a focused [virtual list](../components/virtual-list/), [data table](../components/data-table/) or [log viewer](../components/log-viewer/) uses them to move a page at a time. The focused component wins, so pagination only turns the page while nothing else has focus. If a table and its pagination sit together and that feels surprising, unbind them from pagination and leave paging to its buttons.
+- **`Shift+F10` and `Menu`**: these open a [context menu](../components/context-menu/) from the keyboard. Trees and data tables open their row menu only while they have focus. A context menu your app opens from a chord should be resolved for one target at a time, such as the focused panel. Document tabs leave their menu chord unbound for this reason; bind it only when the tab strip is the only context menu on screen.
+
 ## Subscribing to key presses
 
-`keys::subscription()` delivers every key press that no widget captured, so typing in a text input never switches tabs, and nothing reaches it while a dialog is open.
+`keys::subscription()` delivers every key press that no widget captured, so typing in a text input never switches tabs, and nothing reaches it while a dialog is open. A modifier key on its own, such as Alt, arrives only when it is released with nothing else pressed in between, so `Alt+ArrowUp` is one chord and never also a bare Alt. Apps that listen to window events themselves get the same behaviour from `keys::Tracker`.
 
 ## A complete example
 

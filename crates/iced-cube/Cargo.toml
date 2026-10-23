@@ -48,11 +48,11 @@ primitives = [
 ]
 forms = ["combobox", "field", "select", "textarea"]
 layout = ["card", "stack", "accordion", "resizable-panel", "split-pane"]
-navigation = ["breadcrumb", "command", "pagination", "tabs", "sidebar"]
+navigation = ["breadcrumb", "command", "pagination", "tabs", "sidebar", "document-tabs"]
 overlay = ["tooltip", "toast", "dialog", "popover", "dropdown-menu", "context-menu"]
 feedback = ["alert", "avatar", "badge", "progress", "spinner"]
 application = ["menubar", "toolbar", "status-bar", "command-palette"]
-data = ["tree", "data-table"]
+data = ["tree", "data-table", "json-viewer", "log-viewer", "property-grid", "virtual-list"]
 
 button = ["iced/advanced"]
 icon-button = ["button", "tooltip"]
@@ -79,11 +79,12 @@ command = ["iced/advanced"]
 pagination = ["button"]
 tabs = ["iced/advanced"]
 sidebar = ["iced/advanced", "tooltip", "icon-button"]
+document-tabs = ["iced/advanced", "context-menu", "dropdown-menu", "icon-button"]
 tooltip = []
 toast = ["button", "icon-button"]
 dialog = ["button", "icon-button", "iced/advanced"]
 popover = ["iced/advanced"]
-dropdown-menu = ["iced/advanced"]
+dropdown-menu = ["iced/advanced", "scroll-area"]
 context-menu = ["dropdown-menu"]
 alert = []
 avatar = ["iced/advanced", "iced/image-without-codecs"]
@@ -106,11 +107,34 @@ data-table = [
     "scroll-area",
     "select",
 ]
+json-viewer = [
+    "iced/advanced",
+    "alert",
+    "context-menu",
+    "icon-button",
+    "input",
+    "scroll-area",
+    "dep:serde_json",
+]
+property-grid = [
+    "iced/advanced",
+    "checkbox",
+    "context-menu",
+    "icon-button",
+    "input",
+    "scroll-area",
+    "select",
+    "switch",
+    "tooltip",
+]
+virtual-list = ["iced/advanced", "context-menu", "scroll-area"]
+log-viewer = ["virtual-list", "button", "context-menu", "icon-button", "input", "toggle-group"]
 
 [dependencies]
-iced = { version = "0.14.0", default-features = false, features = ["svg"] }
+iced = { version = "0.14.0", default-features = false, features = ["svg", "advanced"] }
 lucide-static-svg = "1.48.0"
 num-traits = { version = "0.2.19", optional = true }
+serde_json = { version = "1.0.154", optional = true, features = ["preserve_order"] }
 
 [dev-dependencies]
 futures = "0.3.34"

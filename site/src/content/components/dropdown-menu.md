@@ -60,6 +60,8 @@ The trigger is any element you pass in, usually a button whose message carries `
 
 Moving the pointer over an item highlights it, and the keyboard moves the same highlight. The open menu handles its own keys before anything else sees them, so it needs no subscription. A closed menu claims no keys at all, so the arrow keys, Enter and Space stay free for the rest of your app. To open a menu from the keyboard, bind a chord to `Action::Open` and route presses from `keys::subscription()` through `state.key_event`, as the keyboard example does. The [keyboard guide](../../keyboard/) explains how keys reach each layer.
 
+The menu opens on the side you ask for, or the opposite side when only that one has room for all of it. When neither does, it takes the roomier side and scrolls, so it never covers its trigger. A submenu opens beside its item, flipping to the other side near the edge of the window. On a screen too narrow for either, it drops below or above the item instead, so the item's label stays visible.
+
 When any item in a menu has an icon, a check mark or a radio dot, every row gets one leading slot, so all the labels start at the same place. A checked item shows its mark in that slot, and any other item shows its icon there, or leaves it empty.
 
 Shortcut hints are only labels. Bind the keys themselves in your own keymap. The [context menu](../context-menu/) uses the same entries and rows, opened with a right-click.

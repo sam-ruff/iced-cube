@@ -55,24 +55,151 @@
 //! ```
 
 use std::fmt;
+use std::hash::Hash;
 use std::str::FromStr;
 
 use iced::Subscription;
+use iced::advanced::subscription::{self as recipe, EventStream, Hasher, Recipe};
+use iced::event::Status;
+use iced::futures::{StreamExt, future};
 use iced::keyboard::{self, Key, Modifiers, key::Named};
+use iced::{mouse, window};
 
 /// A key press delivered by [`subscription`].
+///
+/// A modifier key on its own, such as Alt, arrives as an event with no
+/// modifiers when it is released, and only if nothing else was pressed
+/// while it was held. So Alt followed by Up is one `Alt+ArrowUp` press,
+/// while Alt pressed and released alone is a lone `Alt`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Event {
     pub key: Key,
     pub modifiers: Modifiers,
 }
 
-/// Key presses that no widget captured, such as a focused text input.
+/// Key presses that no widget captured, such as a focused text input,
+/// plus lone modifier keys as described on [`Event`].
 pub fn subscription() -> Subscription<Event> {
-    keyboard::listen().filter_map(|event| match event {
-        keyboard::Event::KeyPressed { key, modifiers, .. } => Some(Event { key, modifiers }),
+    recipe::from_recipe(Listen)
+}
+
+struct Listen;
+
+#[cfg(not(target_arch = "wasm32"))]
+type Stream = iced::futures::stream::BoxStream<'static, Event>;
+#[cfg(target_arch = "wasm32")]
+type Stream = iced::futures::stream::LocalBoxStream<'static, Event>;
+
+impl Recipe for Listen {
+    type Output = Event;
+
+    fn hash(&self, state: &mut Hasher) {
+        std::any::TypeId::of::<Self>().hash(state);
+    }
+
+    fn stream(self: Box<Self>, input: EventStream) -> Stream {
+        let mut tracker = Tracker::default();
+        Box::pin(input.filter_map(move |event| {
+            let recipe::Event::Interaction { event, status, .. } = event else {
+                return future::ready(None);
+            };
+            future::ready(tracker.update(&event, status == Status::Captured))
+        }))
+    }
+}
+
+/// Turns raw iced events into the [`Event`]s that [`subscription`]
+/// delivers. Apps that listen to window events themselves can feed it
+/// every event, captured or not, to get the same behaviour.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Tracker {
+    held: Option<Named>,
+}
+
+impl Tracker {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The key event `event` delivers, if any. `captured` is whether a
+    /// widget already used it; captured events are not delivered, but a
+    /// captured key press still stops a held modifier counting as lone.
+    pub fn update(&mut self, event: &iced::Event, captured: bool) -> Option<Event> {
+        match event {
+            iced::Event::Keyboard(keyboard::Event::KeyPressed {
+                key,
+                modifiers,
+                repeat,
+                ..
+            }) => self.pressed(key, *modifiers, *repeat, captured),
+            iced::Event::Keyboard(keyboard::Event::KeyReleased { key, .. }) => {
+                self.released(key, captured)
+            }
+            iced::Event::Mouse(
+                mouse::Event::ButtonPressed(_) | mouse::Event::WheelScrolled { .. },
+            )
+            | iced::Event::Window(window::Event::Unfocused) => {
+                self.held = None;
+                None
+            }
+            _ => None,
+        }
+    }
+
+    fn pressed(
+        &mut self,
+        key: &Key,
+        modifiers: Modifiers,
+        repeat: bool,
+        captured: bool,
+    ) -> Option<Event> {
+        let Some(modifier) = modifier_key(key) else {
+            self.held = None;
+            return (!captured).then(|| Event {
+                key: key.clone(),
+                modifiers,
+            });
+        };
+        if repeat && self.held == Some(modifier) {
+            return None;
+        }
+        let others = modifiers.difference(modifier_flag(modifier));
+        self.held = (self.held.is_none() && others.is_empty()).then_some(modifier);
+        None
+    }
+
+    fn released(&mut self, key: &Key, captured: bool) -> Option<Event> {
+        let modifier = modifier_key(key)?;
+        let lone = self.held.take() == Some(modifier);
+        (lone && !captured).then(|| Event {
+            key: Key::Named(modifier),
+            modifiers: Modifiers::empty(),
+        })
+    }
+}
+
+fn modifier_key(key: &Key) -> Option<Named> {
+    match key {
+        Key::Named(
+            named @ (Named::Alt
+            | Named::AltGraph
+            | Named::Control
+            | Named::Shift
+            | Named::Super
+            | Named::Meta),
+        ) => Some(*named),
         _ => None,
-    })
+    }
+}
+
+fn modifier_flag(key: Named) -> Modifiers {
+    match key {
+        Named::Alt | Named::AltGraph => Modifiers::ALT,
+        Named::Control => Modifiers::CTRL,
+        Named::Shift => Modifiers::SHIFT,
+        Named::Super | Named::Meta => Modifiers::LOGO,
+        _ => Modifiers::empty(),
+    }
 }
 
 /// Named keys a [`Chord`] understands: the canonical name first, then aliases.
@@ -611,5 +738,137 @@ mod tests {
         assert_eq!(grouped[1], (Test::Close, vec![chord("Escape")]));
         let closed = keymap.unbind_action(&Test::Open);
         assert_eq!(closed.len(), 1);
+    }
+
+    fn press(key: Key, modifiers: Modifiers) -> iced::Event {
+        press_repeat(key, modifiers, false)
+    }
+
+    fn press_repeat(key: Key, modifiers: Modifiers, repeat: bool) -> iced::Event {
+        iced::Event::Keyboard(keyboard::Event::KeyPressed {
+            modified_key: key.clone(),
+            key,
+            physical_key: keyboard::key::Physical::Unidentified(
+                keyboard::key::NativeCode::Unidentified,
+            ),
+            location: keyboard::Location::Standard,
+            modifiers,
+            text: None,
+            repeat,
+        })
+    }
+
+    fn release(key: Key, modifiers: Modifiers) -> iced::Event {
+        iced::Event::Keyboard(keyboard::Event::KeyReleased {
+            modified_key: key.clone(),
+            key,
+            physical_key: keyboard::key::Physical::Unidentified(
+                keyboard::key::NativeCode::Unidentified,
+            ),
+            location: keyboard::Location::Standard,
+            modifiers,
+        })
+    }
+
+    fn feed(events: &[iced::Event]) -> Vec<Event> {
+        let mut tracker = Tracker::new();
+        events
+            .iter()
+            .filter_map(|event| tracker.update(event, false))
+            .collect()
+    }
+
+    fn alt() -> Key {
+        Key::Named(Named::Alt)
+    }
+
+    fn lone(named: Named) -> Event {
+        Event {
+            key: Key::Named(named),
+            modifiers: Modifiers::empty(),
+        }
+    }
+
+    #[test]
+    fn a_lone_modifier_arrives_on_release() {
+        let events = feed(&[
+            press(alt(), Modifiers::ALT),
+            release(alt(), Modifiers::empty()),
+        ]);
+        assert_eq!(events, vec![lone(Named::Alt)]);
+    }
+
+    #[test]
+    fn a_modifier_used_in_a_chord_is_not_lone() {
+        let up = Key::Named(Named::ArrowUp);
+        let events = feed(&[
+            press(alt(), Modifiers::ALT),
+            press(up.clone(), Modifiers::ALT),
+            release(up.clone(), Modifiers::ALT),
+            release(alt(), Modifiers::empty()),
+        ]);
+        assert_eq!(
+            events,
+            vec![Event {
+                key: up,
+                modifiers: Modifiers::ALT
+            }]
+        );
+    }
+
+    #[test]
+    fn key_repeat_keeps_a_modifier_lone() {
+        let events = feed(&[
+            press(alt(), Modifiers::ALT),
+            press_repeat(alt(), Modifiers::ALT, true),
+            release(alt(), Modifiers::empty()),
+        ]);
+        assert_eq!(events, vec![lone(Named::Alt)]);
+    }
+
+    #[test]
+    fn two_modifiers_together_are_not_lone() {
+        let ctrl = Key::Named(Named::Control);
+        let events = feed(&[
+            press(ctrl.clone(), Modifiers::CTRL),
+            press(alt(), Modifiers::CTRL | Modifiers::ALT),
+            release(alt(), Modifiers::CTRL),
+            release(ctrl, Modifiers::empty()),
+        ]);
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn a_click_while_held_stops_a_modifier_being_lone() {
+        let events = feed(&[
+            press(alt(), Modifiers::ALT),
+            iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+            release(alt(), Modifiers::empty()),
+        ]);
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn captured_keys_are_not_delivered_but_still_break_a_lone_modifier() {
+        let mut tracker = Tracker::new();
+        let up = Key::Named(Named::ArrowUp);
+        assert_eq!(tracker.update(&press(alt(), Modifiers::ALT), false), None);
+        assert_eq!(tracker.update(&press(up, Modifiers::ALT), true), None);
+        assert_eq!(
+            tracker.update(&release(alt(), Modifiers::empty()), false),
+            None
+        );
+    }
+
+    #[test]
+    fn ordinary_presses_pass_through_unchanged() {
+        let events = feed(&[press(character("k"), Modifiers::CTRL)]);
+        assert_eq!(
+            events,
+            vec![Event {
+                key: character("k"),
+                modifiers: Modifiers::CTRL
+            }]
+        );
     }
 }

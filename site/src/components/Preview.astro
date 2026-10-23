@@ -15,8 +15,10 @@ const key = id.replaceAll("/", "-");
 const snapshots = href("/snapshots/");
 const standalone = `${href("/preview/index.html")}?story=${encodeURIComponent(id)}`;
 const name = `${story.title} example`;
-// Scroll areas need the wheel inside the preview; every other preview lets the page scroll.
-const wheel = story.component === "scroll-area";
+// Components whose point is scrolling take the wheel and touch inside the
+// preview; every other preview lets the page scroll.
+const scrolling = new Set(["scroll-area", "virtual-list", "log-viewer", "json-viewer"]);
+const wheel = scrolling.has(story.component);
 ---
 
 <div class="preview" data-preview-root>

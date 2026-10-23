@@ -26,6 +26,8 @@ pub mod dropdown_menu;
 pub mod menu;
 #[cfg(feature = "popover")]
 pub mod popover;
+#[cfg(feature = "dropdown-menu")]
+pub(crate) mod scrolling;
 #[cfg(feature = "toast")]
 pub mod toast;
 #[cfg(feature = "tooltip")]

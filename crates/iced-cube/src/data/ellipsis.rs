@@ -79,19 +79,44 @@ pub(crate) fn ellipsis<'a>(content: impl Into<Cow<'a, str>>) -> Ellipsis<'a> {
 }
 
 impl<'a> Ellipsis<'a> {
-    #[cfg(feature = "data-table")]
+    #[cfg(any(
+        feature = "data-table",
+        feature = "json-viewer",
+        feature = "property-grid"
+    ))]
     pub(crate) fn font(mut self, font: Font) -> Self {
         self.font = font;
         self
     }
 
-    #[cfg(feature = "data-table")]
+    #[cfg(any(
+        feature = "data-table",
+        feature = "document-tabs",
+        feature = "json-viewer",
+        feature = "log-viewer"
+    ))]
     pub(crate) fn width(mut self, width: impl Into<Length>) -> Self {
         self.width = width.into();
         self
     }
 
-    #[cfg(feature = "data-table")]
+    #[cfg(any(
+        feature = "json-viewer",
+        feature = "log-viewer",
+        feature = "property-grid"
+    ))]
+    pub(crate) fn size(mut self, size: f32, line_height: f32) -> Self {
+        self.size = size;
+        self.line_height = LineHeight::Absolute(Pixels(line_height));
+        self
+    }
+
+    #[cfg(any(
+        feature = "data-table",
+        feature = "json-viewer",
+        feature = "log-viewer",
+        feature = "property-grid"
+    ))]
     pub(crate) fn align_x(mut self, align: impl Into<text::Alignment>) -> Self {
         self.align_x = align.into();
         self
