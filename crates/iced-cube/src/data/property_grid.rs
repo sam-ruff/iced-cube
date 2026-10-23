@@ -34,7 +34,7 @@ use iced::{
 
 use crate::data::ellipsis::ellipsis;
 use crate::data::interaction::{
-    Look, RowMenu, pressable, ringed, row_menu, scope, search_count, search_keys, shown_label,
+    Look, RowMenu, match_count_label, pressable, ringed, row_menu, scope, search_count, search_keys,
 };
 use crate::data::rows::rows;
 use crate::forms::select::select;
@@ -1186,15 +1186,19 @@ impl<Id: Copy + Eq + Hash> State<Id> {
         }
     }
 
+    /// The properties on screen in order, without category headings.
+    fn shown_properties(&self) -> Vec<Entry<Id>> {
+        self.entries()
+            .into_iter()
+            .filter(|entry| matches!(entry, Entry::Property(_)))
+            .collect()
+    }
+
     /// Moves the highlight through the properties shown, skipping category
     /// headings and wrapping at either end.
     fn step_match(&mut self, forward: bool) {
         self.finish();
-        let properties: Vec<Entry<Id>> = self
-            .entries()
-            .into_iter()
-            .filter(|entry| matches!(entry, Entry::Property(_)))
-            .collect();
+        let properties = self.shown_properties();
         let count = properties.len();
         if count == 0 {
             return;
@@ -1582,15 +1586,18 @@ pub fn focus_search<Id, Message>(_state: &State<Id>) -> Task<Message> {
     widget::operation::focus(SEARCH)
 }
 
-/// The text beside the search box: how many properties pass it, such as
-/// "3 shown", "None" when nothing does, and empty without a search.
+/// The text beside the search box, as in the log and JSON viewers: "2 of 5"
+/// for the highlighted property of those shown, "5 found" while none of
+/// them is highlighted, "None" when nothing passes, and empty without a
+/// search.
 pub fn match_label<Id: Copy + Eq + Hash>(state: &State<Id>) -> String {
-    let shown = state
-        .properties()
-        .iter()
-        .filter(|property| state.passes(property))
-        .count();
-    shown_label(state.query(), shown)
+    let shown = state.shown_properties();
+    let current = state
+        .highlighted
+        .as_ref()
+        .and_then(|highlighted| shown.iter().position(|entry| entry == highlighted))
+        .map(|index| index + 1);
+    match_count_label(state.query(), shown.len(), current)
 }
 
 /// An entry of the context menu from [`menu`].
@@ -3273,8 +3280,19 @@ mod tests {
         let _ = state.update(Event::Search("i".into()));
         assert_eq!(
             match_label(&state),
-            "5 shown",
-            "Id, Width, Height, Visible, Fill"
+            "1 of 5",
+            "Id, Width, Height, Visible, Fill, with Id highlighted"
+        );
+        let _ = state.update(Event::NextMatch);
+        assert_eq!(match_label(&state), "2 of 5");
+        let _ = state.update(Event::PreviousMatch);
+        let _ = state.update(Event::PreviousMatch);
+        assert_eq!(match_label(&state), "5 of 5", "wraps to Fill");
+        let _ = state.update(Event::ToggleCategory("Layout".into()));
+        assert_eq!(
+            match_label(&state),
+            "2 of 2",
+            "a closed category's properties are not shown"
         );
         let _ = state.update(Event::Search("zebra".into()));
         assert_eq!(match_label(&state), "None");

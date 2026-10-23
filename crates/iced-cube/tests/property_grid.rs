@@ -415,7 +415,7 @@ fn the_filter_keeps_its_width_when_the_count_appears() {
     {
         let mut ui = simulator::simulator(view(&state));
         let after = ui.find(SEARCH).expect("filter").bounds();
-        assert!(ui.find("5 shown").is_ok(), "every name but Blend");
+        assert!(ui.find("1 of 5").is_ok(), "every name but Blend");
         assert_eq!(before.width, after.width);
     }
 
