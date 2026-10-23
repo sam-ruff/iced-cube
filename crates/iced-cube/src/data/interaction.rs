@@ -572,14 +572,12 @@ impl<Message> SearchKeys<'_, Message> {
     }
 
     /// Sent for Enter and F3.
-    #[cfg(any(feature = "json-viewer", feature = "log-viewer"))]
     pub(crate) fn on_next(mut self, message: Option<Message>) -> Self {
         self.next = message;
         self
     }
 
     /// Sent for Shift+Enter and Shift+F3.
-    #[cfg(any(feature = "json-viewer", feature = "log-viewer"))]
     pub(crate) fn on_previous(mut self, message: Option<Message>) -> Self {
         self.previous = message;
         self

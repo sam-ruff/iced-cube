@@ -660,6 +660,11 @@ pub enum Event<Id> {
     ResetHighlighted,
     /// The search text, which filters properties by name, changed.
     Search(String),
+    /// Highlights the next property the filter shows, wrapping at the end.
+    NextMatch,
+    /// Highlights the previous property the filter shows, wrapping at the
+    /// start.
+    PreviousMatch,
     /// Moves keyboard focus to the filter box.
     FocusSearch,
     /// Asks the app to copy a property's value, as it is shown.
@@ -999,6 +1004,8 @@ impl<Id: Copy + Eq + Hash> State<Id> {
                 self.query = query;
                 self.highlight_nearest_shown();
             }
+            Event::NextMatch => self.step_match(true),
+            Event::PreviousMatch => self.step_match(false),
             Event::FocusSearch => {
                 self.finish();
                 self.request(Target::Filter);
@@ -1177,6 +1184,32 @@ impl<Id: Copy + Eq + Hash> State<Id> {
         if let Some(target) = target {
             self.highlighted = Some(target.clone());
         }
+    }
+
+    /// Moves the highlight through the properties shown, skipping category
+    /// headings and wrapping at either end.
+    fn step_match(&mut self, forward: bool) {
+        self.finish();
+        let properties: Vec<Entry<Id>> = self
+            .entries()
+            .into_iter()
+            .filter(|entry| matches!(entry, Entry::Property(_)))
+            .collect();
+        let count = properties.len();
+        if count == 0 {
+            return;
+        }
+        let current = self
+            .highlighted
+            .as_ref()
+            .and_then(|highlighted| properties.iter().position(|entry| entry == highlighted));
+        let index = match (current, forward) {
+            (None, true) => 0,
+            (None, false) => count - 1,
+            (Some(index), true) => (index + 1) % count,
+            (Some(index), false) => (index + count - 1) % count,
+        };
+        self.highlighted = properties.get(index).cloned();
     }
 
     fn expand_or_enter(&mut self) {
@@ -2044,10 +2077,14 @@ where
             .size(input::Size::Sm)
             .width(Length::Fill)
             .on_input_maybe(on_event.map(|on_event| move |query| on_event(Event::Search(query))));
-        let filter = search_keys(field, SEARCH).on_clear(
-            self.send(Event::Search(String::new()))
-                .filter(|_| !state.query().is_empty()),
-        );
+        let searching = !state.query().is_empty();
+        let filter = search_keys(field, SEARCH)
+            .on_clear(
+                self.send(Event::Search(String::new()))
+                    .filter(|_| searching),
+            )
+            .on_next(self.send(Event::NextMatch).filter(|_| searching))
+            .on_previous(self.send(Event::PreviousMatch).filter(|_| searching));
         let sort = |sort: Sort, glyph, label| {
             icon_button(glyph)
                 .label(label)
@@ -2724,6 +2761,29 @@ mod tests {
             Some(&Entry::Property(3)),
             "typing highlights the first shown property"
         );
+    }
+
+    #[test]
+    fn stepping_through_matches_skips_headings_and_wraps() {
+        let mut state = sample();
+        let _ = state.update(Event::Search("e".into()));
+        let mut visited = Vec::new();
+        for _ in 0..5 {
+            let _ = state.update(Event::NextMatch);
+            visited.push(state.highlighted().cloned());
+        }
+        assert_eq!(
+            visited,
+            [4, 6, 7, 8, 3].map(|id| Some(Entry::Property(id))),
+            "Height, Visible, Blend, Label and Locked, then back to Height"
+        );
+        let _ = state.update(Event::PreviousMatch);
+        assert_eq!(state.highlighted(), Some(&Entry::Property(8)), "wraps back");
+
+        let mut none = sample();
+        let _ = none.update(Event::Search("nothing".into()));
+        let _ = none.update(Event::NextMatch);
+        assert_eq!(none.highlighted(), None);
     }
 
     #[test]
