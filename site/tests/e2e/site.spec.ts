@@ -200,6 +200,31 @@ test("long lists take the wheel and touch inside their previews", async ({ page 
   await expect(page.locator('[data-story="button/variants"]').first()).not.toHaveAttribute("data-wheel");
 });
 
+// The preview hands Tab to the component, and the page only moves focus on
+// once nothing in the preview used it.
+test("an open alert dialog keeps Tab, and a closed one lets it leave", async ({ page, isMobile }) => {
+  test.skip(isMobile, "needs a keyboard");
+  await page.goto("docs/components/dialog/");
+  const frame = page.locator('[data-story="dialog/destructive"]').first();
+  await frame.scrollIntoViewIfNeeded();
+  await expect(frame).toHaveClass(/live/, { timeout: 30_000 });
+  await page.waitForTimeout(1_000);
+  const box = await frame.boundingBox();
+  if (!box) throw new Error("no preview frame");
+  // The story's trigger sits at the top left.
+  await page.mouse.click(box.x + 80, box.y + 40);
+  const focused = () => page.evaluate(() => document.activeElement?.tagName);
+
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Tab");
+  await page.waitForTimeout(300);
+  expect(await focused()).toBe("IFRAME");
+
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Tab");
+  await expect.poll(focused).not.toBe("IFRAME");
+});
+
 // Stat cards sit in one row on desktop and stack on a phone, so the frame
 // grows to the height the story reports.
 test("a preview whose cards wrap grows to fit them", async ({ page, isMobile }) => {

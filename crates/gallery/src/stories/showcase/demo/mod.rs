@@ -481,6 +481,8 @@ impl Example {
             }
             // The page's own toggle wins: the app follows the host again.
             Message::Host(bridge::Event::Theme(_)) => self.apply_theme(ThemeMode::System),
+            // The gallery around the demo moves focus on.
+            Message::Host(bridge::Event::TabOut { .. }) => {}
         }
         Task::none()
     }
