@@ -2,7 +2,7 @@
 
 use iced::keyboard::{self, Key, Modifiers, key::Named};
 use iced::widget::{self, column, text_input};
-use iced::{Element, Event, Point, event, mouse};
+use iced::{Element, Event, Point, event, mouse, touch};
 use iced_cube::button;
 use iced_cube::overlay::dialog::{self, CLOSE_BUTTON_ID, alert_dialog, dialog};
 use iced_test::selector::Candidate;
@@ -133,6 +133,31 @@ fn clicks_inside_the_surface_do_not_dismiss() -> Result<(), iced_test::Error> {
     let mut ui = simulator(view(OPEN));
     ui.click("Edit profile")?;
     assert!(messages(ui).is_empty());
+    Ok(())
+}
+
+fn tap_at(ui: &mut Simulator<'_, Message>, position: Point) {
+    let id = touch::Finger(1);
+    ui.point_at(position);
+    let _ = ui.simulate([
+        Event::Touch(touch::Event::FingerPressed { id, position }),
+        Event::Touch(touch::Event::FingerLifted { id, position }),
+    ]);
+}
+
+#[test]
+fn taps_inside_the_surface_do_not_dismiss_but_taps_on_the_scrim_do() -> Result<(), iced_test::Error>
+{
+    let mut ui = simulator(view(OPEN));
+    let title = ui.find("Edit profile")?.bounds().center();
+    tap_at(&mut ui, title);
+    let description = ui.find("Make changes to your profile.")?.bounds().center();
+    tap_at(&mut ui, description);
+    assert!(messages(ui).is_empty(), "the panel stops the finger");
+
+    let mut ui = simulator(view(OPEN));
+    tap_at(&mut ui, SCRIM);
+    assert_eq!(messages(ui), vec![Message::Dismiss]);
     Ok(())
 }
 

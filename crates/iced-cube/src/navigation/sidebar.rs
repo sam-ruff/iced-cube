@@ -27,9 +27,7 @@ use iced::advanced::layout::{self, Layout};
 use iced::advanced::widget::{Operation, Tree, Widget, tree};
 use iced::advanced::{Clipboard, Shell, overlay, renderer};
 use iced::keyboard::{self, key::Named};
-use iced::widget::{
-    Space, button, column, container, mouse_area, opaque, row, scrollable, stack, text,
-};
+use iced::widget::{Space, button, column, container, mouse_area, row, scrollable, stack, text};
 use iced::{
     Alignment, Background, Border, Color, Element, Length, Padding, Rectangle, Renderer, Shadow,
     Size, Theme, Vector, mouse, touch,
@@ -40,6 +38,7 @@ use crate::keys::{self, Chord, Keymap};
 use crate::overlay::menu::{self, Parts, RowStatus};
 use crate::overlay::tooltip::{Position, tooltip};
 use crate::primitives::icon_button::{IconButton, icon_button};
+use crate::solid::solid;
 use crate::theme::{Tokens, fade, mix, radius, space, text_size};
 
 /// Width of the expanded sidebar.
@@ -969,8 +968,8 @@ where
                 .height(Length::Fill)
                 .style(|theme| scrim_style(&Tokens::of(theme)));
             let scrim: Element<'a, Message> = match &on_event {
-                Some(on_event) => opaque(mouse_area(scrim).on_press(on_event(Event::CloseDrawer))),
-                None => opaque(scrim),
+                Some(on_event) => solid(mouse_area(scrim).on_press(on_event(Event::CloseDrawer))),
+                None => solid(scrim),
             };
             let drawer = panel(
                 state,
@@ -982,7 +981,7 @@ where
                 on_event.clone(),
             );
             let drawer = watch(drawer, state, Some(keymap), false, None, on_event.clone());
-            layers = layers.push(scrim).push(opaque(drawer));
+            layers = layers.push(scrim).push(solid(drawer));
         }
         watch(
             layers.into(),
