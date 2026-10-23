@@ -29,3 +29,11 @@ export function appTheme(data: unknown): AppTheme | null {
   if (type !== "app-theme") return null;
   return value === "light" || value === "dark" || value === "system" ? value : null;
 }
+
+/** Which way Tab left the demo app, from a posted message, if it is one. */
+export function exitDirection(data: unknown): "forward" | "back" | null {
+  if (typeof data !== "object" || data === null) return null;
+  const { type, back } = data as { type?: unknown; back?: unknown };
+  if (type !== "exit") return null;
+  return back === true ? "back" : "forward";
+}
