@@ -1,11 +1,13 @@
 //! Fernhill, the operations console of a fictional data platform, built
 //! from every iced-cube component: jobs fed by a simulated worker through
-//! channels, a command palette, menus, dialogs, toasts and settings.
+//! channels, job tabs with an inspector, a live log, a command palette,
+//! menus, dialogs, toasts and settings.
 
 mod activity;
 mod chrome;
 mod data;
 mod feed;
+mod inspector;
 mod jobs;
 mod new_job;
 mod overview;
@@ -13,7 +15,7 @@ mod settings;
 #[cfg(test)]
 mod tests;
 
-use std::collections::VecDeque;
+use std::collections::HashMap;
 use std::time::Duration;
 
 use iced::keyboard::key::Named;
@@ -21,6 +23,9 @@ use iced::time::Instant;
 use iced::widget::{Text, column, container, responsive, row, sensor, space, text};
 use iced::{Element, Length, Size, Subscription, Task, Theme};
 use iced_cube::context_menu;
+use iced_cube::data::json_viewer::{self, NodeId};
+use iced_cube::data::log_viewer::{self, Level, LineId};
+use iced_cube::data::property_grid;
 use iced_cube::dropdown_menu::{self, Output as MenuOutput};
 use iced_cube::feedback::alert::Variant as AlertVariant;
 use iced_cube::feedback::spinner::advance;
@@ -28,22 +33,23 @@ use iced_cube::forms::combobox;
 use iced_cube::keys::{self, Chord, Keymap};
 use iced_cube::layout::accordion;
 use iced_cube::navigation::command;
+use iced_cube::navigation::document_tabs;
 use iced_cube::navigation::tabs::{self, tab};
 use iced_cube::overlay::dialog;
 use iced_cube::overlay::popover;
 use iced_cube::overlay::toast::{self, Variant as ToastVariant, toast, toasts};
 use iced_cube::primitives::checkbox::{self, CheckState};
-use iced_cube::primitives::switch;
+use iced_cube::primitives::toggle_group;
 use iced_cube::theme::{self, Tokens, text_size};
 use iced_cube::{alert, separator, vertical_separator};
 
 use crate::app::ThemeChoice;
 use crate::bridge;
 use data::{
-    Environment, Job, JobId, Level, LevelFilter, LogLine, Queue, Range, Runbook, Schedule, Status,
-    StatusFilter, TEMPLATES,
+    Environment, Job, JobId, Queue, Range, Runbook, Schedule, Status, StatusFilter, TEMPLATES,
 };
 use feed::{Update, Worker};
+use inspector::{Doc, Field, Inspector, Pane};
 use new_job::Draft;
 use settings::Settings;
 
@@ -52,7 +58,7 @@ const NARROW: f32 = 640.0;
 /// From this width the sidebar shows beside the page.
 const WIDE: f32 = 1100.0;
 const SIDEBAR: f32 = 248.0;
-const LOG_LIMIT: usize = 200;
+const LOG_LIMIT: usize = 2000;
 const JOB_LIMIT: usize = 16;
 const QUEUE_LIMIT: usize = 4;
 /// Jobs that had finished before the demo started, for the Succeeded total.
@@ -98,6 +104,7 @@ pub enum MenuItem {
 /// Items of a job row's context menu.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RowAction {
+    Open,
     Logs,
     Retry,
     Pause,
@@ -168,9 +175,16 @@ pub enum Message {
     DeleteSelected,
     Confirm,
     Cancel,
-    Live(bool),
-    Level(LevelFilter),
-    LogQuery(String),
+    OpenJob(JobId),
+    ViewLogs(JobId),
+    Documents(document_tabs::Event<Doc>),
+    Inspector(JobId, property_grid::Event<Field>),
+    GridMenu(context_menu::Event<property_grid::MenuItem, Field>),
+    Json(JobId, json_viewer::Event),
+    JsonMenu(context_menu::Event<json_viewer::MenuItem, NodeId>),
+    Pane(toggle_group::Event<Pane>),
+    Logs(log_viewer::Event),
+    LogMenu(context_menu::Event<log_viewer::MenuItem, LineId>),
     Runbooks(accordion::Event<Runbook>),
     Settings(settings::Message),
     Refresh,
@@ -188,6 +202,10 @@ pub enum Message {
 #[derive(Debug, Clone)]
 struct Keymaps {
     tabs: Keymap<tabs::Action>,
+    /// The page tabs while the job tabs are on screen, which own Ctrl+Tab
+    /// and Ctrl+Shift+Tab then. The arrow keys still switch pages.
+    tabs_beside_documents: Keymap<tabs::Action>,
+    documents: Keymap<document_tabs::Action>,
     accordion: Keymap<accordion::Action>,
     menu: Keymap<dropdown_menu::Action>,
     row_menu: Keymap<context_menu::Action>,
@@ -197,14 +215,32 @@ struct Keymaps {
     combobox: Keymap<combobox::Action>,
     dialog: Keymap<dialog::Action>,
     checkbox: Keymap<checkbox::Action>,
-    switch: Keymap<switch::Action>,
+    log: Keymap<log_viewer::Action>,
+    grid: Keymap<property_grid::Action>,
+    json: Keymap<json_viewer::Action>,
     settings: settings::Keys,
 }
 
 impl Default for Keymaps {
     fn default() -> Self {
+        let tabs = tabs::default_keymap();
+        let tabs_beside_documents = tabs
+            .clone()
+            .unbind(&Chord::named(Named::Tab).ctrl())
+            .unbind(&Chord::named(Named::Tab).ctrl().shift());
         Self {
-            tabs: tabs::default_keymap(),
+            tabs,
+            tabs_beside_documents,
+            // Browsers keep Ctrl+Tab and Ctrl+W for their own tabs, so the
+            // web demo also switches with Ctrl+[ and Ctrl+]. New jobs come
+            // from the header, so Ctrl+N stays free.
+            documents: document_tabs::default_keymap()
+                .unbind_action(&document_tabs::Action::New)
+                .bind(Chord::character(']').ctrl(), document_tabs::Action::Next)
+                .bind(
+                    Chord::character('[').ctrl(),
+                    document_tabs::Action::Previous,
+                ),
             accordion: accordion::default_keymap(),
             // F10 opens the menu, as it opens a menu bar on the desktop.
             menu: dropdown_menu::default_keymap()
@@ -217,7 +253,9 @@ impl Default for Keymaps {
             combobox: combobox::default_keymap(),
             dialog: dialog::default_keymap(),
             checkbox: checkbox::default_keymap(),
-            switch: switch::default_keymap(),
+            log: log_viewer::default_keymap(),
+            grid: property_grid::default_keymap(),
+            json: json_viewer::default_keymap(),
             settings: settings::Keys::default(),
         }
     }
@@ -226,6 +264,11 @@ impl Default for Keymaps {
 /// Opens the command palette from anywhere, and closes it again.
 fn palette_chord() -> Chord {
     Chord::character('k').command()
+}
+
+/// Searches whatever the page shows, when nothing focused took it first.
+fn search_chord() -> Chord {
+    Chord::character('f').command()
 }
 
 #[derive(Debug)]
@@ -262,12 +305,17 @@ pub struct Example {
     /// The rows on show, kept while something points at the list so no row
     /// moves under the pointer or an open menu.
     frozen: Option<Vec<JobId>>,
-    logs: VecDeque<(u32, LogLine)>,
-    held: VecDeque<LogLine>,
-    clock: u32,
-    live: bool,
-    level: LevelFilter,
-    log_query: String,
+    /// The job list and the jobs opened beside it.
+    documents: document_tabs::State<Doc>,
+    inspectors: HashMap<JobId, Inspector>,
+    grid_menu: context_menu::State<property_grid::MenuItem, Field>,
+    json_menu: context_menu::State<json_viewer::MenuItem, NodeId>,
+    panes: toggle_group::State<Pane>,
+    logs: log_viewer::State,
+    log_sender: Option<log_viewer::Sender>,
+    log_menu: context_menu::State<log_viewer::MenuItem, LineId>,
+    /// When the demo started, for its clock.
+    epoch: Instant,
     runbooks: accordion::State<Runbook>,
     settings: Settings,
     // Undo toasts carry the message that restores what they report.
@@ -288,6 +336,8 @@ impl Default for Example {
                 .iter()
                 .filter(|job| job.status == Status::Succeeded)
                 .count();
+        let mut logs = log_viewer::State::new().with_limit(LOG_LIMIT);
+        logs.extend(data::logs());
         Self {
             page: tabs::State::new([
                 tab(Page::Overview, "Overview"),
@@ -325,12 +375,15 @@ impl Default for Example {
             list_hovered: false,
             fresh: Vec::new(),
             frozen: None,
-            logs: data::logs().into(),
-            held: VecDeque::new(),
-            clock: 9 * 3600 + 41 * 60,
-            live: true,
-            level: LevelFilter::All,
-            log_query: String::new(),
+            documents: inspector::documents(),
+            inspectors: HashMap::new(),
+            grid_menu: property_grid::menu(),
+            json_menu: json_viewer::menu(),
+            panes: inspector::panes(),
+            logs,
+            log_sender: None,
+            log_menu: log_viewer::menu(),
+            epoch: Instant::now(),
             runbooks: accordion::State::new(accordion::Mode::Single).with_open(Runbook::Degraded),
             settings: Settings::default(),
             toasts: toast::State::default(),
@@ -346,6 +399,7 @@ impl Default for Example {
 impl Example {
     pub fn update(&mut self, message: Message) -> Task<Message> {
         let task = self.handle(message);
+        self.sync_documents();
         self.settle_list();
         task
     }
@@ -415,16 +469,18 @@ impl Example {
             Message::DeleteSelected => self.pending = Some(Pending::DeleteSelected),
             Message::Confirm => self.confirm(),
             Message::Cancel => self.pending = None,
-            Message::Live(live) => {
-                self.live = live;
-                if live {
-                    for line in std::mem::take(&mut self.held) {
-                        self.log(line);
-                    }
-                }
+            Message::OpenJob(id) => self.open_job(id),
+            Message::ViewLogs(id) => return self.row_action(id, RowAction::Logs),
+            Message::Documents(event) => self.documents_event(event),
+            Message::Inspector(id, event) => return self.inspector_event(id, event),
+            Message::GridMenu(event) => return self.grid_menu_event(event),
+            Message::Json(id, event) => return self.json_event(id, event),
+            Message::JsonMenu(event) => return self.json_menu_event(event),
+            Message::Pane(event) => {
+                let _ = self.panes.update(event);
             }
-            Message::Level(level) => self.level = level,
-            Message::LogQuery(query) => self.log_query = query,
+            Message::Logs(event) => return self.logs_event(event),
+            Message::LogMenu(event) => return self.log_menu_event(event),
             Message::Runbooks(event) => {
                 let _ = self.runbooks.update(event);
             }
@@ -444,11 +500,7 @@ impl Example {
                 }
             }
             Message::Refresh => {
-                self.log(LogLine::new(
-                    Level::Info,
-                    "scheduler",
-                    "Manual refresh requested",
-                ));
+                self.log(Level::Info, "scheduler", "Manual refresh requested");
                 self.notify(toast("Refreshed").description("Job states are up to date."));
             }
             Message::Feed(feed::Event::Ready(sender)) => self.feed = Some(sender),
@@ -472,7 +524,7 @@ impl Example {
                 }
                 self.last_tick = Some(now);
             }
-            Message::Key(key) => self.key(&key),
+            Message::Key(key) => return self.key(&key),
             Message::Resized(size) => {
                 self.width = size.width;
                 if self.width >= WIDE {
@@ -504,9 +556,16 @@ impl Example {
             Some(worker) => Subscription::run_with(worker, Worker::run).map(|never| match never {}),
             None => Subscription::none(),
         };
-        // Spinners only animate while a job is running.
-        let ticks = if self.jobs.iter().any(|job| job.status == Status::Running) || self.live {
+        // Spinners only animate while a job runs or the log streams.
+        let streaming = self.page.selected() == Some(Page::Activity) && !self.logs.is_paused();
+        let ticks = if self.jobs.iter().any(|job| job.status == Status::Running) || streaming {
             feed::ticks(Duration::from_millis(40)).map(Message::Tick)
+        } else {
+            Subscription::none()
+        };
+        // Releasing Ctrl ends a walk through recently used job tabs.
+        let cycle_end = if self.documents_shown() {
+            document_tabs::cycle_end().map(|end| Message::Documents(end.into()))
         } else {
             Subscription::none()
         };
@@ -515,6 +574,8 @@ impl Example {
             keys::subscription().map(Message::Key),
             bridge::subscription().map(Message::Host),
             feed::subscription().map(Message::Feed),
+            log_viewer::subscription().map(Message::Logs),
+            cycle_end,
             feed::ticks(feed::SUBMIT_EVERY).map(|_| Message::Submit),
             toast::subscription().map(Message::Toast),
             toast::timer(&self.toasts).map(Message::Toast),
@@ -537,16 +598,16 @@ impl Example {
     fn shell(&self, size: Size) -> Element<'_, Message> {
         let narrow = size.width < NARROW;
         let sidebar = self.sidebar && size.width >= WIDE;
-        let gutter = if narrow { 16.0 } else { 24.0 };
-        let content = size.width - 2.0 * gutter - if sidebar { SIDEBAR + 1.0 } else { 0.0 };
+        let gutter = gutter(size.width);
+        let content = self.content_width(size.width);
 
         let selected = self.page.selected().unwrap_or(Page::Overview);
         // Card pages keep their gutters inside the scroll area for their shadows.
         let card_page = matches!(selected, Page::Overview | Page::Settings);
         let page = match selected {
             Page::Overview => self.overview(content, gutter),
-            Page::Jobs => self.jobs_page(narrow),
-            Page::Activity => self.activity(narrow),
+            Page::Jobs => self.jobs_page(narrow, content),
+            Page::Activity => self.activity(),
             Page::Settings => self.settings_page(narrow, gutter),
         };
         // Each page has a slot of its own, and the others hold empty space, so
@@ -615,6 +676,16 @@ impl Example {
             .into()
     }
 
+    /// The width a page gets in a window `width` wide.
+    fn content_width(&self, width: f32) -> f32 {
+        let sidebar = if self.sidebar && width >= WIDE {
+            SIDEBAR + 1.0
+        } else {
+            0.0
+        };
+        width - 2.0 * gutter(width) - sidebar
+    }
+
     fn settings_page(&self, narrow: bool, gutter: f32) -> Element<'_, Message> {
         iced_cube::scroll_area(
             container(self.settings.view(narrow).map(Message::Settings))
@@ -631,24 +702,27 @@ impl Example {
         .into()
     }
 
-    fn key(&mut self, key: &keys::Event) {
+    /// Keys no focused widget or open overlay used. Each layer takes what
+    /// it needs and passes the rest on: dialogs, the palette chord, the
+    /// menus, toasts, the open page, and last the page tabs.
+    fn key(&mut self, key: &keys::Event) -> Task<Message> {
         let toggles_palette = palette_chord().matches(&key.key, key.modifiers);
         // An open dialog keeps every key except the ones it passes through.
         if self.palette_open || self.new_job_open || self.pending.is_some() || self.drawer {
             if toggles_palette && self.palette_open {
                 self.palette_open = false;
             }
-            return;
+            return Task::none();
         }
         if toggles_palette {
             self.open_palette();
-            return;
+            return Task::none();
         }
         // Open menus and popovers have already taken their keys, so only
         // the chords that open them arrive here.
         if let Some(event) = self.menu.key_event(&self.keys.menu, key) {
             self.menu_event(event);
-            return;
+            return Task::none();
         }
         if let Some(open) = self
             .keys
@@ -657,38 +731,44 @@ impl Example {
             .and_then(|action| action.apply(self.help))
         {
             self.help = open;
-            return;
+            return Task::none();
         }
         if !self.toasts.is_empty()
             && let Some(action) = self.keys.toast.resolve_event(key)
         {
-            let _ = self.toast_events(action.events(&self.toasts));
-            return;
+            return self.toast_events(action.events(&self.toasts));
         }
 
         let handled = match self.page.selected() {
-            Some(Page::Overview) => self.overview_key(key),
+            Some(Page::Overview) => self.overview_key(key).then(Task::none),
             Some(Page::Jobs) => self.jobs_key(key),
             Some(Page::Activity) => self.activity_key(key),
-            Some(Page::Settings) => match self.settings.key(&self.keys.settings, key) {
-                Some(message) => {
-                    let _ = self.handle(Message::Settings(message));
-                    true
-                }
-                None => false,
-            },
-            None => false,
+            Some(Page::Settings) => self
+                .settings
+                .key(&self.keys.settings, key)
+                .map(|message| self.handle(Message::Settings(message))),
+            None => None,
         };
-        if handled {
-            return;
+        if let Some(task) = handled {
+            return task;
         }
         if let Some(event) = self
-            .keys
-            .tabs
+            .page_keymap()
             .resolve_event(key)
             .and_then(|action| action.event(&self.page))
         {
             let _ = self.page.update(event);
+        }
+        Task::none()
+    }
+
+    /// The page tabs' keymap, which gives up Ctrl+Tab and Ctrl+Shift+Tab
+    /// while the job tabs are on screen, so only one of them owns a chord.
+    fn page_keymap(&self) -> &Keymap<tabs::Action> {
+        if self.documents_shown() {
+            &self.keys.tabs_beside_documents
+        } else {
+            &self.keys.tabs
         }
     }
 
@@ -702,36 +782,42 @@ impl Example {
         true
     }
 
-    fn activity_key(&mut self, key: &keys::Event) -> bool {
-        let Some(action) = self.keys.switch.resolve_event(key) else {
-            return false;
-        };
-        let _ = self.handle(Message::Live(action.apply(self.live)));
-        true
-    }
-
-    fn jobs_key(&mut self, key: &keys::Event) -> bool {
+    /// The job tabs first, then search, then the list while it shows.
+    fn jobs_key(&mut self, key: &keys::Event) -> Option<Task<Message>> {
         use iced::keyboard::Key;
+
+        if self.documents_key(key) {
+            return Some(Task::none());
+        }
+        if search_chord().matches(&key.key, key.modifiers) {
+            return Some(self.focus_job_search());
+        }
+        // An open job's inspector and JSON resolve their keys while focused.
+        if self.active_job().is_some() {
+            return None;
+        }
 
         if let Some(id) = self.cursor {
             if let Some(event) = self.row_menu.key_event(&self.keys.row_menu, key, id) {
-                let _ = self.row_menu_event(event);
-                return true;
+                return Some(self.row_menu_event(event));
             }
             if let Some(action) = self.keys.checkbox.resolve_event(key) {
                 let checked = self.job(id).is_some_and(|job| job.checked);
                 let checked = action.apply(CheckState::from(checked));
-                let _ = self.handle(Message::Check(id, checked));
-                return true;
+                return Some(self.handle(Message::Check(id, checked)));
             }
             if Chord::named(Named::Delete).matches(&key.key, key.modifiers) {
                 self.pending = Some(Pending::Delete(id));
-                return true;
+                return Some(Task::none());
+            }
+            if Chord::named(Named::Enter).matches(&key.key, key.modifiers) {
+                self.open_job(id);
+                return Some(Task::none());
             }
         }
 
         if !key.modifiers.is_empty() {
-            return false;
+            return None;
         }
         let visible: Vec<JobId> = self.visible_jobs().map(|job| job.id).collect();
         let current = self
@@ -743,10 +829,10 @@ impl Example {
             (Key::Named(Named::ArrowUp), Some(index)) => index.saturating_sub(1),
             (Key::Named(Named::ArrowDown | Named::Home), None) | (Key::Named(Named::Home), _) => 0,
             (Key::Named(Named::ArrowUp | Named::End), None) | (Key::Named(Named::End), _) => last,
-            _ => return false,
+            _ => return None,
         };
         self.cursor = visible.get(target).copied();
-        true
+        Some(Task::none())
     }
 
     fn menu_event(&mut self, event: dropdown_menu::Event<MenuItem>) {
@@ -857,10 +943,7 @@ impl Example {
                 let _ = self.toast_events(toast::Action::DismissAll.events(&self.toasts));
             }
             Cmd::Shortcuts => self.help = true,
-            Cmd::Open(id) => {
-                self.show_jobs(StatusFilter::All, "");
-                self.cursor = Some(id);
-            }
+            Cmd::Open(id) => self.open_job(id),
         }
     }
 
@@ -960,9 +1043,11 @@ impl Example {
             return Task::none();
         };
         match action {
+            RowAction::Open => self.open_job(id),
             RowAction::Logs => {
-                self.log_query = job.name.clone();
+                let name = job.name.clone();
                 self.go(Page::Activity);
+                return self.logs_event(log_viewer::Event::Search(name));
             }
             RowAction::Retry => {
                 retry(job);
@@ -1110,7 +1195,6 @@ impl Example {
                 self.succeeded += 1;
             }
             Update::Failed(id, progress) => self.failed(id, progress),
-            Update::Log(line) => self.log(line),
             Update::Submitted(template) => self.submitted(template),
         }
     }
@@ -1119,10 +1203,11 @@ impl Example {
     /// marks it failed and tells the owner.
     fn failed(&mut self, id: JobId, progress: f32) {
         let settings = self.settings.applied();
-        let (retries, channel) = (settings.retries, settings.channel);
+        let (workspace_retries, channel) = (settings.retries, settings.channel);
         let Some(job) = self.job_mut(id) else {
             return;
         };
+        let retries = job.retries.unwrap_or(workspace_retries);
         if job.attempts < retries {
             job.attempts += 1;
             job.status = Status::Queued;
@@ -1131,7 +1216,7 @@ impl Example {
                 "{} ({id}) retrying, attempt {} of {retries}",
                 job.name, job.attempts
             );
-            self.log(LogLine::new(Level::Warning, "scheduler", line));
+            self.log(Level::Warn, "scheduler", line);
             return;
         }
         job.status = Status::Failed;
@@ -1164,11 +1249,11 @@ impl Example {
         let mut job = Job::new(id, *name, owner, *source);
         job.queue = Queue::ALL[template % Queue::ALL.len()];
         self.jobs.insert(0, job);
-        self.log(LogLine::new(
+        self.log(
             Level::Info,
             "scheduler",
             format!("{name} ({id}) submitted by {owner}"),
-        ));
+        );
         if self.holding() {
             self.fresh.push(id);
         } else {
@@ -1176,23 +1261,25 @@ impl Example {
         }
     }
 
-    fn log(&mut self, line: LogLine) {
-        if !self.live {
-            self.held.push_back(line);
-            if self.held.len() > LOG_LIMIT {
-                let _ = self.held.pop_front();
-            }
-            return;
-        }
-        self.clock += 3;
-        self.logs.push_front((self.clock, line));
-        self.logs.truncate(LOG_LIMIT);
+    /// Adds a line from the app itself. The worker's lines come through the
+    /// log's channel instead. A paused log holds both back.
+    fn log(&mut self, level: Level, service: &str, message: impl Into<String>) {
+        let line = data::log_line(level, service, message, self.now());
+        self.logs.extend([line]);
     }
 
-    /// Drops the oldest finished jobs once the list is long.
+    /// The demo clock, in seconds since midnight.
+    fn now(&self) -> u32 {
+        data::now(self.epoch)
+    }
+
+    /// Drops the oldest finished jobs once the list is long, keeping any
+    /// that are open in a tab.
     fn trim_jobs(&mut self) {
         while self.jobs.len() > JOB_LIMIT {
-            let Some(index) = self.jobs.iter().rposition(|job| job.status.is_finished()) else {
+            let Some(index) = self.jobs.iter().rposition(|job| {
+                job.status.is_finished() && !self.inspectors.contains_key(&job.id)
+            }) else {
                 return;
             };
             self.jobs.remove(index);
@@ -1251,6 +1338,7 @@ impl Example {
             return;
         }
         let slots = usize::from(settings.concurrency);
+        let started = data::clock(self.now())[..5].to_owned();
         for queue in Queue::ALL {
             loop {
                 if self.count(Status::Running) >= slots {
@@ -1265,14 +1353,15 @@ impl Example {
                     break;
                 };
                 job.status = Status::Running;
-                job.started = data::clock(self.clock)[..5].to_owned();
+                job.started.clone_from(&started);
             }
         }
     }
 
-    /// The simulated worker for the jobs running now, once both channels are open.
+    /// The simulated worker for the jobs running now, once every channel is open.
     fn worker(&self) -> Option<Worker> {
         let feed = self.feed.clone()?;
+        let logs = self.log_sender.clone()?;
         let toasts = self.toast_sender.clone()?;
         let scheduler = self.settings.applied().scheduler;
         let jobs = self
@@ -1287,7 +1376,13 @@ impl Example {
                 fails_at: job.fails_at,
             })
             .collect();
-        Some(Worker { jobs, feed, toasts })
+        Some(Worker {
+            jobs,
+            feed,
+            logs,
+            toasts,
+            epoch: self.epoch,
+        })
     }
 
     fn job(&self, id: JobId) -> Option<&Job> {
@@ -1344,6 +1439,11 @@ impl Example {
     fn count(&self, status: Status) -> usize {
         self.jobs.iter().filter(|job| job.status == status).count()
     }
+}
+
+/// The space either side of the page in a window `width` wide.
+fn gutter(width: f32) -> f32 {
+    if width < NARROW { 16.0 } else { 24.0 }
 }
 
 fn retry(job: &mut Job) {

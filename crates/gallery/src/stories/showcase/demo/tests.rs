@@ -1,11 +1,18 @@
+use iced::futures::StreamExt;
+use iced::futures::executor::block_on;
 use iced::keyboard::{Key, Modifiers, key::Named};
 use iced_cube::context_menu;
+use iced_cube::data::log_viewer;
+use iced_cube::data::property_grid::{self, Value};
 use iced_cube::dropdown_menu;
 use iced_cube::keys;
+use iced_cube::navigation::document_tabs;
 use iced_cube::overlay::toast::{self, Variant as ToastVariant};
+use iced_cube::primitives::toggle_group;
 
-use super::data::{JobId, Level, LogLine, Queue, Schedule, Status, StatusFilter};
+use super::data::{self, JobId, Queue, Schedule, Status, StatusFilter};
 use super::feed::{self, Update};
+use super::inspector::{Doc, Field, Pane};
 use super::settings::{self, Control};
 use super::{Example, LOG_LIMIT, Message, Page, Pending, RowAction, ThemeMode};
 use crate::app::ThemeChoice;
@@ -390,25 +397,458 @@ fn a_scheduled_job_waits_for_its_schedule() {
 }
 
 #[test]
-fn paused_logs_are_held_until_live_again_up_to_the_limit() {
+fn a_paused_log_holds_lines_until_it_resumes_up_to_the_limit() {
     let mut example = Example::default();
     let before = example.logs.len();
-    send(&mut example, Message::Live(false));
-    feed(
-        &mut example,
-        vec![Update::Log(LogLine::new(Level::Info, "auth", "held"))],
-    );
+    send(&mut example, Message::Logs(log_viewer::Event::TogglePause));
+    send(&mut example, Message::Refresh);
     assert_eq!(example.logs.len(), before);
-    assert_eq!(example.held.len(), 1);
-    send(&mut example, Message::Live(true));
+    assert_eq!(example.logs.pending(), 1);
+    send(&mut example, Message::Logs(log_viewer::Event::TogglePause));
     assert_eq!(example.logs.len(), before + 1);
 
-    send(&mut example, Message::Live(false));
+    send(&mut example, Message::Logs(log_viewer::Event::TogglePause));
     let flood = (0..LOG_LIMIT + 50)
-        .map(|_| Update::Log(LogLine::new(Level::Info, "auth", "flood")))
+        .map(|_| log_viewer::entry(log_viewer::Level::Info, "flood"))
         .collect();
-    feed(&mut example, flood);
-    assert_eq!(example.held.len(), LOG_LIMIT);
+    send(
+        &mut example,
+        Message::Logs(log_viewer::Event::Received(flood)),
+    );
+    assert_eq!(example.logs.pending(), LOG_LIMIT);
+}
+
+#[test]
+fn worker_lines_arrive_through_the_log_channel() {
+    let mut example = Example::default();
+    let mut events = Box::pin(log_viewer::stream());
+    let Some(ready) = block_on(events.next()) else {
+        panic!("the channel opens");
+    };
+    send(&mut example, Message::Logs(ready));
+    let Some(mut sender) = example.log_sender.clone() else {
+        panic!("the app keeps the sender for the worker");
+    };
+
+    // What the worker does with its clone of the sender.
+    let line = data::log_line(log_viewer::Level::Error, "object-store", "disk full", 0);
+    let _ = sender.try_send(line);
+    let Some(batch) = block_on(events.next()) else {
+        panic!("the line arrives");
+    };
+    send(&mut example, Message::Logs(batch));
+
+    let last = example
+        .logs
+        .entries()
+        .last()
+        .map(|entry| entry.message.as_str());
+    assert_eq!(last, Some("disk full"));
+    assert_eq!(example.logs.count(log_viewer::Level::Error), 1);
+}
+
+#[test]
+fn the_log_takes_keys_left_on_the_activity_page() {
+    let mut example = Example::default();
+    example.go(Page::Activity);
+    named(&mut example, Named::ArrowUp);
+    assert!(example.logs.highlighted().is_some());
+
+    send(
+        &mut example,
+        Message::Logs(log_viewer::Event::Search("warehouse".into())),
+    );
+    named(&mut example, Named::Escape);
+    assert_eq!(example.logs.query(), "");
+
+    named(&mut example, Named::ArrowRight);
+    assert_eq!(example.page.selected(), Some(Page::Settings));
+}
+
+#[test]
+fn view_logs_searches_the_log_for_the_job() {
+    let mut example = Example::default();
+    send(&mut example, Message::ViewLogs(JobId(1041)));
+    assert_eq!(example.page.selected(), Some(Page::Activity));
+    assert_eq!(example.logs.query(), "nightly-orders-etl");
+}
+
+fn open(example: &mut Example, id: u32) {
+    send(example, Message::OpenJob(JobId(id)));
+}
+
+fn tabs(example: &Example) -> Vec<Doc> {
+    example
+        .documents
+        .documents()
+        .iter()
+        .map(|document| document.id)
+        .collect()
+}
+
+fn inspect(example: &mut Example, id: u32, event: property_grid::Event<Field>) {
+    send(example, Message::Inspector(JobId(id), event));
+}
+
+fn ctrl_tab(example: &mut Example) {
+    press(example, Key::Named(Named::Tab), Modifiers::CTRL);
+}
+
+#[test]
+fn opening_a_job_adds_a_tab_with_its_inspector() {
+    let mut example = Example::default();
+    assert!(!example.documents_shown(), "the list alone shows no tabs");
+
+    open(&mut example, 1041);
+    assert_eq!(example.page.selected(), Some(Page::Jobs));
+    assert_eq!(tabs(&example), [Doc::Jobs, Doc::Job(JobId(1041))]);
+    assert_eq!(example.active_job(), Some(JobId(1041)));
+    assert!(example.documents_shown());
+    let Some(inspector) = example.inspectors.get(&JobId(1041)) else {
+        panic!("the job has an inspector");
+    };
+    assert_eq!(
+        inspector.grid.value(Field::Name),
+        Some(&Value::Text("nightly-orders-etl".into()))
+    );
+    assert_eq!(inspector.json.value()["queue"], "high");
+
+    open(&mut example, 1041);
+    assert_eq!(tabs(&example).len(), 2, "a job opens once");
+}
+
+#[test]
+fn enter_and_the_row_menu_open_the_current_job() {
+    let mut example = Example::default();
+    example.go(Page::Jobs);
+    named(&mut example, Named::ArrowDown);
+    named(&mut example, Named::Enter);
+    assert_eq!(example.active_job(), Some(JobId(1041)));
+
+    let id = JobId(1045);
+    send(
+        &mut example,
+        Message::Documents(document_tabs::Event::Activate(Doc::Jobs)),
+    );
+    send(
+        &mut example,
+        Message::RowMenu(context_menu::Event::Open(id, iced::Point::ORIGIN)),
+    );
+    send(
+        &mut example,
+        Message::RowMenu(context_menu::Event::Menu(dropdown_menu::Event::Activate(
+            RowAction::Open,
+        ))),
+    );
+    assert_eq!(example.active_job(), Some(id));
+}
+
+#[test]
+fn list_keys_leave_an_open_job_alone() {
+    let mut example = Example::default();
+    open(&mut example, 1042);
+    named(&mut example, Named::ArrowDown);
+    named(&mut example, Named::Delete);
+    assert_eq!(example.cursor, Some(JobId(1042)));
+    assert_eq!(example.pending, None);
+}
+
+#[test]
+fn editing_a_property_updates_the_job_its_tab_and_its_json() {
+    let mut example = Example::default();
+    open(&mut example, 1045);
+
+    inspect(
+        &mut example,
+        1045,
+        property_grid::Event::Set(Field::Queue, Value::Text("High".into())),
+    );
+    assert_eq!(
+        example.job(JobId(1045)).map(|job| job.queue),
+        Some(Queue::High)
+    );
+
+    inspect(&mut example, 1045, property_grid::Event::Edit(Field::Name));
+    inspect(
+        &mut example,
+        1045,
+        property_grid::Event::Input(Field::Name, "thumbnails".into()),
+    );
+    inspect(&mut example, 1045, property_grid::Event::Submit);
+    assert_eq!(
+        example.job(JobId(1045)).map(|job| job.name.as_str()),
+        Some("thumbnails")
+    );
+    let label = example
+        .documents
+        .document(Doc::Job(JobId(1045)))
+        .map(|tab| tab.label.as_str());
+    assert_eq!(label, Some("thumbnails"));
+    let Some(inspector) = example.inspectors.get(&JobId(1045)) else {
+        panic!("the job is open");
+    };
+    assert_eq!(inspector.json.value()["name"], "thumbnails");
+    assert_eq!(inspector.json.value()["queue"], "high");
+}
+
+#[test]
+fn an_invalid_name_never_reaches_the_job() {
+    let mut example = Example::default();
+    open(&mut example, 1045);
+    inspect(&mut example, 1045, property_grid::Event::Edit(Field::Name));
+    inspect(
+        &mut example,
+        1045,
+        property_grid::Event::Input(Field::Name, "Image Thumbnails".into()),
+    );
+    assert_eq!(
+        example.job(JobId(1045)).map(|job| job.name.as_str()),
+        Some("image-thumbnails")
+    );
+    let error = example
+        .inspectors
+        .get(&JobId(1045))
+        .and_then(|inspector| inspector.grid.error(Field::Name));
+    assert_eq!(error, Some("Use lowercase letters, digits and dashes."));
+}
+
+#[test]
+fn retries_set_on_a_job_override_the_workspace_until_reset() {
+    let mut example = Example::default();
+    example.settings.set_scheduler(false);
+    example.settings.saved.retries = 0;
+    open(&mut example, 1041);
+    inspect(
+        &mut example,
+        1041,
+        property_grid::Event::Edit(Field::Retries),
+    );
+    inspect(
+        &mut example,
+        1041,
+        property_grid::Event::Input(Field::Retries, "1".into()),
+    );
+    assert_eq!(
+        example.job(JobId(1041)).and_then(|job| job.retries),
+        Some(1)
+    );
+
+    feed(&mut example, vec![Update::Failed(JobId(1041), 0.5)]);
+    assert_eq!(status(&example, 1041), Some(Status::Queued), "retried once");
+
+    inspect(
+        &mut example,
+        1041,
+        property_grid::Event::Reset(Field::Retries),
+    );
+    assert_eq!(example.job(JobId(1041)).and_then(|job| job.retries), None);
+}
+
+#[test]
+fn the_inspector_follows_changes_made_elsewhere() {
+    let mut example = Example::default();
+    open(&mut example, 1045);
+    send(
+        &mut example,
+        Message::RowMenu(context_menu::Event::Open(JobId(1045), iced::Point::ORIGIN)),
+    );
+    send(
+        &mut example,
+        Message::RowMenu(context_menu::Event::Menu(dropdown_menu::Event::Activate(
+            RowAction::High,
+        ))),
+    );
+    let queue = example
+        .inspectors
+        .get(&JobId(1045))
+        .and_then(|inspector| inspector.grid.value(Field::Queue).cloned());
+    assert_eq!(queue, Some(Value::Text("High".into())));
+}
+
+#[test]
+fn closing_tabs_drops_their_inspectors_but_never_the_job_list() {
+    let mut example = Example::default();
+    open(&mut example, 1041);
+    open(&mut example, 1042);
+    open(&mut example, 1043);
+
+    send(
+        &mut example,
+        Message::Documents(document_tabs::Event::Close(Doc::Job(JobId(1042)))),
+    );
+    assert_eq!(
+        tabs(&example),
+        [Doc::Jobs, Doc::Job(JobId(1041)), Doc::Job(JobId(1043))]
+    );
+    assert!(!example.inspectors.contains_key(&JobId(1042)));
+
+    send(
+        &mut example,
+        Message::Documents(document_tabs::Event::Close(Doc::Jobs)),
+    );
+    send(
+        &mut example,
+        Message::Documents(document_tabs::Event::Pin(Doc::Jobs, false)),
+    );
+    assert_eq!(tabs(&example)[0], Doc::Jobs);
+    assert_eq!(example.documents.pinned_count(), 1);
+
+    send(
+        &mut example,
+        Message::Documents(document_tabs::Event::CloseAll),
+    );
+    assert_eq!(tabs(&example), [Doc::Jobs]);
+    assert!(example.inspectors.is_empty());
+    assert!(!example.documents_shown());
+}
+
+#[test]
+fn deleting_an_open_job_closes_its_tab() {
+    let mut example = Example::default();
+    open(&mut example, 1049);
+    example.pending = Some(Pending::Delete(JobId(1049)));
+    send(&mut example, Message::Confirm);
+    assert_eq!(tabs(&example), [Doc::Jobs]);
+    assert!(example.inspectors.is_empty());
+}
+
+#[test]
+fn ctrl_tab_goes_to_exactly_one_component() {
+    let mut example = Example::default();
+    example.go(Page::Jobs);
+    ctrl_tab(&mut example);
+    assert_eq!(
+        example.page.selected(),
+        Some(Page::Activity),
+        "with no job open the page tabs own it"
+    );
+
+    open(&mut example, 1041);
+    open(&mut example, 1042);
+    ctrl_tab(&mut example);
+    assert_eq!(example.page.selected(), Some(Page::Jobs), "the page stays");
+    assert_eq!(
+        example.active_job(),
+        Some(JobId(1041)),
+        "the job tabs switch to the job used before"
+    );
+    send(
+        &mut example,
+        Message::Documents(document_tabs::CycleEnd.into()),
+    );
+
+    // Ctrl+[ and Ctrl+] reach the page in a browser, which keeps Ctrl+Tab.
+    press(&mut example, Key::Character("]".into()), Modifiers::CTRL);
+    assert_eq!(example.active_job(), Some(JobId(1042)));
+
+    example.go(Page::Activity);
+    ctrl_tab(&mut example);
+    assert_eq!(
+        example.page.selected(),
+        Some(Page::Settings),
+        "the job tabs are out of sight, so the page tabs own it again"
+    );
+    assert_eq!(example.active_job(), Some(JobId(1042)));
+}
+
+#[test]
+fn arrows_still_switch_pages_beside_an_open_job() {
+    let mut example = Example::default();
+    open(&mut example, 1041);
+    named(&mut example, Named::ArrowRight);
+    assert_eq!(example.page.selected(), Some(Page::Activity));
+}
+
+#[test]
+fn ctrl_k_opens_the_palette_over_an_open_job() {
+    let mut example = Example::default();
+    open(&mut example, 1041);
+    ctrl_k(&mut example);
+    assert!(example.palette_open);
+    ctrl_tab(&mut example);
+    assert_eq!(
+        example.active_job(),
+        Some(JobId(1041)),
+        "the palette keeps keys from the tabs"
+    );
+}
+
+#[test]
+fn the_palette_opens_jobs_in_tabs() {
+    let mut example = Example::default();
+    example.run(super::Cmd::Open(JobId(1047)));
+    assert_eq!(example.active_job(), Some(JobId(1047)));
+}
+
+#[test]
+fn trimming_keeps_jobs_that_are_open() {
+    let mut example = Example::default();
+    example.settings.set_scheduler(false);
+    open(&mut example, 1049);
+    for job in &mut example.jobs {
+        job.status = Status::Succeeded;
+    }
+    for _ in 0..12 {
+        send(&mut example, Message::Submit);
+        for job in &mut example.jobs {
+            if job.status == Status::Queued {
+                job.status = Status::Succeeded;
+            }
+        }
+    }
+    assert!(example.job(JobId(1049)).is_some());
+    assert_eq!(tabs(&example).len(), 2);
+}
+
+/// Renders the demo at `size` with the Jobs page showing job 1041.
+fn render_open_job(example: &Example, size: iced::Size) -> Vec<&'static str> {
+    use iced_test::simulator::Simulator;
+
+    iced_cube::theme::set_font(crate::FONT);
+    let settings = iced::Settings {
+        default_font: crate::FONT,
+        fonts: crate::FONT_FILES
+            .iter()
+            .map(|font| (*font).into())
+            .collect(),
+        ..iced::Settings::default()
+    };
+    let mut ui = Simulator::with_size(settings, size, example.view());
+    ["All jobs", "Queue", "Properties"]
+        .into_iter()
+        .filter(|label| ui.find(*label).is_ok())
+        .collect()
+}
+
+#[test]
+fn a_wide_window_shows_the_inspector_beside_the_json() {
+    let mut example = Example::default();
+    let size = iced::Size::new(1280.0, 800.0);
+    send(&mut example, Message::Resized(size));
+    open(&mut example, 1041);
+    let shown = render_open_job(&example, size);
+    assert!(shown.contains(&"All jobs"), "{shown:?}");
+    assert!(shown.contains(&"Queue"), "{shown:?}");
+    assert!(!shown.contains(&"Properties"), "no switch: {shown:?}");
+}
+
+#[test]
+fn a_narrow_window_switches_between_the_inspector_and_the_json() {
+    let mut example = Example::default();
+    let size = iced::Size::new(390.0, 800.0);
+    send(&mut example, Message::Resized(size));
+    open(&mut example, 1041);
+    let shown = render_open_job(&example, size);
+    assert!(shown.contains(&"Properties"), "{shown:?}");
+    assert!(shown.contains(&"Queue"), "{shown:?}");
+
+    send(
+        &mut example,
+        Message::Pane(toggle_group::Event::Toggle(Pane::Json)),
+    );
+    let shown = render_open_job(&example, size);
+    assert!(shown.contains(&"Properties"), "{shown:?}");
+    assert!(!shown.contains(&"Queue"), "{shown:?}");
 }
 
 #[test]

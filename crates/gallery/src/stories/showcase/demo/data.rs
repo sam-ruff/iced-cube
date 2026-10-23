@@ -2,7 +2,10 @@
 
 use std::fmt;
 
+use iced::time::Instant;
+use iced_cube::data::log_viewer::{Entry, Level, entry};
 use iced_cube::feedback::badge::Variant as BadgeVariant;
+use serde_json::{Value, json};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct JobId(pub u32);
@@ -96,6 +99,13 @@ pub enum Queue {
 
 impl Queue {
     pub const ALL: [Queue; 3] = [Queue::High, Queue::Normal, Queue::Low];
+
+    /// The queue shown as `label`, such as "High".
+    pub fn from_label(label: &str) -> Option<Queue> {
+        Queue::ALL
+            .into_iter()
+            .find(|queue| queue.to_string() == label)
+    }
 }
 
 impl fmt::Display for Queue {
@@ -123,6 +133,23 @@ impl Schedule {
         Schedule::Nightly,
         Schedule::Weekly,
     ];
+
+    /// The schedule shown as `label`, such as "Every hour".
+    pub fn from_label(label: &str) -> Option<Schedule> {
+        Schedule::ALL
+            .into_iter()
+            .find(|schedule| schedule.to_string() == label)
+    }
+
+    /// The schedule as a cron expression, or `None` for a single run.
+    pub fn cron(self) -> Option<&'static str> {
+        match self {
+            Schedule::Once => None,
+            Schedule::Hourly => Some("0 * * * *"),
+            Schedule::Nightly => Some("0 2 * * *"),
+            Schedule::Weekly => Some("0 6 * * 1"),
+        }
+    }
 }
 
 impl fmt::Display for Schedule {
@@ -155,6 +182,8 @@ pub struct Job {
     pub notes: String,
     /// Automatic retries used since the job last started from the beginning.
     pub attempts: u8,
+    /// Retries allowed after a failure, or `None` for the workspace setting.
+    pub retries: Option<u8>,
 }
 
 impl Job {
@@ -179,6 +208,7 @@ impl Job {
             schedule: Schedule::Once,
             notes: String::new(),
             attempts: 0,
+            retries: None,
         }
     }
 
@@ -199,6 +229,31 @@ impl Job {
             Status::Succeeded => format!("Finished, started {}", self.started),
             Status::Failed => format!("Failed at {}%", (self.progress * 100.0).round()),
         }
+    }
+
+    /// The job's definition as the platform stores it, with its last run.
+    /// `workspace_retries` stands in for retries the job does not set.
+    pub fn spec(&self, workspace_retries: u8) -> Value {
+        let cpu = 1 + self.id.0 % 4;
+        json!({
+            "id": self.id.to_string(),
+            "name": self.name,
+            "owner": self.owner,
+            "source": self.source,
+            "queue": self.queue.to_string().to_lowercase(),
+            "schedule": self.schedule.cron(),
+            "retries": {
+                "max": self.retries.unwrap_or(workspace_retries),
+                "inherited": self.retries.is_none(),
+            },
+            "resources": { "cpu": cpu, "memoryGb": cpu * 2 },
+            "notes": (!self.notes.is_empty()).then_some(self.notes.as_str()),
+            "lastRun": {
+                "status": self.status.label().to_lowercase(),
+                "attempts": self.attempts,
+                "started": (self.started != "-").then_some(self.started.as_str()),
+            },
+        })
     }
 }
 
@@ -281,77 +336,9 @@ pub fn jobs() -> Vec<Job> {
     ]
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Level {
-    Info,
-    Warning,
-    Error,
-}
-
-impl Level {
-    pub fn label(self) -> &'static str {
-        match self {
-            Level::Info => "Info",
-            Level::Warning => "Warn",
-            Level::Error => "Error",
-        }
-    }
-
-    pub fn badge(self) -> BadgeVariant {
-        match self {
-            Level::Info => BadgeVariant::Outline,
-            Level::Warning => BadgeVariant::Warning,
-            Level::Error => BadgeVariant::Destructive,
-        }
-    }
-}
-
-/// Which log lines the activity page shows.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LevelFilter {
-    All,
-    Warnings,
-    Errors,
-}
-
-impl LevelFilter {
-    pub const ALL: [LevelFilter; 3] =
-        [LevelFilter::All, LevelFilter::Warnings, LevelFilter::Errors];
-
-    pub fn allows(self, level: Level) -> bool {
-        match self {
-            LevelFilter::All => true,
-            LevelFilter::Warnings => level != Level::Info,
-            LevelFilter::Errors => level == Level::Error,
-        }
-    }
-}
-
-impl fmt::Display for LevelFilter {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            LevelFilter::All => "All",
-            LevelFilter::Warnings => "Warnings",
-            LevelFilter::Errors => "Errors",
-        })
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct LogLine {
-    pub level: Level,
-    pub service: &'static str,
-    pub message: String,
-}
-
-impl LogLine {
-    pub fn new(level: Level, service: &'static str, message: impl Into<String>) -> Self {
-        Self {
-            level,
-            service,
-            message: message.into(),
-        }
-    }
+/// A log line from `service`, stamped with a demo clock time.
+pub fn log_line(level: Level, service: &str, message: impl Into<String>, at: u32) -> Entry {
+    entry(level, message).target(service).timestamp(clock(at))
 }
 
 pub const SERVICES: &[&str] = &[
@@ -378,14 +365,10 @@ pub const CHATTER: &[(Level, &str, &str)] = &[
         "Uploaded 312 objects to fernhill-raw",
     ),
     (Level::Info, "scheduler", "Heartbeat from 4 workers"),
-    (
-        Level::Warning,
-        "warehouse",
-        "Query on stock_levels took 12.4s",
-    ),
+    (Level::Warn, "warehouse", "Query on stock_levels took 12.4s"),
     (Level::Info, "notifier", "Sent daily digest to 38 members"),
     (
-        Level::Warning,
+        Level::Warn,
         "ingest-api",
         "Client retried 3 times after a timeout",
     ),
@@ -401,25 +384,31 @@ pub const CHATTER: &[(Level, &str, &str)] = &[
         "Refreshed materialised view daily_revenue",
     ),
     (
-        Level::Warning,
+        Level::Warn,
         "auth",
         "Token for tom.okafor expires in 2 days",
     ),
 ];
 
-pub fn logs() -> Vec<(u32, LogLine)> {
-    let start = 9 * 3600 + 38 * 60;
+/// The demo's clock when it starts, in seconds since midnight.
+pub const START: u32 = 9 * 3600 + 41 * 60;
+
+/// The demo clock: [`START`] plus the time since `epoch`.
+pub fn now(epoch: Instant) -> u32 {
+    let elapsed = u32::try_from(epoch.elapsed().as_secs()).unwrap_or(u32::MAX);
+    START.saturating_add(elapsed)
+}
+
+/// The lines already in the log when the demo starts, oldest first.
+pub fn logs() -> Vec<Entry> {
+    let start = START - 3 * 60;
     CHATTER
         .iter()
         .take(8)
         .enumerate()
         .map(|(index, (level, service, message))| {
-            (
-                start + index as u32 * 17,
-                LogLine::new(*level, service, *message),
-            )
+            log_line(*level, service, *message, start + index as u32 * 17)
         })
-        .rev()
         .collect()
 }
 

@@ -1,20 +1,33 @@
-//! The live log: lines stream in from the worker through the channel and
-//! can be paused, filtered by level and searched.
+//! The live log: lines stream in from the worker through the log viewer's
+//! channel, and the viewer's own toolbar pauses, filters and searches them.
 
-use iced::widget::{column, container, row, space, text};
-use iced::{Alignment, Border, Element, Length};
+use iced::widget::{column, row, space, text};
+use iced::{Alignment, Element, Length, Task};
+use iced_cube::data::log_viewer::{self, Output, log_viewer};
+use iced_cube::dropdown_menu;
 use iced_cube::feedback::badge::Variant as BadgeVariant;
 use iced_cube::feedback::spinner::Size as SpinnerSize;
-use iced_cube::primitives::radio::Direction;
-use iced_cube::theme::{Tokens, radius, text_size};
-use iced_cube::{badge, input, lucide, radio_group, scroll_area, spinner, switch};
+use iced_cube::{badge, context_menu, keys, spinner};
 
-use super::data::{LevelFilter, LogLine, SERVICES, clock};
-use super::{Example, Message, caption, muted};
+use super::data::SERVICES;
+use super::{Example, Message, count, muted};
+use crate::bridge;
 
 impl Example {
-    pub(super) fn activity(&self, narrow: bool) -> Element<'_, Message> {
-        let status: Element<'_, Message> = if self.live {
+    pub(super) fn activity(&self) -> Element<'_, Message> {
+        let status: Element<'_, Message> = if self.logs.is_paused() {
+            row![
+                badge("Paused").variant(BadgeVariant::Warning),
+                muted(format!(
+                    "{} waiting",
+                    count(self.logs.pending(), "new line")
+                ))
+                .wrapping(text::Wrapping::None),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center)
+            .into()
+        } else {
             row![
                 spinner(self.phase).size(SpinnerSize::Sm),
                 muted(format!("Streaming from {} services", SERVICES.len()))
@@ -23,80 +36,17 @@ impl Example {
             .spacing(8)
             .align_y(Alignment::Center)
             .into()
-        } else {
-            row![
-                badge("Paused").variant(BadgeVariant::Warning),
-                muted(format!("{} new lines waiting", self.held.len()))
-                    .wrapping(text::Wrapping::None),
-            ]
-            .spacing(8)
-            .align_y(Alignment::Center)
-            .into()
-        };
-
-        let toolbar = row![
-            status,
-            space::horizontal(),
-            switch(self.live).label("Live").on_toggle(Message::Live),
-        ]
-        .spacing(12)
-        .align_y(Alignment::Center);
-
-        let filters = row![
-            radio_group(LevelFilter::ALL, Some(self.level))
-                .direction(Direction::Horizontal)
-                .on_select(Message::Level),
-            input("Filter lines", &self.log_query)
-                .icon(lucide!(Search))
-                .width(if narrow {
-                    Length::Fill
-                } else {
-                    Length::Fixed(240.0)
-                })
-                .on_input(Message::LogQuery),
-        ]
-        .spacing(16)
-        .align_y(Alignment::Center)
-        .wrap()
-        .vertical_spacing(10);
-
-        let query = self.log_query.trim().to_lowercase();
-        let lines: Vec<Element<'_, Message>> = self
-            .logs
-            .iter()
-            .filter(|(_, line)| self.level.allows(line.level))
-            .filter(|(_, line)| {
-                query.is_empty()
-                    || line.message.to_lowercase().contains(&query)
-                    || line.service.contains(&query)
-            })
-            .map(|(time, line)| log_row(*time, line, narrow))
-            .collect();
-        let list: Element<'_, Message> = if lines.is_empty() {
-            container(muted("No lines match the filters yet."))
-                .padding(24)
-                .center_x(Length::Fill)
-                .into()
-        } else {
-            column(lines).spacing(2).padding(8).into()
         };
 
         column![
-            toolbar,
-            filters,
-            container(scroll_area(list).width(Length::Fill).height(Length::Fill))
+            row![status, space::horizontal()].align_y(Alignment::Center),
+            log_viewer(&self.logs)
+                .placeholder("Search messages")
+                .empty("No lines match the filters yet.")
+                .keymap(self.keys.log.clone())
+                .context_menu(&self.log_menu, Message::LogMenu)
                 .height(Length::Fill)
-                .style(|theme| {
-                    let tokens = Tokens::of(theme);
-                    container::Style {
-                        border: Border {
-                            color: tokens.border,
-                            width: 1.0,
-                            radius: radius::LG.into(),
-                        },
-                        ..container::Style::default()
-                    }
-                }),
+                .on_event(Message::Logs),
         ]
         .spacing(12)
         .padding(iced::Padding {
@@ -106,34 +56,36 @@ impl Example {
         .height(Length::Fill)
         .into()
     }
-}
 
-fn log_row<'a>(time: u32, line: &'a LogLine, narrow: bool) -> Element<'a, Message> {
-    let level = badge(line.level.label()).variant(line.level.badge());
-    if narrow {
-        return column![
-            row![
-                level,
-                caption(line.service),
-                space::horizontal(),
-                caption(clock(time))
-            ]
-            .spacing(8)
-            .align_y(Alignment::Center),
-            text(&line.message).size(text_size::SM),
-        ]
-        .spacing(4)
-        .padding([6, 4])
-        .into();
+    pub(super) fn logs_event(&mut self, event: log_viewer::Event) -> Task<Message> {
+        match self.logs.update(event) {
+            Some(Output::Ready(sender)) => {
+                self.log_sender = Some(sender);
+                Task::none()
+            }
+            Some(Output::Copy(text)) => bridge::copy(text),
+            Some(Output::FocusSearch) => log_viewer::focus_search(&self.logs),
+            None => Task::none(),
+        }
     }
-    row![
-        caption(clock(time)).width(64),
-        container(level).width(56),
-        caption(line.service).width(96),
-        text(&line.message).size(text_size::SM).width(Length::Fill),
-    ]
-    .spacing(12)
-    .align_y(Alignment::Center)
-    .padding([4, 4])
-    .into()
+
+    pub(super) fn log_menu_event(
+        &mut self,
+        event: context_menu::Event<log_viewer::MenuItem, log_viewer::LineId>,
+    ) -> Task<Message> {
+        let chosen = self.log_menu.update(event);
+        match (chosen, self.log_menu.target()) {
+            (Some(dropdown_menu::Output::Activated(item)), Some(&id)) => {
+                self.logs_event(item.event(id))
+            }
+            _ => Task::none(),
+        }
+    }
+
+    /// Keys nothing else used, while the log is on screen but not focused.
+    /// A focused log resolves the same keymap itself.
+    pub(super) fn activity_key(&mut self, key: &keys::Event) -> Option<Task<Message>> {
+        let event = self.logs.key_event(&self.keys.log, key)?;
+        Some(self.logs_event(event))
+    }
 }
