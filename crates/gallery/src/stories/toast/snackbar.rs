@@ -48,6 +48,11 @@ impl Example {
         match message {
             Message::Delete => {
                 self.notes -= 1;
+                // A snackbar replaces the one before rather than stacking.
+                let shown: Vec<_> = self.toasts.ids().collect();
+                for id in shown {
+                    let _ = self.toasts.dismiss(id);
+                }
                 self.toasts.push_with(deleted(), Message::Restore);
             }
             Message::Restore => self.notes += 1,

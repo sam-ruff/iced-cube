@@ -198,6 +198,8 @@ test("long lists take the wheel and touch inside their previews", async ({ page 
   await expect(page.locator('[data-story="virtual-list/large"]').first()).toHaveAttribute("data-wheel", "true");
   await page.goto("docs/components/document-tabs/");
   await expect(page.locator('[data-story="document-tabs/overflow"]').first()).toHaveAttribute("data-wheel", "true");
+  await page.goto("docs/components/tappable/");
+  await expect(page.locator('[data-story="tappable/list"]').first()).toHaveAttribute("data-wheel", "true");
   await page.goto("docs/components/button/");
   await expect(page.locator('[data-story="button/variants"]').first()).not.toHaveAttribute("data-wheel");
 });
