@@ -182,6 +182,33 @@ fn move_to(ui: &mut iced_test::Simulator<'_, Message>, position: Point) {
 }
 
 #[test]
+fn a_tap_on_a_toast_pauses_it_only_while_the_finger_is_down() -> Result<(), iced_test::Error> {
+    let mut state = State::new();
+    let _ = state.push(toast("Tap me"));
+
+    let mut ui = simulator(view(&state));
+    let at = ui.find("Tap me")?.bounds().center();
+    let id = touch::Finger(1);
+    ui.point_at(at);
+    let _ = ui.simulate([
+        iced::Event::Touch(touch::Event::FingerPressed { id, position: at }),
+        iced::Event::Touch(touch::Event::FingerLifted { id, position: at }),
+        iced::Event::Window(iced::window::Event::RedrawRequested(
+            iced::time::Instant::now(),
+        )),
+    ]);
+    let events: Vec<Event> = ui
+        .into_messages()
+        .map(|Message::Toast(event)| event)
+        .collect();
+    assert!(
+        matches!(events.as_slice(), [Event::Pause, Event::Resume]),
+        "{events:?}"
+    );
+    Ok(())
+}
+
+#[test]
 fn hovering_the_toasts_pauses_them_and_leaving_resumes() -> Result<(), iced_test::Error> {
     let mut state = State::new();
     let _ = state.push(toast("Hover me"));

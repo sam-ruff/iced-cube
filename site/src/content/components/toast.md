@@ -131,7 +131,7 @@ fn main() -> iced::Result {
 
 An Undo button needs to know what to undo. Rather than keeping toast ids and matching them, queue the toast with `state.push_with(toast, message)` on a `toast::State<Message>`. When the button is pressed, `update` returns `Output::Payload(message)`, and you handle it like any other message, as the action example does. If the toast is dismissed or times out, the message is dropped with it. Payloads only go through `push_with` on the UI thread; toasts from the channel have none.
 
-Undo is easy to miss, so a toast with an action gets more room than the rest. It stays at least ten seconds, it goes ahead of any toasts waiting their turn (taking the place of the newest plain toast if all three slots are full), and `Alt+Z` presses its button through the keymap. Every countdown pauses while the pointer is over the toasts, so nothing closes as you reach for it.
+Undo is easy to miss, so a toast with an action gets more room than the rest. It stays at least ten seconds, it goes ahead of any toasts waiting their turn (taking the place of the newest plain toast if all three slots are full), and `Alt+Z` presses its button through the keymap. Every countdown pauses while the pointer is over the toasts, so nothing closes as you reach for it. A finger pauses them only while it is down.
 
 Time only enters the queue through `Tick`, so the queue is easy to test: push toasts, call `state.tick(now)` with any instant, and check what is left. A toast starts counting down when it becomes visible, not when it arrives.
 

@@ -27,6 +27,7 @@
 use iced::widget::{self, button::Status, container, row, text};
 use iced::{Alignment, Background, Border, Color, Element, Length, Padding, Shadow, Vector};
 
+use crate::after_touch::after_touch;
 use crate::icon::{Glyph, opacity, themed};
 use crate::natural::natural;
 use crate::overlay::tooltip::{Position, tooltip};
@@ -158,8 +159,8 @@ impl<'a, Message: Clone + 'a> From<Fab<'a, Message>> for Element<'a, Message> {
         .style(|theme, status| style(&Tokens::of(theme), status));
 
         let mut element: Element<'a, Message> = match id {
-            Some(id) => container(button).id(id).into(),
-            None => button.into(),
+            Some(id) => container(after_touch(button)).id(id).into(),
+            None => after_touch(button),
         };
         if let (Some(hint), false) = (hint, extended) {
             element = tooltip(element, hint).position(Position::Left).into();

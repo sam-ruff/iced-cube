@@ -10,6 +10,7 @@ use iced::keyboard::key::Named;
 use iced::widget::{self, button::Status, row, text};
 use iced::{Alignment, Background, Border, Color, Element, Length, Padding, Shadow};
 
+use crate::after_touch::after_touch;
 use crate::icon::{Glyph, opacity, themed};
 use crate::keys::{self, Chord, Keymap};
 use crate::natural::natural;
@@ -221,13 +222,14 @@ pub(crate) fn button<'a, Message: Clone + 'a>(
     } else {
         inner.width(Length::Fill).align_x(Alignment::Center)
     };
-    widget::button(inner)
-        .width(width)
-        .height(Length::Fixed(metrics.height))
-        .padding(Padding::from([0.0, metrics.padding_x]))
-        .on_press_maybe(message)
-        .style(move |theme, status| style(&Tokens::of(theme), status))
-        .into()
+    after_touch(
+        widget::button(inner)
+            .width(width)
+            .height(Length::Fixed(metrics.height))
+            .padding(Padding::from([0.0, metrics.padding_x]))
+            .on_press_maybe(message)
+            .style(move |theme, status| style(&Tokens::of(theme), status)),
+    )
 }
 
 /// Background and foreground colours of a toggle, on or off, in a state.

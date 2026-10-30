@@ -56,6 +56,7 @@ use iced::{
     Vector,
 };
 
+use crate::after_touch::after_touch;
 use crate::icon::{Glyph, themed};
 use crate::keys::{self, Chord, Keymap};
 use crate::primitives::button::{self, Size};
@@ -699,9 +700,12 @@ impl<'a, Message: Clone + 'a, A> From<Toasts<'a, Message, A>> for Element<'a, Me
             .spacing(space::SM)
             .width(Length::Fill)
             .max_width(max_width);
-        // Hovering the toasts pauses their countdowns.
+        // Hovering the toasts pauses their countdowns. A finger pauses them
+        // only while it is down.
         let cards: Element<'a, Message> = match (emit(Event::Pause), emit(Event::Resume)) {
-            (Some(pause), Some(resume)) => mouse_area(cards).on_enter(pause).on_exit(resume).into(),
+            (Some(pause), Some(resume)) => {
+                after_touch(mouse_area(cards).on_enter(pause).on_exit(resume))
+            }
             _ => cards.into(),
         };
 

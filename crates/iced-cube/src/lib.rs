@@ -26,6 +26,8 @@
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+#[cfg(any(feature = "button", feature = "toggle", feature = "tooltip"))]
+mod after_touch;
 pub mod application;
 pub mod data;
 pub mod feedback;

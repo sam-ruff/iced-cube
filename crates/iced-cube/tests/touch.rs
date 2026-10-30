@@ -188,3 +188,65 @@ fn dialog_close_button_and_alert_dialog_buttons() {
     let messages: Vec<_> = ui.into_messages().collect();
     assert_eq!(messages, vec![Message::Cancel, Message::Delete]);
 }
+
+/// A tapped control is drawn as it was before the tap once the finger
+/// lifts, rather than hovered, and a mouse brings the hover back.
+#[cfg(all(feature = "button", feature = "fab", feature = "toggle-group"))]
+#[test]
+fn a_tap_leaves_no_hover_on_buttons_fabs_or_toggle_items() {
+    use iced::time::Instant;
+    use iced::widget::column;
+    use iced::{mouse, window};
+    use iced_cube::primitives::toggle_group::{State, Variant, item, toggle_group};
+    use iced_cube::{button, fab, lucide};
+
+    #[derive(Debug, Clone, PartialEq)]
+    enum Message {
+        Save,
+        New,
+        Mode,
+    }
+    let modes = State::single([item(0, "Light"), item(1, "Dark")]);
+    let view: iced::Element<'_, Message> = column![
+        button("Save").on_press(Message::Save),
+        fab(lucide!(Plus)).label("New").on_press(Message::New),
+        toggle_group(&modes)
+            .variant(Variant::Outline)
+            .width(iced::Length::Fill)
+            .on_event(|_| Message::Mode),
+    ]
+    .spacing(24)
+    .padding(24)
+    .into();
+    let mut ui = iced_test::simulator(view);
+
+    let directory = std::env::temp_dir().join(format!("iced-cube-touch-{}", std::process::id()));
+    let resting = directory.join("resting");
+    let same_as_resting = |ui: &mut Simulator<'_, Message>| {
+        let redraw = Event::Window(window::Event::RedrawRequested(Instant::now()));
+        let _ = ui.simulate([redraw]);
+        match ui
+            .snapshot(&iced_cube::theme::light())
+            .and_then(|frame| frame.matches_hash(&resting))
+        {
+            Ok(same) => same,
+            Err(error) => panic!("snapshot failed: {error:?}"),
+        }
+    };
+    assert!(same_as_resting(&mut ui));
+
+    for label in ["Save", "New", "Dark"] {
+        let at = centre(&mut ui, label);
+        tap(&mut ui, at);
+        assert!(same_as_resting(&mut ui), "{label} still looks hovered");
+
+        let _ = ui.simulate([Event::Mouse(mouse::Event::CursorMoved { position: at })]);
+        assert!(!same_as_resting(&mut ui), "{label} shows no hover");
+        let away = Point::new(2.0, 2.0);
+        ui.point_at(away);
+        let _ = ui.simulate([Event::Mouse(mouse::Event::CursorMoved { position: away })]);
+    }
+    let _ = std::fs::remove_dir_all(&directory);
+    let messages: Vec<_> = ui.into_messages().collect();
+    assert_eq!(messages, vec![Message::Save, Message::New, Message::Mode]);
+}
