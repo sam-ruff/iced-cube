@@ -1,8 +1,8 @@
 #![cfg(feature = "touch-clicks")]
 
 use iced::widget::text_editor::{self, Action, Content};
-use iced::widget::{column, rich_text, scrollable, space, span};
-use iced::{Element, Event, Length, Point, touch};
+use iced::widget::{column, container, mouse_area, rich_text, scrollable, space, span, stack};
+use iced::{Element, Event, Length, Point, mouse, touch};
 use iced_cube::touch_clicks;
 use iced_test::simulator::{Simulator, simulator};
 
@@ -102,6 +102,57 @@ fn a_tap_focuses_an_editor_and_places_the_caret() {
     );
     assert!(
         messages.contains(&Message::Edit(Action::Edit(text_editor::Edit::Insert('x')))),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn each_tap_is_exactly_one_click() {
+    let content = Content::with_text("first line\nsecond line");
+    let view = column![touch_clicks(editor(&content)), space().height(300)];
+    let mut ui = simulator(view);
+    tap(&mut ui, Point::new(40.0, 30.0));
+    let clicks = ui
+        .into_messages()
+        .filter(|message| matches!(message, Message::Edit(Action::Click(_))))
+        .count();
+    assert_eq!(clicks, 1);
+}
+
+#[test]
+fn a_tap_on_a_layer_above_does_not_click_the_content_below() {
+    // An interactive layer that ignores touch, such as a panel over the
+    // text, hides the content from the cursor as it would from a mouse.
+    let cover = mouse_area(container(space()).width(Length::Fill).height(40))
+        .interaction(mouse::Interaction::Pointer);
+    let view = column![stack![touch_clicks(link()), cover], space().height(400)];
+    let mut ui = simulator(view);
+    tap(&mut ui, Point::new(20.0, 8.0));
+    assert_eq!(ui.into_messages().count(), 0);
+}
+
+#[test]
+fn a_tap_on_a_layer_above_unfocuses_the_editor_below() {
+    let content = Content::with_text("text");
+    let cover = mouse_area(container(space()).width(Length::Fill).height(40))
+        .interaction(mouse::Interaction::Pointer);
+    let view = column![
+        stack![touch_clicks(editor(&content)), cover],
+        space().height(300)
+    ];
+    let mut ui = simulator(view);
+    tap(&mut ui, Point::new(40.0, 80.0));
+    tap(&mut ui, Point::new(40.0, 20.0));
+    let _ = ui.typewrite("x");
+    let messages: Vec<_> = ui.into_messages().collect();
+    assert!(
+        matches!(messages.first(), Some(Message::Edit(Action::Click(_)))),
+        "{messages:?}"
+    );
+    assert!(
+        !messages
+            .iter()
+            .any(|message| matches!(message, Message::Edit(Action::Edit(_)))),
         "{messages:?}"
     );
 }

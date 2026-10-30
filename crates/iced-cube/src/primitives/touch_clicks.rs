@@ -75,7 +75,7 @@ struct Track {
     finger: Finger,
     origin: Point,
     last: Point,
-    target: Point,
+    target: mouse::Cursor,
     inside: bool,
     dragging: bool,
     cancelled: bool,
@@ -89,9 +89,10 @@ pub struct Translator {
 
 impl Translator {
     /// A finger went down at `position` in window coordinates. `target` is
-    /// the point a click would land on in the content's coordinates, and
-    /// `inside` whether that is over the content.
-    pub fn press(&mut self, finger: Finger, position: Point, target: Point, inside: bool) {
+    /// the cursor a click would reach the content with, in the content's
+    /// coordinates, and `inside` whether it is over the content. A layer
+    /// above the content hides the cursor from it, as it would a mouse.
+    pub fn press(&mut self, finger: Finger, position: Point, target: mouse::Cursor, inside: bool) {
         if let Some(track) = self.track.as_mut() {
             track.cancelled = true;
             return;
@@ -126,8 +127,9 @@ impl Translator {
         }
     }
 
-    /// The finger lifted. Returns where to click when it was a tap.
-    pub fn lift(&mut self, finger: Finger) -> Option<Point> {
+    /// The finger lifted. Returns the cursor to click with when it was a
+    /// tap.
+    pub fn lift(&mut self, finger: Finger) -> Option<mouse::Cursor> {
         let track = self.track.filter(|track| track.finger == finger)?;
         self.track = None;
         (!track.dragging && !track.cancelled).then_some(track.target)
@@ -211,15 +213,15 @@ struct Wrapper<'a, Message> {
 }
 
 impl<Message> Wrapper<'_, Message> {
-    /// Sends synthetic events to the content with the cursor at `at`. They
-    /// get their own shell, so nothing they capture marks the real touch
-    /// event as captured.
+    /// Sends synthetic events to the content with `cursor`. They get their
+    /// own shell, so nothing they capture marks the real touch event as
+    /// captured.
     #[allow(clippy::too_many_arguments)]
     fn deliver(
         &mut self,
         tree: &mut Tree,
         events: &[Event],
-        at: Point,
+        cursor: mouse::Cursor,
         layout: Layout<'_>,
         renderer: &Renderer,
         clipboard: &mut dyn Clipboard,
@@ -233,7 +235,7 @@ impl<Message> Wrapper<'_, Message> {
                 &mut tree.children[0],
                 event,
                 layout,
-                mouse::Cursor::Available(at),
+                cursor,
                 renderer,
                 clipboard,
                 &mut inner,
@@ -357,11 +359,12 @@ impl<Message> Widget<Message, Theme, Renderer> for Wrapper<'_, Message> {
         let bounds = layout.bounds();
         match *touch {
             touch::Event::FingerPressed { id, position } => {
-                let target = cursor.position().unwrap_or(position);
-                let inside = bounds.contains(target) && viewport.contains(target);
+                let inside = cursor
+                    .position()
+                    .is_some_and(|target| bounds.contains(target) && viewport.contains(target));
                 tree.state
                     .downcast_mut::<Translator>()
-                    .press(id, position, target, inside);
+                    .press(id, position, cursor, inside);
             }
             touch::Event::FingerMoved { id, position } => {
                 let translator = tree.state.downcast_mut::<Translator>();
@@ -384,7 +387,7 @@ impl<Message> Widget<Message, Theme, Renderer> for Wrapper<'_, Message> {
                 self.deliver(
                     tree,
                     &[wheel],
-                    at,
+                    mouse::Cursor::Available(at),
                     layout,
                     renderer,
                     clipboard,
@@ -393,16 +396,21 @@ impl<Message> Widget<Message, Theme, Renderer> for Wrapper<'_, Message> {
                 );
             }
             touch::Event::FingerLifted { id, .. } => {
-                let Some(at) = tree.state.downcast_mut::<Translator>().lift(id) else {
+                let Some(target) = tree.state.downcast_mut::<Translator>().lift(id) else {
                     return;
                 };
-                let click = [
-                    Event::Mouse(mouse::Event::CursorMoved { position: at }),
-                    Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
-                    Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
-                ];
+                let moved = target
+                    .position()
+                    .map(|position| Event::Mouse(mouse::Event::CursorMoved { position }));
+                let click: Vec<Event> = moved
+                    .into_iter()
+                    .chain([
+                        Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+                        Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+                    ])
+                    .collect();
                 self.deliver(
-                    tree, &click, at, layout, renderer, clipboard, shell, viewport,
+                    tree, &click, target, layout, renderer, clipboard, shell, viewport,
                 );
             }
             touch::Event::FingerLost { id, .. } => {
@@ -467,22 +475,34 @@ mod tests {
         assert_eq!(clamped.line_height, 1.0);
     }
 
+    fn cursor(y: f32) -> mouse::Cursor {
+        mouse::Cursor::Available(at(y))
+    }
+
     #[test]
     fn a_tap_clicks_where_the_content_was_touched() {
         let mut translator = Translator::default();
-        translator.press(ONE, at(0.0), at(40.0), true);
+        translator.press(ONE, at(0.0), cursor(40.0), true);
         assert_eq!(
             translator.moved(ONE, at(DEFAULT_SLOP), DEFAULT_SLOP),
             Move::Held
         );
-        assert_eq!(translator.lift(ONE), Some(at(40.0)));
+        assert_eq!(translator.lift(ONE), Some(cursor(40.0)));
         assert_eq!(translator.lift(ONE), None);
+    }
+
+    #[test]
+    fn a_tap_on_hidden_content_clicks_without_a_position() {
+        let mut translator = Translator::default();
+        let hidden = mouse::Cursor::Levitating(at(40.0));
+        translator.press(ONE, at(40.0), hidden, false);
+        assert_eq!(translator.lift(ONE), Some(hidden));
     }
 
     #[test]
     fn a_drag_is_not_a_click_and_reports_its_movement() {
         let mut translator = Translator::default();
-        translator.press(ONE, at(0.0), at(0.0), true);
+        translator.press(ONE, at(0.0), cursor(0.0), true);
         assert_eq!(
             translator.moved(ONE, at(20.0), DEFAULT_SLOP),
             Move::Dragged {
@@ -503,16 +523,16 @@ mod tests {
     #[test]
     fn a_second_finger_cancels_and_others_are_ignored() {
         let mut translator = Translator::default();
-        translator.press(ONE, at(0.0), at(0.0), true);
+        translator.press(ONE, at(0.0), cursor(0.0), true);
         assert_eq!(
             translator.moved(Finger(2), at(90.0), DEFAULT_SLOP),
             Move::Ignored
         );
-        translator.press(Finger(2), at(0.0), at(0.0), true);
+        translator.press(Finger(2), at(0.0), cursor(0.0), true);
         assert_eq!(translator.lift(Finger(2)), None);
         assert_eq!(translator.lift(ONE), None);
 
-        translator.press(ONE, at(0.0), at(0.0), false);
+        translator.press(ONE, at(0.0), cursor(0.0), false);
         assert!(!translator.is_inside(ONE));
         translator.lost(ONE);
         assert_eq!(translator.lift(ONE), None);

@@ -25,7 +25,7 @@ api:
 
 Some of iced's own widgets read only the mouse: the text editor, rich text and so markdown. On a touch screen you cannot place the caret in them or tap a link. Turning every touch into a mouse event for the whole window would fix those and break the rest, because widgets that already read touch, such as buttons and [tappables](../tappable/), would then react twice. Wrap just the mouse-only content instead.
 
-For a finger that goes down and lifts within the slop, the content gets the cursor moved to the touch point, then a left press and release there, so a link opens or the caret moves. A tap anywhere in the window is passed on this way, so tapping outside a focused editor unfocuses it, as a click would. A finger that moves further is a drag. By default the content gets nothing extra, so a list around rich text scrolls as usual and no link opens.
+For a finger that goes down and lifts within the slop, the content gets the cursor moved to the touch point, then a left press and release there, so a link opens or the caret moves. A tap anywhere in the window is passed on this way, so tapping outside a focused editor unfocuses it, as a click would. A tap on a layer drawn over the content, such as a menu, reaches it as a click elsewhere, so a link under the menu does not open. A finger that moves further is a drag. By default the content gets nothing extra, so a list around rich text scrolls as usual and no link opens.
 
 Markdown views are wrapped the same way as the rich text example: `touch_clicks(markdown::view(&items, settings).map(Message::Link))`. A [textarea](../textarea/) is already wrapped, with scrolling on.
 
