@@ -319,6 +319,47 @@ fn drawn(ui: &mut Simulator<'_, Message>, statuses: &RefCell<Vec<Status>>) -> Op
     statuses.borrow().last().copied()
 }
 
+#[cfg(feature = "context-menu")]
+#[test]
+fn a_context_menu_opened_by_holding_a_row_leaves_it_ready_for_a_tap() {
+    use iced_cube::overlay::context_menu::{self, context_menu};
+    use iced_cube::overlay::dropdown_menu::item;
+
+    let menu: context_menu::State<u8> = context_menu::State::new([item(1, "Open")]);
+    let statuses = Rc::new(RefCell::new(Vec::new()));
+    let recorder = statuses.clone();
+    let row = tappable(text("Recorded"))
+        .on_tap(Message::Tap(0))
+        .width(Length::Fill)
+        .padding(12)
+        .style(move |theme, status| {
+            recorder.borrow_mut().push(status);
+            style(&Tokens::of(theme), status)
+        });
+    let view: Element<'_, Message> = column![
+        context_menu(&menu, row).on_event(|_| Message::Nested),
+        text("Below")
+    ]
+    .into();
+    let mut ui = simulator(view);
+    let at = centre(&mut ui, "Recorded");
+
+    touch_at(&mut ui, pressed, at);
+    let start = Instant::now();
+    let _ = ui.simulate([
+        Event::Window(window::Event::RedrawRequested(start)),
+        Event::Window(window::Event::RedrawRequested(
+            start + Duration::from_secs(2),
+        )),
+    ]);
+    touch_at(&mut ui, lifted, at);
+    assert_eq!(drawn(&mut ui, &statuses), Some(Status::Active));
+
+    touch_at(&mut ui, pressed, at);
+    touch_at(&mut ui, lifted, at);
+    assert_eq!(messages(ui), vec![Message::Nested, Message::Tap(0)]);
+}
+
 #[test]
 fn a_touch_leaves_no_pressed_or_hovered_look_behind() {
     let statuses = Rc::new(RefCell::new(Vec::new()));
