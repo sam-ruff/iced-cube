@@ -1,6 +1,8 @@
-//! Moving between views and actions: breadcrumbs, command lists, document
-//! tabs, pagination, the sidebar and tabs.
+//! Moving between views and actions: bottom navigation, breadcrumbs,
+//! command lists, document tabs, pagination, the sidebar and tabs.
 
+#[cfg(feature = "bottom-nav")]
+pub mod bottom_nav;
 #[cfg(feature = "breadcrumb")]
 pub mod breadcrumb;
 #[cfg(feature = "command")]
@@ -14,6 +16,8 @@ pub mod sidebar;
 #[cfg(feature = "tabs")]
 pub mod tabs;
 
+#[cfg(feature = "bottom-nav")]
+pub use bottom_nav::{BottomNav, bottom_nav};
 #[cfg(feature = "breadcrumb")]
 pub use breadcrumb::{Breadcrumb, breadcrumb, crumb};
 #[cfg(feature = "command")]

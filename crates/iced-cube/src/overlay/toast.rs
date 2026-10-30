@@ -52,7 +52,8 @@ use iced::keyboard::key::Named;
 use iced::time::{Duration, Instant};
 use iced::widget::{self, column, container, mouse_area, row, stack, text};
 use iced::{
-    Alignment, Background, Border, Color, Element, Length, Shadow, Subscription, Theme, Vector,
+    Alignment, Background, Border, Color, Element, Length, Padding, Shadow, Subscription, Theme,
+    Vector,
 };
 
 use crate::icon::{Glyph, themed};
@@ -76,7 +77,11 @@ pub const DEFAULT_LIMIT: usize = 3;
 /// How often [`timer`] checks for expired toasts.
 pub const TICK: Duration = Duration::from_millis(250);
 
-const WIDTH: f32 = 356.0;
+/// The widest toasts get by default. A narrower window fits them to its
+/// width.
+pub const MAX_WIDTH: f32 = 356.0;
+/// The default space between the toasts and the window edges.
+pub const INSET: f32 = space::LG;
 
 /// The sending half of the toast channel. Clone it for each producer.
 pub type Sender = mpsc::Sender<Toast>;
@@ -616,6 +621,8 @@ pub struct Toasts<'a, Message, A = ()> {
     state: &'a State<A>,
     content: Element<'a, Message>,
     position: Position,
+    inset: Padding,
+    max_width: f32,
     on_event: Option<Box<dyn Fn(Event) -> Message + 'a>>,
 }
 
@@ -629,6 +636,8 @@ pub fn toasts<'a, Message, A>(
         state,
         content: content.into(),
         position: Position::default(),
+        inset: Padding::from(INSET),
+        max_width: MAX_WIDTH,
         on_event: None,
     }
 }
@@ -638,6 +647,8 @@ impl<Message, A: std::fmt::Debug> std::fmt::Debug for Toasts<'_, Message, A> {
         f.debug_struct("Toasts")
             .field("state", self.state)
             .field("position", &self.position)
+            .field("inset", &self.inset)
+            .field("max_width", &self.max_width)
             .finish_non_exhaustive()
     }
 }
@@ -645,6 +656,22 @@ impl<Message, A: std::fmt::Debug> std::fmt::Debug for Toasts<'_, Message, A> {
 impl<'a, Message, A> Toasts<'a, Message, A> {
     pub fn position(mut self, position: Position) -> Self {
         self.position = position;
+        self
+    }
+
+    /// The space between the toasts and each window edge. Defaults to
+    /// [`INSET`] all round. Raise the bottom to keep toasts above a bottom
+    /// bar, such as `Padding::from(16).bottom(96)`.
+    pub fn inset(mut self, inset: impl Into<Padding>) -> Self {
+        self.inset = inset.into();
+        self
+    }
+
+    /// The widest the toasts get. They fill a narrower window up to its
+    /// inset, so on a phone a bottom-centre toast spans the screen like a
+    /// snackbar. Defaults to [`MAX_WIDTH`].
+    pub fn max_width(mut self, max_width: f32) -> Self {
+        self.max_width = max_width.max(0.0);
         self
     }
 
@@ -660,13 +687,18 @@ impl<'a, Message: Clone + 'a, A> From<Toasts<'a, Message, A>> for Element<'a, Me
             state,
             content,
             position,
+            inset,
+            max_width,
             on_event,
         } = toasts;
         let emit = |event: Event| on_event.as_ref().map(|on_event| on_event(event));
 
         let cards = state.visible().map(|(id, toast)| card(id, toast, &emit));
 
-        let cards = column(cards).spacing(space::SM).width(WIDTH);
+        let cards = column(cards)
+            .spacing(space::SM)
+            .width(Length::Fill)
+            .max_width(max_width);
         // Hovering the toasts pauses their countdowns.
         let cards: Element<'a, Message> = match (emit(Event::Pause), emit(Event::Resume)) {
             (Some(pause), Some(resume)) => mouse_area(cards).on_enter(pause).on_exit(resume).into(),
@@ -675,7 +707,7 @@ impl<'a, Message: Clone + 'a, A> From<Toasts<'a, Message, A>> for Element<'a, Me
 
         let (align_x, align_y) = position.alignment();
         let layer = container(cards)
-            .padding(space::LG)
+            .padding(inset)
             .width(Length::Fill)
             .height(Length::Fill)
             .align_x(align_x)
@@ -809,6 +841,20 @@ mod tests {
         assert!(t.description.is_none());
         assert!(t.action.is_none());
         assert!(toast("Sticky").persistent().duration.is_none());
+    }
+
+    #[test]
+    fn layer_defaults_keep_the_corner_and_options_override_them() {
+        let state: State = State::new();
+        let layer: Toasts<'_, (), ()> = toasts(&state, text("Content"));
+        assert_eq!(layer.position, Position::BottomRight);
+        assert_eq!(layer.inset, Padding::from(INSET));
+        assert_eq!(layer.max_width, MAX_WIDTH);
+        let layer: Toasts<'_, (), ()> = toasts(&state, text("Content"))
+            .inset(Padding::from(16).bottom(96))
+            .max_width(-1.0);
+        assert_eq!(layer.inset.bottom, 96.0);
+        assert_eq!(layer.max_width, 0.0);
     }
 
     #[test]

@@ -38,3 +38,5 @@ keyboard:
 The textarea wraps iced's text editor, so your app owns the `text_editor::Content` and applies every `Action` it receives. This keeps undo, validation and limits in your own `update`, as the character count example shows.
 
 Read the text back with `content.text()`. Wrap the textarea in [`field`](../field/) to give it a label and helper text.
+
+On a touch screen a tap places the caret and a vertical drag scrolls the text, because the textarea wraps its editor in [touch clicks](../touch-clicks/) with scrolling on. A drag inside a textarea therefore scrolls the textarea, not a list around it.

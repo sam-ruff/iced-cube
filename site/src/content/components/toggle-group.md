@@ -10,7 +10,7 @@ imports: |
 keywords: [segmented control, button group, toolbar, radio buttons]
 related: [toggle, tabs, radio]
 hero: toggle-group/single
-stories: [toggle-group/single, toggle-group/multiple, toggle-group/keyboard]
+stories: [toggle-group/single, toggle-group/multiple, toggle-group/segmented, toggle-group/keyboard]
 api:
   - name: "State::single(items) / State::multiple(items)"
     description: "Holds the items, with nothing on. Single mode keeps at most one item on; multiple mode switches each one by itself."
@@ -32,6 +32,8 @@ api:
     description: "Default, separate toggles with a small gap, or Outline, attached segments inside one border. Defaults to Default."
   - name: ".size(Size)"
     description: "The toggle Size: Sm, Md or Lg. Defaults to Md."
+  - name: ".width(length)"
+    description: "The group's width. Shrink, the default, fits the items; any other width, such as Length::Fill, shares it equally between them with their labels centred."
   - name: ".on_event(f)"
     description: "Maps item events to your message, such as Message::Group."
   - name: "toggle_group::default_keymap()"
@@ -45,6 +47,8 @@ The app owns a `toggle_group::State` and routes events into it, as with [tabs](.
 Multiple mode suits formatting options and filters, where each item is independent. `selected()` returns the items that are on in the order they are shown, whatever order they were pressed in.
 
 Separate toggles wrap onto new lines on a narrow screen. An outlined group stays in one row, so keep it to two to four short items.
+
+For a segmented control that spans a settings row, such as System, Light and Dark, give an outlined single-choice group `.width(Length::Fill)`. Every segment is then the same width, a line separates each one from the next, and the selected segment takes a stronger fill than a plain toggle so it stands out in dark themes too.
 
 Use a single-choice group for a few short options shown side by side, and a [select](../select/) when there are more than four or five. When the options switch between whole views rather than settings, tabs are the clearer choice.
 

@@ -9,7 +9,7 @@ imports: |
 keywords: [notification, snackbar]
 related: [alert]
 hero: toast/variants
-stories: [toast/variants, toast/background-job, toast/action, toast/keyboard]
+stories: [toast/variants, toast/background-job, toast/action, toast/keyboard, toast/snackbar]
 api:
   - name: "toast(title)"
     description: "Creates a toast that closes five seconds after it becomes visible."
@@ -47,6 +47,10 @@ api:
     description: "Renders the toasts over your content. Toast buttons render disabled until .on_event(f) is set."
   - name: ".position(Position)"
     description: "TopLeft, TopCenter, TopRight, BottomLeft, BottomCenter or BottomRight. Defaults to BottomRight."
+  - name: ".inset(padding)"
+    description: "The space between the toasts and each window edge. Defaults to INSET (16) all round. Raise the bottom to keep toasts above a bottom bar."
+  - name: ".max_width(pixels)"
+    description: "The widest the toasts get. They fill a narrower window up to its inset. Defaults to MAX_WIDTH (356)."
   - name: "toast::close_button_id(id)"
     description: "The widget id of a toast's close button, for focusing it or clicking it in tests."
   - name: "toast::default_keymap()"
@@ -132,3 +136,5 @@ Undo is easy to miss, so a toast with an action gets more room than the rest. It
 Time only enters the queue through `Tick`, so the queue is easy to test: push toasts, call `state.tick(now)` with any instant, and check what is left. A toast starts counting down when it becomes visible, not when it arrives.
 
 The background job example uses an async stream that waits with `futures-timer` instead of a thread, so it also runs in the browser.
+
+On a phone, a toast with an action works as a snackbar: put it at `Position::BottomCenter`, raise the bottom of `.inset(...)` by the height of any [bottom navigation](../bottom-nav/) bar so it sits just above it, and let `.max_width(...)` decide how wide it gets on a wide window. On a narrow one it fills the width less the inset. The action and close buttons answer taps as well as clicks.

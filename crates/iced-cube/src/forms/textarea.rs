@@ -1,5 +1,8 @@
 //! Multi-line text editing.
 //!
+//! A tap places the caret and a vertical drag scrolls the text, as with the
+//! mouse, so a textarea works on a touch screen.
+//!
 //! The app owns the [`Content`] and applies each [`Action`] in `update`:
 //!
 //! ```no_run
@@ -26,10 +29,13 @@ use iced::{Element, Length, Padding};
 pub use iced::widget::text_editor::{Action, Content};
 
 use crate::primitives::input;
+use crate::primitives::touch_clicks::touch_clicks;
 use crate::theme::{Tokens, space, text_size};
 
 /// Minimum height while the height is [`Length::Shrink`], roughly three lines.
 pub const MIN_HEIGHT: f32 = 80.0;
+/// Line height as a multiple of the text size.
+const LINE_HEIGHT: f32 = 1.5;
 
 /// A textarea builder. Convert it into an [`Element`] to render.
 ///
@@ -134,7 +140,7 @@ impl<'a, Message: Clone + 'a> From<Textarea<'a, Message>> for Element<'a, Messag
         // iced never reports Disabled for an editor without `on_action`.
         let mut editor = iced::widget::text_editor(textarea.content)
             .size(text_size::SM)
-            .line_height(LineHeight::Relative(1.5))
+            .line_height(LineHeight::Relative(LINE_HEIGHT))
             .padding(Padding::from([space::SM, space::MD]))
             .height(textarea.height)
             .style(move |theme, status| {
@@ -154,7 +160,12 @@ impl<'a, Message: Clone + 'a> From<Textarea<'a, Message>> for Element<'a, Messag
             editor = editor.on_action(on_action);
         }
 
-        container(editor).width(textarea.width).into()
+        // iced's editor reads only the mouse, so taps and drags are
+        // translated for it.
+        touch_clicks(container(editor).width(textarea.width))
+            .scroll(true)
+            .line_height(text_size::SM * LINE_HEIGHT)
+            .into()
     }
 }
 

@@ -8,6 +8,7 @@ pub mod accordion;
 pub mod alert;
 pub mod avatar;
 pub mod badge;
+pub mod bottom_nav;
 pub mod breadcrumb;
 pub mod button;
 pub mod card;
@@ -20,6 +21,7 @@ pub mod data_table;
 pub mod dialog;
 pub mod document_tabs;
 pub mod dropdown_menu;
+pub mod fab;
 pub mod icon_button;
 pub mod input;
 pub mod json_viewer;
@@ -44,6 +46,7 @@ pub mod stack;
 pub mod status_bar;
 pub mod switch;
 pub mod tabs;
+pub mod tappable;
 pub mod textarea;
 pub mod theme;
 pub mod toast;
@@ -51,6 +54,7 @@ pub mod toggle;
 pub mod toggle_group;
 pub mod toolbar;
 pub mod tooltip;
+pub mod touch_clicks;
 pub mod tree;
 pub mod virtual_list;
 
@@ -219,6 +223,41 @@ crate::stories! {
         id: "toggle-group/keyboard", component: "toggle-group", title: "Keyboard shortcuts",
         description: "The arrow keys move a single-choice group's selection through the default keymap.",
         file: "toggle_group/keyboard.rs", height: 160, subscription: true,
+    }
+    ToggleGroupSegmented => toggle_group::segmented {
+        id: "toggle-group/segmented", component: "toggle-group", title: "Segmented control",
+        description: "An outlined group filling its container, with equal-width items for System, Light and Dark.",
+        file: "toggle_group/segmented.rs", height: 200,
+    }
+    FabOverList => fab::over_list {
+        id: "fab/over-list", component: "fab", title: "Over a list",
+        description: "An icon-only fab placed in the bottom-right corner over a scrolling list with a stack.",
+        file: "fab/over_list.rs", height: 320,
+    }
+    FabExtended => fab::extended {
+        id: "fab/extended", component: "fab", title: "Extended and disabled",
+        description: "Fabs with a label, an icon-only fab with a tooltip, and a disabled fab.",
+        file: "fab/extended.rs", height: 200,
+    }
+    TappableList => tappable::list {
+        id: "tappable/list", component: "tappable", title: "List rows",
+        description: "Rows that open on a tap and show a menu on a long press or right click, while a finger dragged over them scrolls the list.",
+        file: "tappable/list.rs", height: 320,
+    }
+    TouchClicksRichText => touch_clicks::rich_text {
+        id: "touch-clicks/rich-text", component: "touch-clicks", title: "Links in rich text",
+        description: "Rich text with links, wrapped so a tap opens a link. Markdown views are wrapped the same way.",
+        file: "touch_clicks/rich_text.rs", height: 200,
+    }
+    BottomNavDefault => bottom_nav::default {
+        id: "bottom-nav/default", component: "bottom-nav", title: "Default",
+        description: "Four destinations under a screen. Selecting the current one again goes back to its top.",
+        file: "bottom_nav/default.rs", height: 300,
+    }
+    BottomNavKeyboard => bottom_nav::keyboard {
+        id: "bottom-nav/keyboard", component: "bottom-nav", title: "Keyboard shortcuts",
+        description: "Alt and a number pick a destination through the default keymap.",
+        file: "bottom_nav/keyboard.rs", height: 260, subscription: true,
     }
     SelectDefault => select::default {
         id: "select/default", component: "select", title: "Default",
@@ -559,6 +598,11 @@ crate::stories! {
         id: "toast/keyboard", component: "toast", title: "Keyboard shortcuts",
         description: "Escape closes the newest toast and Shift+Escape closes them all, through the default keymap.",
         file: "toast/keyboard.rs", height: 340, subscription: true,
+    }
+    ToastSnackbar => toast::snackbar {
+        id: "toast/snackbar", component: "toast", title: "Snackbar above a bottom bar",
+        description: "A bottom-centre toast with Undo, inset above a bottom navigation bar and filling a narrow window up to a maximum width.",
+        file: "toast/snackbar.rs", height: 340, subscription: true, edge: true,
     }
     DialogDefault => dialog::default {
         id: "dialog/default", component: "dialog", title: "Default",

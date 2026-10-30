@@ -11,13 +11,13 @@
 use iced::border::Radius;
 use iced::keyboard::key::Named;
 use iced::widget::{self, button::Status, container, row};
-use iced::{Background, Border, Element, Theme};
+use iced::{Background, Border, Element, Length, Theme};
 
 use crate::icon::Glyph;
 use crate::keys::{self, Chord, Keymap};
 use crate::natural::natural;
 use crate::primitives::toggle::{self, Size};
-use crate::theme::{Tokens, fade, radius, space};
+use crate::theme::{Tokens, fade, mix, radius, space};
 
 /// Whether one or several items can be on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -321,6 +321,7 @@ pub struct ToggleGroup<'a, Id, Message> {
     state: &'a State<Id>,
     variant: Variant,
     size: Size,
+    width: Length,
     on_event: Option<Box<dyn Fn(Event<Id>) -> Message + 'a>>,
 }
 
@@ -331,6 +332,7 @@ pub fn toggle_group<Id, Message>(state: &State<Id>) -> ToggleGroup<'_, Id, Messa
         state,
         variant: Variant::default(),
         size: Size::default(),
+        width: Length::Shrink,
         on_event: None,
     }
 }
@@ -341,6 +343,7 @@ impl<Id: std::fmt::Debug, Message> std::fmt::Debug for ToggleGroup<'_, Id, Messa
             .field("state", self.state)
             .field("variant", &self.variant)
             .field("size", &self.size)
+            .field("width", &self.width)
             .field("enabled", &self.on_event.is_some())
             .finish()
     }
@@ -354,6 +357,14 @@ impl<'a, Id, Message> ToggleGroup<'a, Id, Message> {
 
     pub fn size(mut self, size: Size) -> Self {
         self.size = size;
+        self
+    }
+
+    /// The group's width. The default shrinks to the items; any other
+    /// width, such as `Length::Fill`, shares it equally between the items
+    /// with their content centred, like a segmented control.
+    pub fn width(mut self, width: impl Into<Length>) -> Self {
+        self.width = width.into();
         self
     }
 
@@ -393,9 +404,16 @@ where
             state,
             variant,
             size,
+            width,
             on_event,
         } = group;
         let len = state.items.len();
+        let shrink = width == Length::Shrink;
+        let item_width = if shrink {
+            Length::Shrink
+        } else {
+            Length::FillPortion(1)
+        };
         // An outlined group draws its border outside the items, so they
         // shrink by the border to keep the group as tall as a button.
         let metrics = match variant {
@@ -418,6 +436,7 @@ where
                 entry.icon,
                 pressed,
                 metrics,
+                item_width,
                 message,
                 move |tokens, status| item_style(tokens, variant, position, pressed, status),
             )
@@ -428,13 +447,46 @@ where
         // segments stay in one row, so keep outlined groups to a few short
         // items.
         match variant {
-            Variant::Default => row(items.map(natural)).spacing(space::XS).wrap().into(),
-            Variant::Outline => natural(
-                container(row(items))
+            Variant::Default if shrink => row(items.map(natural)).spacing(space::XS).wrap().into(),
+            Variant::Default => row(items).spacing(space::XS).width(width).into(),
+            Variant::Outline => {
+                let mut segments = row![].width(if shrink { Length::Shrink } else { Length::Fill });
+                for (index, item) in items.enumerate() {
+                    if index > 0 {
+                        segments = segments.push(divider(metrics.height, enabled));
+                    }
+                    segments = segments.push(item);
+                }
+                let group = container(segments)
                     .padding(BORDER)
-                    .style(move |theme: &Theme| group_style(&Tokens::of(theme), variant, enabled)),
-            ),
+                    .width(width)
+                    .style(move |theme: &Theme| group_style(&Tokens::of(theme), variant, enabled));
+                if shrink { natural(group) } else { group.into() }
+            }
         }
+    }
+}
+
+/// The line between two segments of an outlined group, so every item reads
+/// as outlined whether or not it is on.
+fn divider<'a, Message: 'a>(height: f32, enabled: bool) -> Element<'a, Message> {
+    container(widget::space())
+        .width(BORDER)
+        .height(height)
+        .style(move |theme: &Theme| divider_style(&Tokens::of(theme), enabled))
+        .into()
+}
+
+/// The line between segments: the group's border colour.
+pub fn divider_style(tokens: &Tokens, enabled: bool) -> container::Style {
+    let colour = if enabled {
+        tokens.border
+    } else {
+        fade(tokens.border, 0.5)
+    };
+    container::Style {
+        background: Some(Background::Color(colour)),
+        ..container::Style::default()
     }
 }
 
@@ -464,12 +516,32 @@ pub fn item_style(
         Position::Last => Radius::default().right(outer),
     };
     widget::button::Style {
+        background: selected_background(tokens, pressed, status).or(base.background),
         border: Border {
             radius,
             ..base.border
         },
         ..base
     }
+}
+
+/// An outlined segment that is on takes the accent pulled towards the
+/// foreground, so it stands out from its neighbours in dark themes too,
+/// where the plain accent is close to the background.
+fn selected_background(tokens: &Tokens, pressed: bool, status: Status) -> Option<Background> {
+    if !pressed {
+        return None;
+    }
+    let amount = match status {
+        Status::Hovered | Status::Pressed => 0.18,
+        Status::Active => 0.1,
+        Status::Disabled => return None,
+    };
+    Some(Background::Color(mix(
+        tokens.accent,
+        tokens.foreground,
+        amount,
+    )))
 }
 
 /// The container around the items: nothing for separate toggles, one
@@ -731,5 +803,55 @@ mod tests {
         assert_eq!(enabled.border.width, 1.0);
         assert_eq!(enabled.border.color, tokens.border);
         assert!(disabled.border.color.a < enabled.border.color.a);
+    }
+
+    fn lightness(background: Option<Background>) -> f32 {
+        match background {
+            Some(Background::Color(colour)) => (colour.r + colour.g + colour.b) / 3.0,
+            _ => 0.0,
+        }
+    }
+
+    #[test]
+    fn an_outlined_selected_item_stands_out_more_than_the_plain_accent() {
+        for theme in [light(), dark()] {
+            let tokens = Tokens::of(&theme);
+            let selected = item_style(
+                &tokens,
+                Variant::Outline,
+                Position::First,
+                true,
+                Status::Active,
+            );
+            let plain = toggle::style(&tokens, toggle::Variant::Default, true, Status::Active);
+            let base = (tokens.background.r + tokens.background.g + tokens.background.b) / 3.0;
+            assert!(
+                (lightness(selected.background) - base).abs()
+                    > (lightness(plain.background) - base).abs(),
+                "{theme:?}"
+            );
+            let hovered = item_style(
+                &tokens,
+                Variant::Outline,
+                Position::First,
+                true,
+                Status::Hovered,
+            );
+            assert_ne!(hovered.background, selected.background);
+        }
+    }
+
+    #[test]
+    fn dividers_use_the_border_and_fade_when_disabled() {
+        for theme in [light(), dark()] {
+            let tokens = Tokens::of(&theme);
+            let enabled = divider_style(&tokens, true);
+            assert_eq!(enabled.background, Some(Background::Color(tokens.border)));
+            let disabled = divider_style(&tokens, false);
+            assert_eq!(
+                disabled.background,
+                Some(Background::Color(fade(tokens.border, 0.5)))
+            );
+        }
     }
 }
