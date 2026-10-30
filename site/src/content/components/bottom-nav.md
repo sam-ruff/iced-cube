@@ -35,3 +35,5 @@ Selecting the destination that is already active still sends `on_select`. Apps u
 Each destination responds to a tap without capturing the finger, as a [tappable](../tappable/) does, and shows a light wash while pressed. On a wide window the same bar works with the mouse; a [sidebar](../sidebar/) is usually the better choice there.
 
 When a system bar is drawn over the bottom of the window, pass its height to `.inset(...)` so the labels stay clear of it. Raise the bottom inset of [toasts](../toast/) by `HEIGHT` plus the same amount to keep a snackbar above the bar.
+
+The default shortcuts are Alt and a number, because Ctrl and a number belong to [document tabs](../document-tabs/). Some browsers keep Alt and a number for their own tabs, so a web build may never receive them; rebind them there.

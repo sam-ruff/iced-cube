@@ -36,7 +36,7 @@ use iced::{Alignment, Background, Border, Color, Element, Length, Padding, Theme
 use crate::icon::{Glyph, opacity, themed};
 use crate::keys::{self, Chord, Keymap};
 use crate::primitives::tappable::{self, Status, tappable};
-use crate::theme::{Tokens, fade, radius, text_size};
+use crate::theme::{Tokens, fade, mix, radius, text_size};
 
 /// Height of the bar above any inset, its top border included.
 pub const HEIGHT: f32 = 80.0;
@@ -234,10 +234,16 @@ pub fn colours(tokens: &Tokens, active: bool) -> Colours {
     }
 }
 
-/// The pill behind the active icon, and nothing behind the others.
+/// The pill behind the active icon, and nothing behind the others. It takes
+/// the accent pulled towards the foreground, as a selected segment of an
+/// outlined toggle group does, so it stands out in dark themes too.
 pub fn pill_style(tokens: &Tokens, active: bool) -> container::Style {
     container::Style {
-        background: active.then_some(Background::Color(tokens.accent)),
+        background: active.then_some(Background::Color(mix(
+            tokens.accent,
+            tokens.foreground,
+            0.1,
+        ))),
         border: Border {
             radius: radius::FULL.into(),
             ..Border::default()
@@ -325,8 +331,9 @@ impl keys::Action for Action {
 /// | --- | --- |
 /// | `Alt+1` to `Alt+5` | [`Action::Go`] with index 0 to 4 |
 ///
-/// Alt and a number is how many desktop apps jump between their main
-/// views, so a phone layout shown on a desktop keeps that habit.
+/// Ctrl and a number belong to document tabs, so the bar uses Alt. Some
+/// browsers keep Alt and a number for their own tabs, so a web build may
+/// never receive these; rebind them there.
 pub fn default_keymap() -> Keymap<Action> {
     ['1', '2', '3', '4', '5']
         .into_iter()
@@ -366,8 +373,15 @@ mod tests {
             let off = colours(&tokens, false);
             assert_ne!(on.label, off.label);
             assert_eq!(off.label, tokens.muted_foreground);
-            assert!(pill_style(&tokens, true).background.is_some());
             assert!(pill_style(&tokens, false).background.is_none());
+            let Some(Background::Color(pill)) = pill_style(&tokens, true).background else {
+                panic!("the active pill has no fill");
+            };
+            let distance = |colour: Color| {
+                let lightness = |c: Color| (c.r + c.g + c.b) / 3.0;
+                (lightness(colour) - lightness(tokens.background)).abs()
+            };
+            assert!(distance(pill) > distance(tokens.accent), "{theme:?}");
         }
     }
 
