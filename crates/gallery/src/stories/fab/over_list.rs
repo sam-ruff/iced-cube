@@ -1,5 +1,5 @@
 use iced::widget::{column, container, scrollable, stack, text};
-use iced::{Element, Length, Theme};
+use iced::{Element, Length, Padding, Theme};
 use iced_cube::theme::Tokens;
 use iced_cube::{fab, lucide};
 
@@ -40,7 +40,8 @@ impl Example {
                 })
                 .into()
         });
-        let list = scrollable(column(rows).spacing(8)).spacing(8);
+        // Room under the last note so it can scroll clear of the fab.
+        let list = scrollable(column(rows).spacing(8).padding(Padding::ZERO.bottom(88))).spacing(8);
 
         // The app places the fab: a stack over the list and a container
         // aligned to the bottom-right corner.

@@ -54,7 +54,7 @@ impl Example {
             .on_tap(Message::Open(index))
             .on_long_press(Message::Menu(index))
             .width(Length::Fill)
-            .padding([10, 12])
+            .padding([14, 12])
             .into()
         });
 

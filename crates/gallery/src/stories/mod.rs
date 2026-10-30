@@ -237,7 +237,7 @@ crate::stories! {
     FabExtended => fab::extended {
         id: "fab/extended", component: "fab", title: "Extended and disabled",
         description: "Fabs with a label, an icon-only fab with a tooltip, and a disabled fab.",
-        file: "fab/extended.rs", height: 200,
+        file: "fab/extended.rs", height: 240,
     }
     TappableList => tappable::list {
         id: "tappable/list", component: "tappable", title: "List rows",

@@ -1,15 +1,14 @@
 use iced::widget::{column, container};
 use iced::{Element, Length, Padding, Subscription};
+use iced_cube::navigation::bottom_nav::{self, bottom_nav};
 use iced_cube::overlay::toast::{self, Position, toast, toasts};
 use iced_cube::primitives::button::Variant;
-use iced_cube::{bottom_nav, button, lucide};
-
-/// How far the bottom bar reaches up from the window edge.
-const BAR: f32 = 80.0;
+use iced_cube::{button, lucide};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Screen {
     Notes,
+    Search,
     Trash,
 }
 
@@ -74,6 +73,7 @@ impl Example {
 
         let bar = bottom_nav(self.screen)
             .item(Screen::Notes, lucide!(NotebookText), "Notes")
+            .item(Screen::Search, lucide!(Search), "Search")
             .item(Screen::Trash, lucide!(Trash), "Bin")
             .on_select(Message::Go);
 
@@ -81,7 +81,7 @@ impl Example {
         // up to 420 pixels like a snackbar.
         toasts(&self.toasts, column![screen, bar].height(Length::Fill))
             .position(Position::BottomCenter)
-            .inset(Padding::from(12).bottom(12.0 + BAR))
+            .inset(Padding::from(12).bottom(12.0 + bottom_nav::HEIGHT))
             .max_width(420.0)
             .on_event(Message::Toast)
             .into()
