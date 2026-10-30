@@ -1,10 +1,14 @@
 #![cfg(feature = "tappable")]
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use iced::time::{Duration, Instant};
 use iced::widget::{self, column, row, scrollable, text};
 use iced::{Element, Event, Length, Point, mouse, touch, window};
-use iced_cube::primitives::tappable::DEFAULT_HOLD;
+use iced_cube::primitives::tappable::{DEFAULT_HOLD, Status, style};
 use iced_cube::tappable;
+use iced_cube::theme::Tokens;
 use iced_test::simulator::{Simulator, simulator};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -228,6 +232,113 @@ fn a_nested_button_takes_its_own_tap_and_the_row_stays_quiet() {
     touch_at(&mut ui, pressed, label);
     touch_at(&mut ui, lifted, label);
     assert_eq!(messages(ui), vec![Message::Nested, Message::Tap(0)]);
+}
+
+fn nested() -> Element<'static, Message> {
+    tappable(
+        row![
+            text("Outer"),
+            tappable(text("Inner"))
+                .on_tap(Message::Tap(1))
+                .on_long_press(Message::Hold(1))
+                .padding(8),
+        ]
+        .spacing(40),
+    )
+    .on_tap(Message::Tap(0))
+    .on_long_press(Message::Hold(0))
+    .padding(12)
+    .into()
+}
+
+#[test]
+fn a_nested_tappable_takes_its_own_taps_and_long_presses() {
+    let mut ui = simulator(nested());
+    let inner = centre(&mut ui, "Inner");
+    touch_at(&mut ui, pressed, inner);
+    touch_at(&mut ui, lifted, inner);
+    touch_at(&mut ui, pressed, inner);
+    let _ = ui.simulate([later()]);
+    touch_at(&mut ui, lifted, inner);
+    mouse_at(
+        &mut ui,
+        inner,
+        &[
+            mouse::Event::ButtonPressed(mouse::Button::Left),
+            mouse::Event::ButtonReleased(mouse::Button::Left),
+        ],
+    );
+    let outer = centre(&mut ui, "Outer");
+    touch_at(&mut ui, pressed, outer);
+    touch_at(&mut ui, lifted, outer);
+    assert_eq!(
+        messages(ui),
+        vec![
+            Message::Tap(1),
+            Message::Hold(1),
+            Message::Tap(1),
+            Message::Tap(0)
+        ]
+    );
+}
+
+#[test]
+fn a_second_finger_cancels_the_tap() {
+    let mut ui = simulator(rows());
+    let at = centre(&mut ui, "Row 2");
+    let second = Point::new(at.x + 40.0, at.y);
+    ui.point_at(at);
+    let _ = ui.simulate([
+        finger(pressed, at),
+        Event::Touch(pressed(touch::Finger(2), second)),
+        Event::Touch(lifted(touch::Finger(2), second)),
+        finger(lifted, at),
+    ]);
+    assert!(gestures(ui).is_empty());
+}
+
+/// A row that records every status it is drawn in.
+fn recorded(statuses: Rc<RefCell<Vec<Status>>>) -> Element<'static, Message> {
+    let row = tappable(text("Recorded"))
+        .on_tap(Message::Tap(0))
+        .on_long_press(Message::Hold(0))
+        .width(Length::Fill)
+        .padding(12)
+        .style(move |theme, status| {
+            statuses.borrow_mut().push(status);
+            style(&Tokens::of(theme), status)
+        });
+    column![row, text("Below")].into()
+}
+
+fn drawn(ui: &mut Simulator<'_, Message>, statuses: &RefCell<Vec<Status>>) -> Option<Status> {
+    statuses.borrow_mut().clear();
+    if let Err(error) = ui.snapshot(&iced_cube::theme::light()) {
+        panic!("snapshot failed: {error:?}");
+    }
+    statuses.borrow().last().copied()
+}
+
+#[test]
+fn a_touch_leaves_no_pressed_or_hovered_look_behind() {
+    let statuses = Rc::new(RefCell::new(Vec::new()));
+    let mut ui = simulator(recorded(statuses.clone()));
+    let at = centre(&mut ui, "Recorded");
+
+    touch_at(&mut ui, pressed, at);
+    assert_eq!(drawn(&mut ui, &statuses), Some(Status::Pressed));
+    touch_at(&mut ui, lifted, at);
+    assert_eq!(drawn(&mut ui, &statuses), Some(Status::Active));
+
+    touch_at(&mut ui, pressed, at);
+    touch_at(&mut ui, moved, Point::new(at.x, at.y + 30.0));
+    assert_eq!(drawn(&mut ui, &statuses), Some(Status::Active));
+    touch_at(&mut ui, lifted, Point::new(at.x, at.y + 30.0));
+
+    // A real mouse over the row brings the hover back.
+    mouse_at(&mut ui, at, &[]);
+    assert_eq!(drawn(&mut ui, &statuses), Some(Status::Hovered));
+    assert_eq!(messages(ui), vec![Message::Tap(0)]);
 }
 
 #[test]

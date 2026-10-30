@@ -23,7 +23,7 @@ api:
   - name: ".slop(pixels)"
     description: "How far a press may move and still be a tap. Defaults to DEFAULT_SLOP (8)."
   - name: ".style(fn(&Theme, Status) -> container::Style)"
-    description: "Replaces the default look, which is transparent at rest, lightly tinted on hover and more strongly while pressed. Status is Idle, Hovered or Pressed."
+    description: "Replaces the default look, which is transparent at rest, lightly tinted on hover and more strongly while pressed. Status is Active, Hovered or Pressed."
   - name: ".width(length) / .height(length) / .padding(padding)"
     description: "Sizes the pressable area around the content."
   - name: "tappable::Tracker"
@@ -36,4 +36,4 @@ Use it for list rows, cards and anything else people tap on a phone. A press hel
 
 The pressed tint clears as soon as the finger lifts or the press is cancelled. A touch leaves the cursor where the finger was, so after a touch the hover tint stays off until the mouse really moves.
 
-The content gets every event first. A press the content captures, such as one on a button inside the row, belongs to that button: the row does not send its own tap as well. Such a button also captures the finger, so a drag that starts on it does not scroll; keep nested controls small, or make them tappables too.
+The content gets every event first. A press on content that is interactive under the pointer, such as a button or another tappable inside the row, belongs to that content: the row does not send its own tap or long press as well. A nested button also captures the finger, so a drag that starts on it does not scroll; keep nested controls small, or make them tappables too. Links in rich text count as interactive, so wrap such text in [touch clicks](../touch-clicks/) for a tap to open them.

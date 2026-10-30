@@ -14,11 +14,13 @@
 //! | Right click | `on_long_press` |
 //! | Finger moved beyond the slop, a second finger, or a lost finger | Cancelled |
 //!
-//! Content gets every event first. A press the content captures, such as
-//! one on a button nested in the row, belongs to the content: the row is not
-//! tapped as well. Such a button also captures the finger, so a drag that
-//! starts on it does not scroll; keep nested controls small, or make them
-//! tappables too.
+//! Content gets every event first. A press on content that is interactive
+//! under the pointer, such as a button or a tappable nested in the row,
+//! belongs to the content: the row is not tapped as well. A nested button
+//! also captures the finger, so a drag that starts on it does not scroll;
+//! keep nested controls small, or make them tappables too. Links in rich
+//! text count as interactive, so wrap such text in `touch_clicks` for a tap
+//! to open them.
 //!
 //! ```no_run
 //! use iced::widget::text;
@@ -58,8 +60,9 @@ pub const DEFAULT_SLOP: f32 = 8.0;
 /// The interaction state a tappable is drawn in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Status {
+    /// At rest.
     #[default]
-    Idle,
+    Active,
     /// A mouse is over it. Never shown after a touch until the mouse moves.
     Hovered,
     /// A finger or button is down on it.
@@ -67,7 +70,7 @@ pub enum Status {
 }
 
 impl Status {
-    pub const ALL: [Status; 3] = [Status::Idle, Status::Hovered, Status::Pressed];
+    pub const ALL: [Status; 3] = [Status::Active, Status::Hovered, Status::Pressed];
 }
 
 /// What a finished interaction means.
@@ -181,7 +184,7 @@ impl Tracker {
         if cursor_over && !self.touched {
             return Status::Hovered;
         }
-        Status::Idle
+        Status::Active
     }
 }
 
@@ -189,7 +192,7 @@ impl Tracker {
 /// stronger one while pressed.
 pub fn style(tokens: &Tokens, status: Status) -> container::Style {
     let background = match status {
-        Status::Idle => None,
+        Status::Active => None,
         Status::Hovered => Some(mix(tokens.background, tokens.accent, 0.5)),
         Status::Pressed => Some(tokens.accent),
     };
@@ -411,7 +414,7 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for Surface<'_, Message> {
         let status = if self.is_enabled() {
             state.tracker.status(over(cursor, bounds, viewport))
         } else {
-            Status::Idle
+            Status::Active
         };
         let appearance = (self.style)(theme, status);
         container::draw_background(renderer, &appearance, bounds);
@@ -466,10 +469,19 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for Surface<'_, Message> {
             return;
         }
 
+        // Content that is interactive under the cursor, such as a nested
+        // tappable, owns a press there even when it does not capture it.
+        let claimed = self.content.as_widget().mouse_interaction(
+            &tree.children[0],
+            layout,
+            cursor,
+            viewport,
+            renderer,
+        ) != mouse::Interaction::None;
         let state = tree.state.downcast_mut::<State>();
         let bounds = layout.bounds();
         let inside = over(cursor, bounds, viewport);
-        let free = !shell.is_event_captured();
+        let free = !shell.is_event_captured() && !claimed;
         let tracker = &mut state.tracker;
         let mut gesture = None;
         let mut now = Instant::now();
@@ -613,7 +625,7 @@ mod tests {
         assert_eq!(tracker.status(true), Status::Pressed);
         tracker.moved(FINGER, at(DEFAULT_SLOP), DEFAULT_SLOP);
         assert_eq!(tracker.release(FINGER, true), Some(Gesture::Tap));
-        assert_eq!(tracker.status(true), Status::Idle);
+        assert_eq!(tracker.status(true), Status::Active);
     }
 
     #[test]
@@ -666,17 +678,17 @@ mod tests {
         assert_eq!(tracker.status(true), Status::Hovered);
         tracker.press(FINGER, at(0.0), Instant::now());
         let _ = tracker.release(FINGER, true);
-        assert_eq!(tracker.status(true), Status::Idle);
+        assert_eq!(tracker.status(true), Status::Active);
         tracker.mouse_moved();
         assert_eq!(tracker.status(true), Status::Hovered);
-        assert_eq!(tracker.status(false), Status::Idle);
+        assert_eq!(tracker.status(false), Status::Active);
     }
 
     #[test]
     fn default_style_is_clear_at_rest_and_stronger_when_pressed() {
         for theme in [light(), dark()] {
             let tokens = Tokens::of(&theme);
-            assert!(style(&tokens, Status::Idle).background.is_none());
+            assert!(style(&tokens, Status::Active).background.is_none());
             let hovered = style(&tokens, Status::Hovered).background;
             let pressed = style(&tokens, Status::Pressed).background;
             assert!(hovered.is_some() && pressed.is_some());

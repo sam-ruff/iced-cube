@@ -43,7 +43,7 @@ impl Example {
                 if let Some(screen) = self
                     .keymap
                     .resolve_event(&key)
-                    .and_then(|action| action.target(&SCREENS))
+                    .and_then(|action| action.apply(&SCREENS))
                 {
                     self.screen = screen;
                 }

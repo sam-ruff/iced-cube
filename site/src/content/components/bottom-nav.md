@@ -24,7 +24,7 @@ api:
     description: "The bar's height above the inset: 80 pixels, its top border included."
   - name: "bottom_nav::default_keymap()"
     description: "The default shortcuts as a Keymap<Action>. Bind, unbind or clear chords to change them."
-  - name: "action.target(&ids)"
+  - name: "action.apply(&ids)"
     description: "The id a resolved Action::Go(index) selects from your list of destinations, or None when there is no destination at that index."
 ---
 

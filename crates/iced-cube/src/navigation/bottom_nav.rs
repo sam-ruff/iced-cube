@@ -250,7 +250,7 @@ pub fn pill_style(tokens: &Tokens, active: bool) -> container::Style {
 /// and a stronger one while pressed, visible on any bar colour.
 pub fn slot_style(tokens: &Tokens, status: Status) -> container::Style {
     let alpha = match status {
-        Status::Idle => return container::Style::default(),
+        Status::Active => return container::Style::default(),
         Status::Hovered => 0.04,
         Status::Pressed => 0.1,
     };
@@ -277,8 +277,9 @@ pub enum Action {
 }
 
 impl Action {
-    /// The destination this action selects, if there is one at its index.
-    pub fn target<Id: Copy>(self, ids: &[Id]) -> Option<Id> {
+    /// The destination to send through the bar's `on_select` message, if
+    /// there is one at this action's index.
+    pub fn apply<Id: Copy>(self, ids: &[Id]) -> Option<Id> {
         let Action::Go(index) = self;
         ids.get(index).copied()
     }
@@ -383,7 +384,7 @@ mod tests {
     fn slot_feedback_is_clear_at_rest_and_stronger_when_pressed() {
         for theme in [light(), dark()] {
             let tokens = Tokens::of(&theme);
-            assert!(slot_style(&tokens, Status::Idle).background.is_none());
+            assert!(slot_style(&tokens, Status::Active).background.is_none());
             let alpha = |status| match slot_style(&tokens, status).background {
                 Some(Background::Color(colour)) => colour.a,
                 _ => 0.0,
@@ -431,8 +432,8 @@ mod tests {
     #[test]
     fn actions_pick_the_destination_at_their_index() {
         let ids = ['a', 'b', 'c'];
-        assert_eq!(Action::Go(0).target(&ids), Some('a'));
-        assert_eq!(Action::Go(2).target(&ids), Some('c'));
-        assert_eq!(Action::Go(4).target(&ids), None);
+        assert_eq!(Action::Go(0).apply(&ids), Some('a'));
+        assert_eq!(Action::Go(2).apply(&ids), Some('c'));
+        assert_eq!(Action::Go(4).apply(&ids), None);
     }
 }
