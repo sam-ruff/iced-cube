@@ -34,6 +34,8 @@ api:
     description: "The toggle Size: Sm, Md or Lg. Defaults to Md."
   - name: ".width(length)"
     description: "The group's width. Shrink, the default, fits the items; any other width, such as Length::Fill, shares it equally between them with their labels centred."
+  - name: ".height(px)"
+    description: "The group's height in pixels, overriding the size's. Use 48 for a segmented control on a touch screen."
   - name: ".on_event(f)"
     description: "Maps item events to your message, such as Message::Group."
   - name: "toggle_group::default_keymap()"

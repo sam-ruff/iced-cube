@@ -57,6 +57,7 @@ use iced::{
 };
 
 use crate::after_touch::after_touch;
+use crate::hit_slop::hit_slop;
 use crate::icon::{Glyph, themed};
 use crate::keys::{self, Chord, Keymap};
 use crate::primitives::button::{self, Size};
@@ -758,19 +759,21 @@ fn card<'a, Message: Clone + 'a>(
     }
     content = content.push(body);
     if let Some(label) = &toast.action {
-        content = content.push(
+        content = content.push(hit_slop(
             button::button(label.as_str())
                 .variant(button::Variant::Outline)
                 .size(Size::Sm)
                 .on_press_maybe(emit(Event::Action(id))),
-        );
+            HIT_SLOP,
+        ));
     }
     content = content.push(
-        container(
+        container(hit_slop(
             icon_button(crate::lucide!(X))
                 .size(Size::Sm)
                 .on_press_maybe(emit(Event::Dismiss(id))),
-        )
+            HIT_SLOP,
+        ))
         .id(close_button_id(id)),
     );
 
@@ -781,6 +784,15 @@ fn card<'a, Message: Clone + 'a>(
             .style(move |theme| style(&Tokens::of(theme), variant)),
     )
 }
+
+/// How far past its edges a toast button takes presses: a 32 pixel button becomes 48 tall and
+/// 44 wide. Sideways it reaches half the gap between the buttons, so their margins never meet.
+const HIT_SLOP: Padding = Padding {
+    top: 8.0,
+    bottom: 8.0,
+    left: space::MD / 2.0,
+    right: space::MD / 2.0,
+};
 
 /// The colour of a variant's icon and tint.
 pub fn accent(tokens: &Tokens, variant: Variant) -> Color {

@@ -112,6 +112,32 @@ fn labels_stay_on_one_line_in_a_narrow_container() {
     }
 }
 
+#[test]
+fn a_height_overrides_the_size_and_the_whole_height_takes_a_press() {
+    let state = State::single(items());
+    for variant in Variant::ALL {
+        let element: Element<'_, Message> = column![
+            toggle_group(&state)
+                .variant(variant)
+                .height(48.0)
+                .on_event(Message::Group)
+        ]
+        .into();
+        let mut ui = simulator(element);
+        let label = ui.find("Bold").expect("Bold is rendered").bounds().center();
+        // 20 above the label's centre is outside a 36 pixel item and inside a 48 pixel one.
+        let at = iced::Point::new(label.x, label.y - 20.0);
+        ui.point_at(at);
+        let _ = ui.simulate([
+            iced::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)),
+            iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+                iced::mouse::Button::Left,
+            )),
+        ]);
+        assert_eq!(ui.into_messages().count(), 1, "{variant:?}");
+    }
+}
+
 fn segmented(state: &State<Format>, variant: Variant) -> Element<'_, Message> {
     toggle_group(state)
         .variant(variant)

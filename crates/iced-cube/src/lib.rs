@@ -34,6 +34,8 @@ pub mod feedback;
 #[cfg(feature = "breadcrumb")]
 mod fit;
 pub mod forms;
+#[cfg(feature = "toast")]
+mod hit_slop;
 pub mod icon;
 #[cfg(feature = "slider")]
 mod inert;
