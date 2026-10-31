@@ -19,12 +19,19 @@
 //!     .into();
 //! ```
 
+use std::cell::Cell;
 use std::fmt;
+use std::rc::Rc;
 
+use iced::advanced::layout::{self, Layout};
+use iced::advanced::widget::{Operation, Tree, Widget, tree};
+use iced::advanced::{Clipboard, Shell, input_method, overlay, renderer};
 use iced::widget::text::LineHeight;
 use iced::widget::text_editor::{self, Status, Style};
 use iced::widget::{Id, container, text_input};
-use iced::{Element, Length, Padding};
+use iced::{
+    Color, Element, Event, Length, Padding, Rectangle, Renderer, Size, Theme, Vector, mouse,
+};
 
 pub use iced::widget::text_editor::{Action, Content};
 
@@ -136,6 +143,8 @@ impl<'a, Message: Clone + 'a> From<Textarea<'a, Message>> for Element<'a, Messag
     fn from(textarea: Textarea<'a, Message>) -> Self {
         let invalid = textarea.invalid;
         let enabled = textarea.is_enabled();
+        let composing = Rc::new(Cell::new(false));
+        let hide_placeholder = Rc::clone(&composing);
 
         // iced never reports Disabled for an editor without `on_action`.
         let mut editor = iced::widget::text_editor(textarea.content)
@@ -145,7 +154,13 @@ impl<'a, Message: Clone + 'a> From<Textarea<'a, Message>> for Element<'a, Messag
             .height(textarea.height)
             .style(move |theme, status| {
                 let status = if enabled { status } else { Status::Disabled };
-                style(&Tokens::of(theme), status, invalid)
+                let mut style = style(&Tokens::of(theme), status, invalid);
+                // The keyboard draws the word it is composing over the
+                // editor, so the placeholder would show through it.
+                if hide_placeholder.get() && matches!(status, Status::Focused { .. }) {
+                    style.placeholder = Color::TRANSPARENT;
+                }
+                style
             });
         if textarea.height == Length::Shrink {
             editor = editor.min_height(textarea.min_height);
@@ -162,10 +177,158 @@ impl<'a, Message: Clone + 'a> From<Textarea<'a, Message>> for Element<'a, Messag
 
         // iced's editor reads only the mouse, so taps and drags are
         // translated for it.
+        let editor = Element::new(Composing {
+            content: editor.into(),
+            composing,
+        });
+
+        // iced's editor reads only the mouse, so taps and drags are
+        // translated for it.
         touch_clicks(container(editor).width(textarea.width))
             .scroll(true)
             .line_height(text_size::SM * LINE_HEIGHT)
             .into()
+    }
+}
+
+/// Tracks whether the input method is composing a word, which iced's editor
+/// does not consider when it draws its placeholder.
+struct Composing<'a, Message> {
+    content: Element<'a, Message>,
+    composing: Rc<Cell<bool>>,
+}
+
+impl<Message> Widget<Message, Theme, Renderer> for Composing<'_, Message> {
+    fn tag(&self) -> tree::Tag {
+        tree::Tag::of::<bool>()
+    }
+
+    fn state(&self) -> tree::State {
+        tree::State::new(false)
+    }
+
+    fn children(&self) -> Vec<Tree> {
+        vec![Tree::new(&self.content)]
+    }
+
+    fn diff(&self, tree: &mut Tree) {
+        tree.diff_children(std::slice::from_ref(&self.content));
+    }
+
+    fn size(&self) -> Size<Length> {
+        self.content.as_widget().size()
+    }
+
+    fn size_hint(&self) -> Size<Length> {
+        self.content.as_widget().size_hint()
+    }
+
+    fn layout(
+        &mut self,
+        tree: &mut Tree,
+        renderer: &Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
+        self.content
+            .as_widget_mut()
+            .layout(&mut tree.children[0], renderer, limits)
+    }
+
+    fn draw(
+        &self,
+        tree: &Tree,
+        renderer: &mut Renderer,
+        theme: &Theme,
+        style: &renderer::Style,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+    ) {
+        self.composing.set(*tree.state.downcast_ref::<bool>());
+        self.content.as_widget().draw(
+            &tree.children[0],
+            renderer,
+            theme,
+            style,
+            layout,
+            cursor,
+            viewport,
+        );
+    }
+
+    fn operate(
+        &mut self,
+        tree: &mut Tree,
+        layout: Layout<'_>,
+        renderer: &Renderer,
+        operation: &mut dyn Operation,
+    ) {
+        self.content
+            .as_widget_mut()
+            .operate(&mut tree.children[0], layout, renderer, operation);
+    }
+
+    fn update(
+        &mut self,
+        tree: &mut Tree,
+        event: &Event,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        renderer: &Renderer,
+        clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, Message>,
+        viewport: &Rectangle,
+    ) {
+        if let Event::InputMethod(event) = event {
+            *tree.state.downcast_mut::<bool>() = matches!(
+                event,
+                input_method::Event::Preedit(text, _) if !text.is_empty()
+            );
+        }
+        self.content.as_widget_mut().update(
+            &mut tree.children[0],
+            event,
+            layout,
+            cursor,
+            renderer,
+            clipboard,
+            shell,
+            viewport,
+        );
+    }
+
+    fn mouse_interaction(
+        &self,
+        tree: &Tree,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+        renderer: &Renderer,
+    ) -> mouse::Interaction {
+        self.content.as_widget().mouse_interaction(
+            &tree.children[0],
+            layout,
+            cursor,
+            viewport,
+            renderer,
+        )
+    }
+
+    fn overlay<'b>(
+        &'b mut self,
+        tree: &'b mut Tree,
+        layout: Layout<'b>,
+        renderer: &Renderer,
+        viewport: &Rectangle,
+        translation: Vector,
+    ) -> Option<overlay::Element<'b, Message, Theme, Renderer>> {
+        self.content.as_widget_mut().overlay(
+            &mut tree.children[0],
+            layout,
+            renderer,
+            viewport,
+            translation,
+        )
     }
 }
 

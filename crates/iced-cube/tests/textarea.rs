@@ -1,5 +1,6 @@
 #![cfg(feature = "textarea")]
 
+use iced::advanced::input_method;
 use iced::keyboard::key::Named;
 use iced::widget::Id;
 use iced::widget::text_editor::{Action, Content, Edit};
@@ -132,6 +133,68 @@ fn a_vertical_drag_scrolls_the_text() {
         })
         .sum();
     assert_eq!(lines, 4);
+}
+
+/// Renders an empty textarea, optionally focused and with a word being
+/// composed, and returns a hash of the window.
+fn empty_render(
+    placeholder: bool,
+    focused: bool,
+    composing: Option<&str>,
+    name: &str,
+) -> Result<String, Error> {
+    let content = Content::new();
+    let editor = textarea(&content).id("notes").on_action(Message::Edit);
+    let editor = if placeholder {
+        editor.placeholder("Write a note")
+    } else {
+        editor
+    };
+    let mut ui = simulator(Element::from(editor));
+    if focused {
+        ui.click(Id::new("notes"))?;
+    }
+    if let Some(word) = composing {
+        let _ = ui.simulate([Event::InputMethod(input_method::Event::Preedit(
+            word.to_owned(),
+            Some(word.len()..word.len()),
+        ))]);
+    }
+
+    let directory =
+        std::env::temp_dir().join(format!("iced-cube-textarea-{name}-{}", std::process::id()));
+    let _ = ui
+        .snapshot(&iced_cube::theme::light())?
+        .matches_hash(directory.join(name))?;
+    let mut hash = String::new();
+    for file in std::fs::read_dir(&directory)?.filter_map(Result::ok) {
+        hash = std::fs::read_to_string(file.path())?;
+    }
+    std::fs::remove_dir_all(&directory)?;
+    Ok(hash)
+}
+
+#[test]
+fn the_placeholder_hides_while_a_word_is_composed() -> Result<(), Error> {
+    let composing = empty_render(true, true, Some("hel"), "composing")?;
+    let no_placeholder = empty_render(false, true, Some("hel"), "no-placeholder")?;
+    let not_composing = empty_render(true, true, None, "not-composing")?;
+    let finished = empty_render(true, true, Some(""), "finished")?;
+
+    assert!(!composing.is_empty());
+    assert_eq!(composing, no_placeholder);
+    assert_ne!(composing, not_composing);
+    assert_eq!(finished, not_composing);
+    Ok(())
+}
+
+#[test]
+fn an_unfocused_textarea_keeps_its_placeholder() -> Result<(), Error> {
+    let composing = empty_render(true, false, Some("hel"), "unfocused-composing")?;
+    let idle = empty_render(true, false, None, "unfocused-idle")?;
+
+    assert_eq!(composing, idle);
+    Ok(())
 }
 
 #[test]
