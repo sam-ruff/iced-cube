@@ -304,6 +304,35 @@ fn taps_press_the_action_and_close_buttons() -> Result<(), iced_test::Error> {
     Ok(())
 }
 
+#[test]
+fn a_tap_just_outside_a_small_button_still_presses_it() -> Result<(), iced_test::Error> {
+    let mut state = State::new();
+    let undo = state.push(toast("Deleted").action("Undo"));
+
+    let mut ui = simulator(view(&state));
+    // The Undo button is 32 pixels tall around its label; 20 above the label's centre is outside
+    // the button and inside its hit area.
+    let label = ui.find("Undo")?.bounds().center();
+    tap(&mut ui, Point::new(label.x, label.y - 20.0));
+    let close = ui.find(toast::close_button_id(undo))?.bounds();
+    assert!(close.height >= 48.0 && close.width >= 48.0, "{close:?}");
+    tap(&mut ui, Point::new(close.x + 3.0, close.y + 3.0));
+
+    // A finger on a toast also pauses it.
+    let messages: Vec<_> = ui
+        .into_messages()
+        .filter(|Message::Toast(event)| !matches!(event, Event::Pause | Event::Resume))
+        .collect();
+    assert!(
+        matches!(
+            messages.as_slice(),
+            [Message::Toast(Event::Action(a)), Message::Toast(Event::Dismiss(d))] if *a == undo && *d == undo
+        ),
+        "{messages:?}"
+    );
+    Ok(())
+}
+
 fn snackbar(state: &State) -> Element<'_, Message> {
     toasts(state, text("Content"))
         .position(toast::Position::BottomCenter)

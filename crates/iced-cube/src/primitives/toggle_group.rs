@@ -322,6 +322,7 @@ pub struct ToggleGroup<'a, Id, Message> {
     variant: Variant,
     size: Size,
     width: Length,
+    height: Option<f32>,
     on_event: Option<Box<dyn Fn(Event<Id>) -> Message + 'a>>,
 }
 
@@ -333,6 +334,7 @@ pub fn toggle_group<Id, Message>(state: &State<Id>) -> ToggleGroup<'_, Id, Messa
         variant: Variant::default(),
         size: Size::default(),
         width: Length::Shrink,
+        height: None,
         on_event: None,
     }
 }
@@ -344,6 +346,7 @@ impl<Id: std::fmt::Debug, Message> std::fmt::Debug for ToggleGroup<'_, Id, Messa
             .field("variant", &self.variant)
             .field("size", &self.size)
             .field("width", &self.width)
+            .field("height", &self.height)
             .field("enabled", &self.on_event.is_some())
             .finish()
     }
@@ -365,6 +368,12 @@ impl<'a, Id, Message> ToggleGroup<'a, Id, Message> {
     /// with their content centred, like a segmented control.
     pub fn width(mut self, width: impl Into<Length>) -> Self {
         self.width = width.into();
+        self
+    }
+
+    /// The group's height, overriding the size's. A touch screen wants 48.
+    pub fn height(mut self, height: f32) -> Self {
+        self.height = Some(height);
         self
     }
 
@@ -405,9 +414,14 @@ where
             variant,
             size,
             width,
+            height,
             on_event,
         } = group;
         let len = state.items.len();
+        let sized = toggle::Metrics {
+            height: height.unwrap_or(size.metrics().height),
+            ..size.metrics()
+        };
         let shrink = width == Length::Shrink;
         let item_width = if shrink {
             Length::Shrink
@@ -417,10 +431,10 @@ where
         // An outlined group draws its border outside the items, so they
         // shrink by the border to keep the group as tall as a button.
         let metrics = match variant {
-            Variant::Default => size.metrics(),
+            Variant::Default => sized,
             Variant::Outline => toggle::Metrics {
-                height: size.metrics().height - 2.0 * BORDER,
-                ..size.metrics()
+                height: sized.height - 2.0 * BORDER,
+                ..sized
             },
         };
 

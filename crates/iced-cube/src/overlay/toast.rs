@@ -756,30 +756,57 @@ fn card<'a, Message: Clone + 'a>(
             accent(&Tokens::of(theme), variant)
         }));
     }
-    content = content.push(body);
+    content = content.push(container(body).padding([HIT_SLOP, 0.0]));
     if let Some(label) = &toast.action {
-        content = content.push(
+        let action = emit(Event::Action(id));
+        content = content.push(hit_area(
             button::button(label.as_str())
                 .variant(button::Variant::Outline)
                 .size(Size::Sm)
-                .on_press_maybe(emit(Event::Action(id))),
-        );
+                .on_press_maybe(action.clone()),
+            action,
+        ));
     }
+    let dismiss = emit(Event::Dismiss(id));
     content = content.push(
-        container(
+        container(hit_area(
             icon_button(crate::lucide!(X))
                 .size(Size::Sm)
-                .on_press_maybe(emit(Event::Dismiss(id))),
-        )
+                .on_press_maybe(dismiss.clone()),
+            dismiss,
+        ))
         .id(close_button_id(id)),
     );
 
+    // The buttons' hit areas reach into the card's padding, so the card keeps its size.
     solid(
         container(content)
-            .padding([space::MD, space::LG])
+            .padding(Padding {
+                top: space::MD - HIT_SLOP,
+                bottom: space::MD - HIT_SLOP,
+                left: space::LG,
+                right: space::LG - HIT_SLOP,
+            })
             .width(Length::Fill)
             .style(move |theme| style(&Tokens::of(theme), variant)),
     )
+}
+
+/// How far a toast button's hit area reaches past its edges: a small button becomes a 48 px
+/// touch target.
+const HIT_SLOP: f32 = 8.0;
+
+/// A button with a larger touch target. A press on the margin sends the button's message; one on
+/// the button itself is the button's own.
+fn hit_area<'a, Message: Clone + 'a>(
+    button: impl Into<Element<'a, Message>>,
+    on_press: Option<Message>,
+) -> Element<'a, Message> {
+    let padded = container(button).padding(HIT_SLOP);
+    match on_press {
+        Some(message) => mouse_area(padded).on_press(message).into(),
+        None => padded.into(),
+    }
 }
 
 /// The colour of a variant's icon and tint.
