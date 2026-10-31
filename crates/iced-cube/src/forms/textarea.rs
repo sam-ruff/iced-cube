@@ -24,6 +24,7 @@ use std::fmt;
 use std::rc::Rc;
 
 use iced::advanced::layout::{self, Layout};
+use iced::advanced::text::highlighter::PlainText;
 use iced::advanced::widget::{Operation, Tree, Widget, tree};
 use iced::advanced::{Clipboard, Shell, input_method, overlay, renderer};
 use iced::widget::text::LineHeight;
@@ -175,8 +176,6 @@ impl<'a, Message: Clone + 'a> From<Textarea<'a, Message>> for Element<'a, Messag
             editor = editor.on_action(on_action);
         }
 
-        // iced's editor reads only the mouse, so taps and drags are
-        // translated for it.
         let editor = Element::new(Composing {
             content: editor.into(),
             composing,
@@ -279,11 +278,18 @@ impl<Message> Widget<Message, Theme, Renderer> for Composing<'_, Message> {
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) {
+        // Mirrors the editor, which keeps a composing word only while focused,
+        // so a word composed in another field is never counted.
         if let Event::InputMethod(event) = event {
-            *tree.state.downcast_mut::<bool>() = matches!(
-                event,
-                input_method::Event::Preedit(text, _) if !text.is_empty()
-            );
+            match event {
+                input_method::Event::Opened | input_method::Event::Closed => {
+                    *tree.state.downcast_mut::<bool>() = false;
+                }
+                input_method::Event::Preedit(text, _) if editor_focused(&tree.children[0]) => {
+                    *tree.state.downcast_mut::<bool>() = !text.is_empty();
+                }
+                _ => {}
+            }
         }
         self.content.as_widget_mut().update(
             &mut tree.children[0],
@@ -330,6 +336,15 @@ impl<Message> Widget<Message, Theme, Renderer> for Composing<'_, Message> {
             translation,
         )
     }
+}
+
+fn editor_focused(tree: &Tree) -> bool {
+    let tree::State::Some(state) = &tree.state else {
+        return false;
+    };
+    state
+        .downcast_ref::<text_editor::State<PlainText>>()
+        .is_some_and(text_editor::State::is_focused)
 }
 
 /// The iced text editor style for a status, matching the input's look.

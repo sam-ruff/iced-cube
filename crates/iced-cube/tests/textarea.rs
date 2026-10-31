@@ -6,7 +6,7 @@ use iced::widget::Id;
 use iced::widget::text_editor::{Action, Content, Edit};
 use iced::{Element, Event, Point, touch};
 use iced_cube::textarea;
-use iced_test::{Error, simulator};
+use iced_test::{Error, Simulator, simulator};
 
 #[derive(Debug, Clone, PartialEq)]
 enum Message {
@@ -155,12 +155,19 @@ fn empty_render(
         ui.click(Id::new("notes"))?;
     }
     if let Some(word) = composing {
-        let _ = ui.simulate([Event::InputMethod(input_method::Event::Preedit(
-            word.to_owned(),
-            Some(word.len()..word.len()),
-        ))]);
+        compose(&mut ui, word);
     }
+    render_hash(&mut ui, name)
+}
 
+fn compose(ui: &mut Simulator<'_, Message>, word: &str) {
+    let _ = ui.simulate([Event::InputMethod(input_method::Event::Preedit(
+        word.to_owned(),
+        Some(word.len()..word.len()),
+    ))]);
+}
+
+fn render_hash(ui: &mut Simulator<'_, Message>, name: &str) -> Result<String, Error> {
     let directory =
         std::env::temp_dir().join(format!("iced-cube-textarea-{name}-{}", std::process::id()));
     let _ = ui
@@ -194,6 +201,33 @@ fn an_unfocused_textarea_keeps_its_placeholder() -> Result<(), Error> {
     let idle = empty_render(true, false, None, "unfocused-idle")?;
 
     assert_eq!(composing, idle);
+    Ok(())
+}
+
+#[test]
+fn a_word_composed_elsewhere_leaves_the_placeholder_once_focused() -> Result<(), Error> {
+    let content = Content::new();
+    let mut ui = simulator(view(&content, true));
+    compose(&mut ui, "hel");
+    ui.click(Id::new("notes"))?;
+    let focused_after = render_hash(&mut ui, "focused-after")?;
+    let focused = empty_render(true, true, None, "focused")?;
+
+    assert_eq!(focused_after, focused);
+    Ok(())
+}
+
+#[test]
+fn closing_the_keyboard_restores_the_placeholder() -> Result<(), Error> {
+    let content = Content::new();
+    let mut ui = simulator(view(&content, true));
+    ui.click(Id::new("notes"))?;
+    compose(&mut ui, "hel");
+    let _ = ui.simulate([Event::InputMethod(input_method::Event::Closed)]);
+    let closed = render_hash(&mut ui, "closed")?;
+    let focused = empty_render(true, true, None, "idle-focused")?;
+
+    assert_eq!(closed, focused);
     Ok(())
 }
 
