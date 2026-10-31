@@ -1,3 +1,9 @@
+## [0.0.7](https://github.com/sam-ruff/iced-cube/compare/v0.0.6...v0.0.7) (2026-10-31)
+
+### Features
+
+* touch and phone components (bottom nav, fab, tappable, touch clicks) ([#4](https://github.com/sam-ruff/iced-cube/issues/4)) ([cfa9f78](https://github.com/sam-ruff/iced-cube/commit/cfa9f78addfc3ea0eb40973b38df89b9387323be))
+
 ## [0.0.6](https://github.com/sam-ruff/iced-cube/compare/v0.0.5...v0.0.6) (2026-10-23)
 
 ### Features
