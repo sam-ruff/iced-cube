@@ -315,8 +315,17 @@ fn a_tap_just_outside_a_small_button_still_presses_it() -> Result<(), iced_test:
     let label = ui.find("Undo")?.bounds().center();
     tap(&mut ui, Point::new(label.x, label.y - 20.0));
     let close = ui.find(toast::close_button_id(undo))?.bounds();
-    assert!(close.height >= 48.0 && close.width >= 48.0, "{close:?}");
-    tap(&mut ui, Point::new(close.x + 3.0, close.y + 3.0));
+    assert!(close.height < 48.0, "the button keeps its size: {close:?}");
+    tap(
+        &mut ui,
+        Point::new(close.center_x(), close.y + close.height + 6.0),
+    );
+    tap(
+        &mut ui,
+        Point::new(close.x + close.width + 5.0, close.center_y()),
+    );
+    // Beyond the hit area nothing is pressed.
+    tap(&mut ui, Point::new(close.center_x(), close.y - 10.0));
 
     // A finger on a toast also pauses it.
     let messages: Vec<_> = ui
@@ -326,11 +335,63 @@ fn a_tap_just_outside_a_small_button_still_presses_it() -> Result<(), iced_test:
     assert!(
         matches!(
             messages.as_slice(),
-            [Message::Toast(Event::Action(a)), Message::Toast(Event::Dismiss(d))] if *a == undo && *d == undo
+            [
+                Message::Toast(Event::Action(a)),
+                Message::Toast(Event::Dismiss(d)),
+                Message::Toast(Event::Dismiss(e)),
+            ] if *a == undo && *d == undo && *e == undo
         ),
         "{messages:?}"
     );
     Ok(())
+}
+
+#[test]
+fn a_press_on_a_buttons_margin_fires_on_release_and_can_be_dragged_off()
+-> Result<(), iced_test::Error> {
+    let mut state = State::new();
+    let undo = state.push(toast("Deleted").action("Undo"));
+
+    let mut ui = simulator(view(&state));
+    let label = ui.find("Undo")?.bounds().center();
+    let margin = Point::new(label.x, label.y - 20.0);
+    let left = mouse::Button::Left;
+
+    ui.point_at(margin);
+    let _ = ui.simulate([iced::Event::Mouse(mouse::Event::ButtonPressed(left))]);
+    let pressed: Vec<_> = actions(ui.into_messages());
+    assert!(pressed.is_empty(), "nothing fires on press: {pressed:?}");
+
+    let mut ui = simulator(view(&state));
+    ui.point_at(margin);
+    let _ = ui.simulate([iced::Event::Mouse(mouse::Event::ButtonPressed(left))]);
+    let away = Point::new(label.x, label.y - 60.0);
+    ui.point_at(away);
+    let _ = ui.simulate([
+        iced::Event::Mouse(mouse::Event::CursorMoved { position: away }),
+        iced::Event::Mouse(mouse::Event::ButtonReleased(left)),
+    ]);
+    let dragged: Vec<_> = actions(ui.into_messages());
+    assert!(dragged.is_empty(), "dragging off cancels: {dragged:?}");
+
+    let mut ui = simulator(view(&state));
+    ui.point_at(margin);
+    let _ = ui.simulate([
+        iced::Event::Mouse(mouse::Event::ButtonPressed(left)),
+        iced::Event::Mouse(mouse::Event::ButtonReleased(left)),
+    ]);
+    assert_eq!(actions(ui.into_messages()), [undo]);
+    Ok(())
+}
+
+fn actions(messages: impl IntoIterator<Item = Message>) -> Vec<toast::Id> {
+    messages
+        .into_iter()
+        .filter_map(|Message::Toast(event)| match event {
+            Event::Action(id) => Some(id),
+            _ => None,
+        })
+        .collect()
 }
 
 fn snackbar(state: &State) -> Element<'_, Message> {

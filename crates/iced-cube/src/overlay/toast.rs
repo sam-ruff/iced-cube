@@ -57,6 +57,7 @@ use iced::{
 };
 
 use crate::after_touch::after_touch;
+use crate::hit_slop::hit_slop;
 use crate::icon::{Glyph, themed};
 use crate::keys::{self, Chord, Keymap};
 use crate::primitives::button::{self, Size};
@@ -756,58 +757,42 @@ fn card<'a, Message: Clone + 'a>(
             accent(&Tokens::of(theme), variant)
         }));
     }
-    content = content.push(container(body).padding([HIT_SLOP, 0.0]));
+    content = content.push(body);
     if let Some(label) = &toast.action {
-        let action = emit(Event::Action(id));
-        content = content.push(hit_area(
+        content = content.push(hit_slop(
             button::button(label.as_str())
                 .variant(button::Variant::Outline)
                 .size(Size::Sm)
-                .on_press_maybe(action.clone()),
-            action,
+                .on_press_maybe(emit(Event::Action(id))),
+            HIT_SLOP,
         ));
     }
-    let dismiss = emit(Event::Dismiss(id));
     content = content.push(
-        container(hit_area(
+        container(hit_slop(
             icon_button(crate::lucide!(X))
                 .size(Size::Sm)
-                .on_press_maybe(dismiss.clone()),
-            dismiss,
+                .on_press_maybe(emit(Event::Dismiss(id))),
+            HIT_SLOP,
         ))
         .id(close_button_id(id)),
     );
 
-    // The buttons' hit areas reach into the card's padding, so the card keeps its size.
     solid(
         container(content)
-            .padding(Padding {
-                top: space::MD - HIT_SLOP,
-                bottom: space::MD - HIT_SLOP,
-                left: space::LG,
-                right: space::LG - HIT_SLOP,
-            })
+            .padding([space::MD, space::LG])
             .width(Length::Fill)
             .style(move |theme| style(&Tokens::of(theme), variant)),
     )
 }
 
-/// How far a toast button's hit area reaches past its edges: a small button becomes a 48 px
-/// touch target.
-const HIT_SLOP: f32 = 8.0;
-
-/// A button with a larger touch target. A press on the margin sends the button's message; one on
-/// the button itself is the button's own.
-fn hit_area<'a, Message: Clone + 'a>(
-    button: impl Into<Element<'a, Message>>,
-    on_press: Option<Message>,
-) -> Element<'a, Message> {
-    let padded = container(button).padding(HIT_SLOP);
-    match on_press {
-        Some(message) => mouse_area(padded).on_press(message).into(),
-        None => padded.into(),
-    }
-}
+/// How far past its edges a toast button takes presses: a 32 pixel button becomes 48 tall and
+/// 44 wide. Sideways it reaches half the gap between the buttons, so their margins never meet.
+const HIT_SLOP: Padding = Padding {
+    top: 8.0,
+    bottom: 8.0,
+    left: space::MD / 2.0,
+    right: space::MD / 2.0,
+};
 
 /// The colour of a variant's icon and tint.
 pub fn accent(tokens: &Tokens, variant: Variant) -> Color {
