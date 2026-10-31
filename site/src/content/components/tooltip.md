@@ -22,6 +22,6 @@ api:
     description: "The bubble style, for reuse in custom overlays."
 ---
 
-Use a tooltip to name an icon-only button or to add a short hint. Keep the label to a few words, and never put anything in it that people need to finish a task, because touch screens have no hover.
+Use a tooltip to name an icon-only button or to add a short hint. Keep the label to a few words, and never put anything in it that people need to finish a task, because touch screens have no hover. A finger held on the element shows the bubble, and it closes when the finger lifts.
 
 The bubble uses the primary colours, so it reads as dark on a light page and light on a dark one. It moves to stay inside the window when there is no room on the requested side.

@@ -6,7 +6,7 @@ use futures::executor::block_on;
 use futures::{SinkExt, StreamExt};
 use iced::keyboard::{Key, Modifiers};
 use iced::widget::text;
-use iced::{Element, Point, mouse};
+use iced::{Element, Padding, Point, Size, mouse, touch};
 use iced_cube::keys;
 use iced_cube::overlay::toast::{self, Event, Output, State, Variant, toast, toasts};
 use iced_test::simulator;
@@ -182,6 +182,33 @@ fn move_to(ui: &mut iced_test::Simulator<'_, Message>, position: Point) {
 }
 
 #[test]
+fn a_tap_on_a_toast_pauses_it_only_while_the_finger_is_down() -> Result<(), iced_test::Error> {
+    let mut state = State::new();
+    let _ = state.push(toast("Tap me"));
+
+    let mut ui = simulator(view(&state));
+    let at = ui.find("Tap me")?.bounds().center();
+    let id = touch::Finger(1);
+    ui.point_at(at);
+    let _ = ui.simulate([
+        iced::Event::Touch(touch::Event::FingerPressed { id, position: at }),
+        iced::Event::Touch(touch::Event::FingerLifted { id, position: at }),
+        iced::Event::Window(iced::window::Event::RedrawRequested(
+            iced::time::Instant::now(),
+        )),
+    ]);
+    let events: Vec<Event> = ui
+        .into_messages()
+        .map(|Message::Toast(event)| event)
+        .collect();
+    assert!(
+        matches!(events.as_slice(), [Event::Pause, Event::Resume]),
+        "{events:?}"
+    );
+    Ok(())
+}
+
+#[test]
 fn hovering_the_toasts_pauses_them_and_leaving_resumes() -> Result<(), iced_test::Error> {
     let mut state = State::new();
     let _ = state.push(toast("Hover me"));
@@ -244,4 +271,79 @@ fn the_keymap_presses_undo_on_the_newest_action_toast() {
         .collect();
     assert!(matches!(restored.as_slice(), [App::Restore(files)] if files == &["b"]));
     assert_eq!(state.len(), 2);
+}
+
+fn tap(ui: &mut iced_test::Simulator<'_, Message>, at: Point) {
+    let id = touch::Finger(1);
+    ui.point_at(at);
+    let _ = ui.simulate([
+        iced::Event::Touch(touch::Event::FingerPressed { id, position: at }),
+        iced::Event::Touch(touch::Event::FingerLifted { id, position: at }),
+    ]);
+}
+
+#[test]
+fn taps_press_the_action_and_close_buttons() -> Result<(), iced_test::Error> {
+    let mut state = State::new();
+    let undo = state.push(toast("Deleted").action("Undo"));
+    let other = state.push(toast("Saved"));
+
+    let mut ui = simulator(view(&state));
+    let action = ui.find("Undo")?.bounds().center();
+    tap(&mut ui, action);
+    let close = ui.find(toast::close_button_id(other))?.bounds().center();
+    tap(&mut ui, close);
+    let messages: Vec<_> = ui.into_messages().collect();
+    assert!(
+        matches!(
+            messages.as_slice(),
+            [Message::Toast(Event::Action(a)), Message::Toast(Event::Dismiss(d))] if *a == undo && *d == other
+        ),
+        "{messages:?}"
+    );
+    Ok(())
+}
+
+fn snackbar(state: &State) -> Element<'_, Message> {
+    toasts(state, text("Content"))
+        .position(toast::Position::BottomCenter)
+        .inset(Padding::from(12).bottom(100))
+        .max_width(420.0)
+        .on_event(Message::Toast)
+        .into()
+}
+
+#[test]
+fn a_narrow_window_fills_its_width_up_to_the_inset() -> Result<(), iced_test::Error> {
+    let mut state = State::new();
+    let id = state.push(toast("Moved to the bin").action("Undo"));
+    let size = Size::new(360.0, 640.0);
+    let mut ui = iced_test::Simulator::with_size(iced::Settings::default(), size, snackbar(&state));
+    let close = ui.find(toast::close_button_id(id))?.bounds();
+    let title = ui.find("Moved to the bin")?.bounds();
+    // The card spans the window less the 12 pixel insets, so its close
+    // button ends near the right edge and its title starts near the left.
+    assert!(
+        close.x + close.width > size.width - 12.0 - 24.0,
+        "{close:?}"
+    );
+    assert!(title.x < 12.0 + 24.0, "{title:?}");
+    // Lifted above the bottom inset.
+    assert!(close.y + close.height < size.height - 100.0);
+    Ok(())
+}
+
+#[test]
+fn a_wide_window_caps_the_width_and_centres_it() -> Result<(), iced_test::Error> {
+    let mut state = State::new();
+    let id = state.push(toast("Moved to the bin").action("Undo"));
+    let size = Size::new(1000.0, 640.0);
+    let mut ui = iced_test::Simulator::with_size(iced::Settings::default(), size, snackbar(&state));
+    let close = ui.find(toast::close_button_id(id))?.bounds();
+    let title = ui.find("Moved to the bin")?.bounds();
+    let right = close.x + close.width;
+    assert!(right < size.width / 2.0 + 210.0 + 1.0, "{close:?}");
+    assert!(right > size.width / 2.0 + 210.0 - 24.0, "{close:?}");
+    assert!(title.x > size.width / 2.0 - 210.0 - 1.0, "{title:?}");
+    Ok(())
 }

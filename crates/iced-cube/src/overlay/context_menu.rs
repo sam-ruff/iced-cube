@@ -618,12 +618,27 @@ impl<Message> Widget<Message, Theme, Renderer> for Area<'_, Message> {
         viewport: &Rectangle,
     ) {
         let press = tree.state.downcast_mut::<LongPress>();
-        // The finger that opened the menu lifts over it, not as a tap.
+        // The finger that opened the menu lifts over it, not as a tap. The
+        // content hears it as lost, so a press it was tracking ends.
         if let IcedEvent::Touch(
-            touch::Event::FingerLifted { id, .. } | touch::Event::FingerLost { id, .. },
+            touch::Event::FingerLifted { id, position } | touch::Event::FingerLost { id, position },
         ) = event
             && press.lift(*id)
         {
+            let lost = IcedEvent::Touch(touch::Event::FingerLost {
+                id: *id,
+                position: *position,
+            });
+            self.content.as_widget_mut().update(
+                &mut tree.children[0],
+                &lost,
+                layout,
+                cursor,
+                renderer,
+                clipboard,
+                shell,
+                viewport,
+            );
             shell.capture_event();
             return;
         }

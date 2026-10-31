@@ -7,7 +7,9 @@ use iced_cube::data::{data_table, json_viewer, log_viewer, property_grid, tree, 
 use iced_cube::forms::{combobox, select};
 use iced_cube::keys::{Action, Keymap};
 use iced_cube::layout::{accordion, resizable_panel};
-use iced_cube::navigation::{breadcrumb, command, document_tabs, pagination, sidebar, tabs};
+use iced_cube::navigation::{
+    bottom_nav, breadcrumb, command, document_tabs, pagination, sidebar, tabs,
+};
 use iced_cube::overlay::{context_menu, dialog, dropdown_menu, popover, toast};
 use iced_cube::primitives::{checkbox, slider, switch, toggle, toggle_group};
 use serde::Serialize;
@@ -37,6 +39,7 @@ pub fn bindings<A: Action>() -> Vec<Binding> {
 pub fn all() -> BTreeMap<&'static str, Vec<Binding>> {
     BTreeMap::from([
         ("accordion", bindings::<accordion::Action>()),
+        ("bottom-nav", bindings::<bottom_nav::Action>()),
         ("breadcrumb", bindings::<breadcrumb::Action>()),
         ("checkbox", bindings::<checkbox::Action>()),
         ("combobox", bindings::<combobox::Action>()),

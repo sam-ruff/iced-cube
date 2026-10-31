@@ -1,9 +1,13 @@
 //! A small label shown while the pointer rests on an element.
+//!
+//! A finger shows it while held. Once the finger lifts, the bubble stays
+//! closed until a mouse is used, so a tap on a phone does not leave it open.
 
 use iced::time::Duration;
 use iced::widget::{self, container, text};
 use iced::{Background, Border, Element};
 
+use crate::after_touch::after_touch;
 use crate::theme::{Tokens, radius, space, text_size};
 
 /// Where the bubble appears relative to its element.
@@ -90,10 +94,11 @@ impl<'a, Message: 'a> From<Tooltip<'a, Message>> for Element<'a, Message> {
             .padding([space::XS + 2.0, space::MD])
             .style(|theme| style(&Tokens::of(theme)));
 
-        widget::tooltip(tooltip.content, bubble, tooltip.position.to_iced())
-            .gap(GAP)
-            .delay(tooltip.delay)
-            .into()
+        after_touch(
+            widget::tooltip(tooltip.content, bubble, tooltip.position.to_iced())
+                .gap(GAP)
+                .delay(tooltip.delay),
+        )
     }
 }
 

@@ -1,10 +1,14 @@
-//! Basic controls: buttons, icon buttons, checkboxes, inputs, radios,
-//! scroll areas, separators, sliders, switches, toggles and toggle groups.
+//! Basic controls: buttons, icon buttons, floating action buttons,
+//! checkboxes, inputs, radios, scroll areas, separators, sliders, switches,
+//! toggles and toggle groups, plus the touch helpers tappable and
+//! touch clicks.
 
 #[cfg(feature = "button")]
 pub mod button;
 #[cfg(feature = "checkbox")]
 pub mod checkbox;
+#[cfg(feature = "fab")]
+pub mod fab;
 #[cfg(feature = "icon-button")]
 pub mod icon_button;
 #[cfg(feature = "input")]
@@ -19,15 +23,21 @@ pub mod separator;
 pub mod slider;
 #[cfg(feature = "switch")]
 pub mod switch;
+#[cfg(feature = "tappable")]
+pub mod tappable;
 #[cfg(feature = "toggle")]
 pub mod toggle;
 #[cfg(feature = "toggle-group")]
 pub mod toggle_group;
+#[cfg(feature = "touch-clicks")]
+pub mod touch_clicks;
 
 #[cfg(feature = "button")]
 pub use button::{Button, button};
 #[cfg(feature = "checkbox")]
 pub use checkbox::{CheckState, Checkbox, checkbox};
+#[cfg(feature = "fab")]
+pub use fab::{Fab, fab};
 #[cfg(feature = "icon-button")]
 pub use icon_button::{IconButton, icon_button};
 #[cfg(feature = "input")]
@@ -42,7 +52,11 @@ pub use separator::{Separator, separator, vertical_separator};
 pub use slider::{Slider, slider};
 #[cfg(feature = "switch")]
 pub use switch::{Switch, switch};
+#[cfg(feature = "tappable")]
+pub use tappable::{Tappable, tappable};
 #[cfg(feature = "toggle")]
 pub use toggle::{Toggle, toggle};
 #[cfg(feature = "toggle-group")]
 pub use toggle_group::{ToggleGroup, toggle_group};
+#[cfg(feature = "touch-clicks")]
+pub use touch_clicks::{TouchClicks, touch_clicks};

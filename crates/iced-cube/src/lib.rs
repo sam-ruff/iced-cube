@@ -26,6 +26,8 @@
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+#[cfg(any(feature = "button", feature = "toggle", feature = "tooltip"))]
+mod after_touch;
 pub mod application;
 pub mod data;
 pub mod feedback;
@@ -41,6 +43,7 @@ pub mod layout;
     feature = "avatar",
     feature = "badge",
     feature = "button",
+    feature = "fab",
     feature = "tabs",
     feature = "toggle"
 ))]
@@ -108,6 +111,8 @@ pub use layout::split_pane;
 #[cfg(feature = "stack")]
 pub use layout::{hstack, vstack};
 
+#[cfg(feature = "bottom-nav")]
+pub use navigation::bottom_nav;
 #[cfg(feature = "command")]
 pub use navigation::command;
 #[cfg(feature = "document-tabs")]
@@ -138,6 +143,8 @@ pub use overlay::{toast, toasts};
 pub use primitives::button;
 #[cfg(feature = "checkbox")]
 pub use primitives::checkbox;
+#[cfg(feature = "fab")]
+pub use primitives::fab;
 #[cfg(feature = "icon-button")]
 pub use primitives::icon_button;
 #[cfg(feature = "input")]
@@ -148,10 +155,14 @@ pub use primitives::scroll_area;
 pub use primitives::slider;
 #[cfg(feature = "switch")]
 pub use primitives::switch;
+#[cfg(feature = "tappable")]
+pub use primitives::tappable;
 #[cfg(feature = "toggle")]
 pub use primitives::toggle;
 #[cfg(feature = "toggle-group")]
 pub use primitives::toggle_group;
+#[cfg(feature = "touch-clicks")]
+pub use primitives::touch_clicks;
 #[cfg(feature = "radio")]
 pub use primitives::{radio, radio_group};
 #[cfg(feature = "separator")]

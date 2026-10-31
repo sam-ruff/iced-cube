@@ -45,10 +45,21 @@ primitives = [
     "separator",
     "toggle",
     "toggle-group",
+    "fab",
+    "tappable",
+    "touch-clicks",
 ]
 forms = ["combobox", "field", "select", "textarea"]
 layout = ["card", "stack", "accordion", "resizable-panel", "split-pane"]
-navigation = ["breadcrumb", "command", "pagination", "tabs", "sidebar", "document-tabs"]
+navigation = [
+    "breadcrumb",
+    "command",
+    "pagination",
+    "tabs",
+    "sidebar",
+    "document-tabs",
+    "bottom-nav",
+]
 overlay = ["tooltip", "toast", "dialog", "popover", "dropdown-menu", "context-menu"]
 feedback = ["alert", "avatar", "badge", "progress", "spinner"]
 application = ["menubar", "toolbar", "status-bar", "command-palette"]
@@ -65,10 +76,13 @@ scroll-area = []
 separator = []
 toggle = ["iced/advanced"]
 toggle-group = ["toggle"]
+fab = ["button", "tooltip"]
+tappable = ["iced/advanced"]
+touch-clicks = ["iced/advanced"]
 combobox = ["input", "iced/advanced"]
 field = []
 select = ["iced/advanced"]
-textarea = ["input"]
+textarea = ["input", "touch-clicks"]
 card = []
 stack = []
 accordion = []
@@ -80,6 +94,7 @@ pagination = ["button"]
 tabs = ["iced/advanced"]
 sidebar = ["iced/advanced", "tooltip", "icon-button"]
 document-tabs = ["iced/advanced", "context-menu", "dropdown-menu", "icon-button"]
+bottom-nav = ["tappable"]
 tooltip = []
 toast = ["button", "icon-button"]
 dialog = ["button", "icon-button", "iced/advanced"]

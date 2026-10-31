@@ -10,6 +10,7 @@ use iced::keyboard::key::Named;
 use iced::widget::{self, button::Status, row, text};
 use iced::{Alignment, Background, Border, Color, Element, Length, Padding, Shadow};
 
+use crate::after_touch::after_touch;
 use crate::icon::{Glyph, opacity, themed};
 use crate::keys::{self, Chord, Keymap};
 use crate::natural::natural;
@@ -172,6 +173,7 @@ impl<'a, Message: Clone + 'a> From<Toggle<'a, Message>> for Element<'a, Message>
             icon,
             pressed,
             size.metrics(),
+            Length::Shrink,
             message,
             move |tokens, status| style(tokens, variant, pressed, status),
         ))
@@ -179,12 +181,14 @@ impl<'a, Message: Clone + 'a> From<Toggle<'a, Message>> for Element<'a, Message>
 }
 
 /// Renders the toggle button itself, so a group can draw its items with
-/// their own borders and corners.
+/// their own borders and corners. A width other than shrink centres the
+/// content.
 pub(crate) fn button<'a, Message: Clone + 'a>(
     label: impl text::IntoFragment<'a>,
     icon: Option<Glyph>,
     pressed: bool,
     metrics: Metrics,
+    width: Length,
     message: Option<Message>,
     style: impl Fn(&Tokens, Status) -> widget::button::Style + 'a,
 ) -> Element<'a, Message> {
@@ -210,16 +214,22 @@ pub(crate) fn button<'a, Message: Clone + 'a>(
             .wrapping(text::Wrapping::None),
     );
 
-    widget::button(
-        widget::container(content)
-            .height(Length::Fill)
-            .align_y(Alignment::Center),
+    let inner = widget::container(content)
+        .height(Length::Fill)
+        .align_y(Alignment::Center);
+    let inner = if width == Length::Shrink {
+        inner
+    } else {
+        inner.width(Length::Fill).align_x(Alignment::Center)
+    };
+    after_touch(
+        widget::button(inner)
+            .width(width)
+            .height(Length::Fixed(metrics.height))
+            .padding(Padding::from([0.0, metrics.padding_x]))
+            .on_press_maybe(message)
+            .style(move |theme, status| style(&Tokens::of(theme), status)),
     )
-    .height(Length::Fixed(metrics.height))
-    .padding(Padding::from([0.0, metrics.padding_x]))
-    .on_press_maybe(message)
-    .style(move |theme, status| style(&Tokens::of(theme), status))
-    .into()
 }
 
 /// Background and foreground colours of a toggle, on or off, in a state.

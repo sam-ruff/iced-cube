@@ -63,7 +63,7 @@ use iced::advanced::subscription::{self as recipe, EventStream, Hasher, Recipe};
 use iced::event::Status;
 use iced::futures::{StreamExt, future};
 use iced::keyboard::{self, Key, Modifiers, key::Named};
-use iced::{mouse, window};
+use iced::{mouse, touch, window};
 
 /// A key press delivered by [`subscription`].
 ///
@@ -138,6 +138,7 @@ impl Tracker {
             iced::Event::Mouse(
                 mouse::Event::ButtonPressed(_) | mouse::Event::WheelScrolled { .. },
             )
+            | iced::Event::Touch(touch::Event::FingerPressed { .. })
             | iced::Event::Window(window::Event::Unfocused) => {
                 self.held = None;
                 None
@@ -843,6 +844,19 @@ mod tests {
         let events = feed(&[
             press(alt(), Modifiers::ALT),
             iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+            release(alt(), Modifiers::empty()),
+        ]);
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn a_tap_while_held_stops_a_modifier_being_lone() {
+        let events = feed(&[
+            press(alt(), Modifiers::ALT),
+            iced::Event::Touch(touch::Event::FingerPressed {
+                id: touch::Finger(1),
+                position: iced::Point::ORIGIN,
+            }),
             release(alt(), Modifiers::empty()),
         ]);
         assert!(events.is_empty());

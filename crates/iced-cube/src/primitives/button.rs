@@ -3,6 +3,7 @@
 use iced::widget::{self, button::Status, row, text};
 use iced::{Alignment, Background, Border, Element, Length, Padding, Shadow};
 
+use crate::after_touch::after_touch;
 use crate::icon::{Glyph, opacity, themed};
 use crate::natural::natural;
 use crate::theme::{Tokens, fade, mix, radius, text_size};
@@ -212,7 +213,7 @@ impl<'a, Message: Clone + 'a> From<Button<'a, Message>> for Element<'a, Message>
             ),
         };
 
-        natural(
+        natural(after_touch(
             widget::button(
                 widget::container(content)
                     .height(Length::Fill)
@@ -225,7 +226,7 @@ impl<'a, Message: Clone + 'a> From<Button<'a, Message>> for Element<'a, Message>
             .padding(padding)
             .on_press_maybe(button.on_press)
             .style(move |theme, status| style(&Tokens::of(theme), variant, status)),
-        )
+        ))
     }
 }
 

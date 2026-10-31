@@ -112,6 +112,58 @@ fn labels_stay_on_one_line_in_a_narrow_container() {
     }
 }
 
+fn segmented(state: &State<Format>, variant: Variant) -> Element<'_, Message> {
+    toggle_group(state)
+        .variant(variant)
+        .width(iced::Length::Fill)
+        .on_event(Message::Group)
+        .into()
+}
+
+#[test]
+fn a_fill_width_shares_the_row_equally_with_centred_labels() {
+    let state = State::single(items()).required(true);
+    for variant in Variant::ALL {
+        let mut ui = iced_test::Simulator::with_size(
+            iced::Settings::default(),
+            iced::Size::new(360.0, 200.0),
+            segmented(&state, variant),
+        );
+        let centres: Vec<f32> = ["Bold", "Italic", "Underline"]
+            .into_iter()
+            .map(|label| ui.find(label).expect("rendered").bounds().center_x())
+            .collect();
+        let step = centres[1] - centres[0];
+        assert!(
+            (centres[2] - centres[1] - step).abs() < 1.5,
+            "{variant:?} {centres:?}"
+        );
+        // Three equal items across about 360 pixels.
+        assert!((step - 120.0).abs() < 4.0, "{variant:?} {centres:?}");
+    }
+}
+
+#[test]
+fn taps_toggle_items() {
+    let state = State::single(items()).required(true);
+    for variant in Variant::ALL {
+        let mut ui = simulator(segmented(&state, variant));
+        let at = ui.find("Italic").expect("rendered").bounds().center();
+        let id = iced::touch::Finger(1);
+        ui.point_at(at);
+        let _ = ui.simulate([
+            iced::Event::Touch(iced::touch::Event::FingerPressed { id, position: at }),
+            iced::Event::Touch(iced::touch::Event::FingerLifted { id, position: at }),
+        ]);
+        let messages: Vec<_> = ui.into_messages().collect();
+        assert_eq!(
+            messages,
+            vec![Message::Group(Event::Toggle(Format::Italic))],
+            "{variant:?}"
+        );
+    }
+}
+
 #[cfg(feature = "button")]
 #[test]
 fn an_outlined_group_is_as_tall_as_a_button() {
