@@ -17,7 +17,7 @@ api:
   - name: ".on_action(fn) / .on_action_maybe(option)"
     description: "Sets the message built from each edit action. Apply it with content.perform(action) in update. None disables the textarea."
   - name: ".placeholder(text)"
-    description: "Text shown while the content is empty."
+    description: "Text shown while the content is empty. It is hidden while a phone keyboard or input method is composing a word in the focused textarea."
   - name: ".height(length)"
     description: "Sets the height. By default the textarea starts about three lines tall and grows with its content. A fixed height scrolls once the text overflows."
   - name: ".min_height(pixels)"
