@@ -1,3 +1,9 @@
+## [0.0.9](https://github.com/sam-ruff/iced-cube/compare/v0.0.8...v0.0.9) (2026-10-31)
+
+### Bug Fixes
+
+* **textarea:** hide the placeholder while a word is being composed ([#6](https://github.com/sam-ruff/iced-cube/issues/6)) ([14e514a](https://github.com/sam-ruff/iced-cube/commit/14e514a2e15a80b86d0306fbb3e7ce529f26467a))
+
 ## [0.0.8](https://github.com/sam-ruff/iced-cube/compare/v0.0.7...v0.0.8) (2026-10-31)
 
 ### Features
