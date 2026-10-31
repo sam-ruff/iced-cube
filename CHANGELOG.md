@@ -1,3 +1,9 @@
+## [0.0.8](https://github.com/sam-ruff/iced-cube/compare/v0.0.7...v0.0.8) (2026-10-31)
+
+### Features
+
+* 48 pixel touch targets for toast buttons and a toggle group height ([#5](https://github.com/sam-ruff/iced-cube/issues/5)) ([dfd6059](https://github.com/sam-ruff/iced-cube/commit/dfd6059ffe9ae9352bd2d97a7528fa6aeae89220))
+
 ## [0.0.7](https://github.com/sam-ruff/iced-cube/compare/v0.0.6...v0.0.7) (2026-10-31)
 
 ### Features
