@@ -1,3 +1,13 @@
+## [0.0.12](https://github.com/sam-ruff/iced-cube/compare/v0.0.11...v0.0.12) (2026-11-08)
+
+### Features
+
+* **rich-text-editor:** add a rich text editor and formatting toolbar ([0fcaeae](https://github.com/sam-ruff/iced-cube/commit/0fcaeaea1821bcb9ecee33a944c11afc59c9c2ce))
+
+### Bug Fixes
+
+* pin lucide-static-svg to 1.48.0, whose newer releases drop icons iced-cube uses ([113aa3d](https://github.com/sam-ruff/iced-cube/commit/113aa3da0a4cff1c24888895a3ebf09415c2455d))
+
 ## [0.0.11](https://github.com/sam-ruff/iced-cube/compare/v0.0.10...v0.0.11) (2026-11-08)
 
 ### Bug Fixes
