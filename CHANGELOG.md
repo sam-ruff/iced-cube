@@ -1,3 +1,9 @@
+## [0.0.11](https://github.com/sam-ruff/iced-cube/compare/v0.0.10...v0.0.11) (2026-11-08)
+
+### Bug Fixes
+
+* **input:** keep undo steps and redo when typing arrives in one frame or the caret moves ([7945033](https://github.com/sam-ruff/iced-cube/commit/794503391a41f5beb6cbf44bd8423a02bdd05f09))
+
 ## [0.0.10](https://github.com/sam-ruff/iced-cube/compare/v0.0.9...v0.0.10) (2026-11-08)
 
 ### Features
