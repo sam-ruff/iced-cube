@@ -211,7 +211,9 @@ impl<'a, Message: Clone + 'a> From<Textarea<'a, Message>> for Element<'a, Messag
         if let Some(on_action) = on_action.clone() {
             let edited = Rc::clone(&edited);
             editor = editor.on_action(move |action| {
-                edited.set(true);
+                if action.is_edit() {
+                    edited.set(true);
+                }
                 on_action(action)
             });
         }

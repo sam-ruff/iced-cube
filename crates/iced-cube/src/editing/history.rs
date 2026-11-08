@@ -79,9 +79,12 @@ impl History {
 
         // While earlier edits are unapplied the text is stale, so the edit
         // joins the open step rather than starting one from a wrong base.
+        // An edit that would start a new step closes this one instead, so
+        // the next edit after the text settles starts afresh.
         if self.pending {
             match &mut self.open {
-                Some(open) => open.kind = kind.joined(open.kind),
+                Some(open) if !replacing && open.kind.continues(&edit) => open.kind = kind,
+                Some(open) => open.kind = Kind::Closed,
                 None => {
                     let base = self.known.clone().unwrap_or_default();
                     self.open = Some(Open { kind, base });
@@ -228,14 +231,6 @@ impl Kind {
             }
             (Kind::Deleting, Edit::Delete) => true,
             _ => false,
-        }
-    }
-
-    /// The kind of a step that absorbed an edit of kind `self`.
-    fn joined(self, open: Kind) -> Self {
-        match (open, self) {
-            (Kind::Closed, _) | (_, Kind::Closed) => Kind::Closed,
-            _ => self,
         }
     }
 }
@@ -463,6 +458,34 @@ mod tests {
         history.settle(|| "a b".into());
         let restore = history.undo("a b".into());
         assert_eq!(restore.map(|r| r.text), Some(String::new()));
+    }
+
+    #[test]
+    fn words_typed_in_one_frame_do_not_swallow_the_next_frame() {
+        let mut history = History::default();
+        for c in "one two".chars() {
+            history.record(Edit::Insert(c.to_string()), false, String::new);
+        }
+        history.settle(|| "one two".into());
+        for c in " three".chars() {
+            history.record(Edit::Insert(c.to_string()), false, || "one two".into());
+        }
+        history.settle(|| "one two three".into());
+        let restore = history.undo("one two three".into());
+        assert_eq!(restore.map(|r| r.text).as_deref(), Some("one two"));
+    }
+
+    #[test]
+    fn a_frame_of_one_word_still_joins_the_word_before() {
+        let mut history = History::default();
+        history.record(Edit::Insert("o".into()), false, String::new);
+        history.settle(|| "o".into());
+        for c in "ne".chars() {
+            history.record(Edit::Insert(c.to_string()), false, || "o".into());
+        }
+        history.settle(|| "one".into());
+        let restore = history.undo("one".into());
+        assert_eq!(restore.map(|r| r.text).as_deref(), Some(""));
     }
 
     #[test]

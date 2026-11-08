@@ -200,6 +200,46 @@ fn keys_arriving_in_one_frame_still_undo_cleanly() {
 }
 
 #[test]
+fn text_typed_in_one_frame_undoes_without_the_text_before() {
+    let mut ui = editor("Dig the beds");
+    ui.press(COMMAND, letter('a'));
+    ui.tap(Named::Backspace);
+    ui.batch(iced_test::simulator::typewrite("alpha beta gamma"));
+    ui.batch(iced_test::simulator::typewrite(" delta"));
+    assert_eq!(text(&ui), "alpha beta gamma delta");
+
+    ui.press(COMMAND, letter('z'));
+    assert_eq!(text(&ui), "alpha beta gamma");
+    ui.press(COMMAND, letter('z'));
+    assert_eq!(text(&ui), "");
+    ui.press(COMMAND, letter('z'));
+    assert_eq!(text(&ui), "Dig the beds");
+}
+
+#[test]
+fn moving_the_caret_after_undo_keeps_redo() {
+    let mut ui = editor("");
+    ui.type_text("one two");
+    ui.press(COMMAND, letter('z'));
+    assert_eq!(text(&ui), "one ");
+    ui.press(jump(), Named::End);
+    ui.tap(Named::ArrowLeft);
+    ui.press(COMMAND | Modifiers::SHIFT, letter('z'));
+    assert_eq!(text(&ui), "one two");
+}
+
+#[test]
+fn moving_the_caret_still_starts_a_new_step() {
+    let mut ui = editor("");
+    ui.type_text("ab");
+    ui.tap(Named::ArrowLeft);
+    ui.type_text("x");
+    assert_eq!(text(&ui), "axb");
+    ui.press(COMMAND, letter('z'));
+    assert_eq!(text(&ui), "ab");
+}
+
+#[test]
 fn content_replaced_by_the_app_forgets_the_history() {
     let mut ui = editor("");
     ui.type_text("first document");

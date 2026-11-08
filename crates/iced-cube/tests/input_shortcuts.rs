@@ -142,6 +142,44 @@ fn undo_reverts_typing_a_word_at_a_time_and_redo_restores_it() {
     assert_eq!(value(&ui), "hello world");
 }
 
+/// A busy app can receive a whole run of typing in one frame, before it
+/// applies any of it.
+fn type_in_one_frame(ui: &mut Harness<Form, Message>, text: &str) {
+    ui.batch(iced_test::simulator::typewrite(text));
+}
+
+#[test]
+fn text_typed_in_one_frame_undoes_without_the_text_before() {
+    let mut ui = field("Garden plan");
+    ui.press(COMMAND, letter('a'));
+    ui.tap(Named::Backspace);
+    type_in_one_frame(&mut ui, "alpha beta gamma");
+    type_in_one_frame(&mut ui, " delta");
+    assert_eq!(value(&ui), "alpha beta gamma delta");
+
+    ui.press(COMMAND, letter('z'));
+    assert_eq!(value(&ui), "alpha beta gamma");
+    ui.press(COMMAND, letter('z'));
+    assert_eq!(value(&ui), "");
+    ui.press(COMMAND, letter('z'));
+    assert_eq!(value(&ui), "Garden plan");
+    ui.press(COMMAND | Modifiers::SHIFT, letter('z'));
+    ui.press(COMMAND | Modifiers::SHIFT, letter('z'));
+    ui.press(COMMAND, letter('y'));
+    assert_eq!(value(&ui), "alpha beta gamma delta");
+}
+
+#[test]
+fn moving_the_caret_after_undo_keeps_redo() {
+    let mut ui = field("");
+    ui.type_text("one two");
+    ui.press(COMMAND, letter('z'));
+    ui.tap(Named::Home);
+    ui.tap(Named::End);
+    ui.press(COMMAND | Modifiers::SHIFT, letter('z'));
+    assert_eq!(value(&ui), "one two");
+}
+
 #[test]
 fn a_word_with_a_v_undoes_in_one_step() {
     let mut ui = field("");
