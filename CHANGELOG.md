@@ -1,3 +1,9 @@
+## [0.0.10](https://github.com/sam-ruff/iced-cube/compare/v0.0.9...v0.0.10) (2026-11-08)
+
+### Features
+
+* **input:** undo, redo and word deletion in every text field ([9a8ec83](https://github.com/sam-ruff/iced-cube/commit/9a8ec835bf6c4a9d695aef2ced40f28a6ffb48f7))
+
 ## [0.0.9](https://github.com/sam-ruff/iced-cube/compare/v0.0.8...v0.0.9) (2026-10-31)
 
 ### Bug Fixes
