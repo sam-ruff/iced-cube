@@ -1122,6 +1122,7 @@ dependencies = [
  "num-traits",
  "png 0.18.1",
  "serde_json",
+ "unicode-segmentation",
 ]
 
 [[package]]

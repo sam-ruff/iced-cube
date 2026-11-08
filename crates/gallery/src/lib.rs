@@ -16,7 +16,9 @@ use iced::Font;
 /// Inter matches the docs site, and is bundled because browsers expose no system fonts to wasm.
 pub const FONT: Font = Font::with_name("Inter");
 
-pub const FONT_FILES: [&[u8]; 2] = [
+pub const FONT_FILES: [&[u8]; 4] = [
     include_bytes!("../fonts/Inter-Regular.ttf"),
     include_bytes!("../fonts/Inter-SemiBold.ttf"),
+    include_bytes!("../fonts/Inter-Italic.ttf"),
+    include_bytes!("../fonts/Inter-SemiBoldItalic.ttf"),
 ];

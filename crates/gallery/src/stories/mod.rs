@@ -22,6 +22,7 @@ pub mod dialog;
 pub mod document_tabs;
 pub mod dropdown_menu;
 pub mod fab;
+pub mod formatting_toolbar;
 pub mod icon_button;
 pub mod input;
 pub mod json_viewer;
@@ -34,6 +35,7 @@ pub mod progress;
 pub mod property_grid;
 pub mod radio;
 pub mod resizable_panel;
+pub mod rich_text_editor;
 pub mod scroll_area;
 pub mod select;
 pub mod separator;
@@ -128,6 +130,26 @@ crate::stories! {
         id: "textarea/disabled", component: "textarea", title: "Fixed height and disabled",
         description: "A fixed-height textarea next to one without on_action, which is disabled.",
         file: "textarea/disabled.rs",
+    }
+    RichTextEditorCompose => rich_text_editor::compose {
+        id: "rich-text-editor/compose", component: "rich-text-editor", title: "Compose",
+        description: "A draft loaded from HTML, with the formatting toolbar above it. Select text and press a button, or use Ctrl+B, Ctrl+I and the other shortcuts; the buttons follow the caret. Ctrl+K or the link button asks for an address.",
+        file: "rich_text_editor/compose.rs", height: 360, task: true,
+    }
+    RichTextEditorShortcuts => rich_text_editor::shortcuts {
+        id: "rich-text-editor/shortcuts", component: "rich-text-editor", title: "Shortcuts",
+        description: "Switch the formatting shortcuts or undo and redo off: their keys then pass through the editor to the app, which shows the last key it received from keys::subscription.",
+        file: "rich_text_editor/shortcuts.rs", height: 300, subscription: true,
+    }
+    RichTextEditorPlaceholder => rich_text_editor::placeholder {
+        id: "rich-text-editor/placeholder", component: "rich-text-editor", title: "Placeholder and disabled",
+        description: "An empty editor shows its placeholder; one without on_action is disabled.",
+        file: "rich_text_editor/placeholder.rs", height: 240,
+    }
+    RichTextEditorOutput => rich_text_editor::output {
+        id: "rich-text-editor/output", component: "rich-text-editor", title: "HTML and plain text",
+        description: "The HTML and the plain-text alternative a mail client sends, updated as you edit.",
+        file: "rich_text_editor/output.rs", height: 360,
     }
     LabelField => label::field {
         id: "label/field", component: "label", title: "Field",
@@ -683,6 +705,11 @@ crate::stories! {
         id: "toolbar/formatting", component: "toolbar", title: "Formatting toolbar",
         description: "Toggles, a single-choice alignment group, undo and redo. Drag the slider: whatever does not fit moves into the More menu. Ctrl+F10 focuses the toolbar for the arrow keys.",
         file: "toolbar/formatting.rs", height: 360, subscription: true,
+    }
+    FormattingToolbarWidths => formatting_toolbar::widths {
+        id: "formatting-toolbar/widths", component: "formatting-toolbar", title: "Narrow widths",
+        description: "The toolbar above a rich text editor. Drag the slider: the size menu stays and the buttons that do not fit move into More. Ctrl+F10 focuses the buttons for the arrow keys.",
+        file: "formatting_toolbar/widths.rs", height: 340, subscription: true, task: true,
     }
     StatusBarBackground => status_bar::background {
         id: "status-bar/background", component: "status-bar", title: "Background updates",

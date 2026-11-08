@@ -64,6 +64,8 @@ pub use keys::{Chord, Keymap};
 
 #[cfg(feature = "command-palette")]
 pub use application::command_palette;
+#[cfg(feature = "formatting-toolbar")]
+pub use application::formatting_toolbar;
 #[cfg(feature = "menubar")]
 pub use application::menubar;
 #[cfg(feature = "status-bar")]
@@ -97,6 +99,8 @@ pub use feedback::{avatar, avatar_group};
 
 #[cfg(feature = "combobox")]
 pub use forms::combobox;
+#[cfg(feature = "rich-text-editor")]
+pub use forms::rich_text_editor;
 #[cfg(feature = "select")]
 pub use forms::select;
 #[cfg(feature = "textarea")]

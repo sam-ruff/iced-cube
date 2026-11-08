@@ -1,7 +1,9 @@
-//! Application chrome: the menubar, toolbar, status bar and command palette.
+//! Application chrome: the menubar, toolbars, status bar and command palette.
 
 #[cfg(feature = "command-palette")]
 pub mod command_palette;
+#[cfg(feature = "formatting-toolbar")]
+pub mod formatting_toolbar;
 #[cfg(feature = "menubar")]
 pub mod menubar;
 #[cfg(feature = "status-bar")]
@@ -11,6 +13,8 @@ pub mod toolbar;
 
 #[cfg(feature = "command-palette")]
 pub use command_palette::{CommandPalette, command_palette};
+#[cfg(feature = "formatting-toolbar")]
+pub use formatting_toolbar::{FormattingToolbar, formatting_toolbar};
 #[cfg(feature = "menubar")]
 pub use menubar::{Menubar, menubar};
 #[cfg(feature = "status-bar")]

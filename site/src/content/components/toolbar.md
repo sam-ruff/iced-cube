@@ -35,6 +35,8 @@ api:
     description: "Resolves a key press from keys::subscription. Only Focus claims a key until the toolbar has focus."
   - name: "toolbar(&state)"
     description: "Renders the entries that fit and a More menu with the rest. Buttons render disabled until .on_event is set."
+  - name: ".edge(bool)"
+    description: "Whether to draw the line along the bottom of the strip. On by default; turn it off when the toolbar sits inside another bar."
   - name: ".on_event(f) / .tooltip(Option<Position>) / .more_label(text)"
     description: "Maps toolbar events to your message, moves or hides the tooltips (below by default), and names the More button."
   - name: ".menu_keymap(keymap)"

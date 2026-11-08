@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use iced_cube::application::{command_palette, menubar, toolbar};
 use iced_cube::data::{data_table, json_viewer, log_viewer, property_grid, tree, virtual_list};
-use iced_cube::forms::{combobox, select};
+use iced_cube::forms::{combobox, rich_text_editor, select};
 use iced_cube::keys::{Action, Keymap};
 use iced_cube::layout::{accordion, resizable_panel};
 use iced_cube::navigation::{
@@ -24,7 +24,13 @@ pub struct Binding {
 
 /// The default bindings of one action type, grouped by action.
 pub fn bindings<A: Action>() -> Vec<Binding> {
-    Keymap::<A>::defaults()
+    bindings_of(&Keymap::<A>::defaults())
+}
+
+/// The bindings of `keymap`, grouped by action, for a component whose
+/// defaults differ from its action type's.
+pub fn bindings_of<A: Action>(keymap: &Keymap<A>) -> Vec<Binding> {
+    keymap
         .grouped()
         .into_iter()
         .map(|(action, chords)| Binding {
@@ -50,6 +56,7 @@ pub fn all() -> BTreeMap<&'static str, Vec<Binding>> {
         ("dialog", bindings::<dialog::Action>()),
         ("document-tabs", bindings::<document_tabs::Action>()),
         ("dropdown-menu", bindings::<dropdown_menu::Action>()),
+        ("formatting-toolbar", bindings::<toolbar::Action>()),
         ("input", bindings::<input::Shortcut>()),
         ("json-viewer", bindings::<json_viewer::Action>()),
         ("log-viewer", bindings::<log_viewer::Action>()),
@@ -58,6 +65,10 @@ pub fn all() -> BTreeMap<&'static str, Vec<Binding>> {
         ("popover", bindings::<popover::Action>()),
         ("property-grid", bindings::<property_grid::Action>()),
         ("resizable-panel", bindings::<resizable_panel::Action>()),
+        (
+            "rich-text-editor",
+            bindings_of(&rich_text_editor::default_keymap()),
+        ),
         ("select", bindings::<select::Action>()),
         ("sidebar", bindings::<sidebar::Action>()),
         ("slider", bindings::<slider::Action>()),

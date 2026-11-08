@@ -7,7 +7,7 @@
 
 use futures::executor::block_on;
 use iced::keyboard::{self, Key, Modifiers, key};
-use iced::{Element, Event, Font, Pixels, Size};
+use iced::{Element, Event, Font, Pixels, Point, Size};
 use iced_test::core::clipboard::{Clipboard, Kind};
 use iced_test::core::renderer::Headless;
 use iced_test::core::widget::operation::focusable;
@@ -67,13 +67,39 @@ impl<S, M> Harness<S, M> {
     /// Delivers `events` as one batch, then applies the messages they
     /// produced. Returns whether each event was captured.
     pub fn batch(&mut self, events: impl IntoIterator<Item = Event>) -> Vec<bool> {
+        self.batch_with(iced::mouse::Cursor::Unavailable, events)
+    }
+
+    /// Clicks the left button at `position`, applying the messages.
+    pub fn click(&mut self, position: Point) {
+        self.batch_with(
+            iced::mouse::Cursor::Available(position),
+            [
+                Event::Mouse(iced::mouse::Event::CursorMoved { position }),
+                Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)),
+            ],
+        );
+        self.batch_with(
+            iced::mouse::Cursor::Available(position),
+            [Event::Mouse(iced::mouse::Event::ButtonReleased(
+                iced::mouse::Button::Left,
+            ))],
+        );
+    }
+
+    /// Delivers `events` with the mouse at `cursor`.
+    pub fn batch_with(
+        &mut self,
+        cursor: iced::mouse::Cursor,
+        events: impl IntoIterator<Item = Event>,
+    ) -> Vec<bool> {
         let events: Vec<Event> = events.into_iter().collect();
         let mut messages = Vec::new();
         let cache = self.cache.take().unwrap_or_default();
         let mut ui = build((self.view)(&self.state), cache, &mut self.renderer);
         let (_, statuses) = ui.update(
             &events,
-            iced::mouse::Cursor::Unavailable,
+            cursor,
             &mut self.renderer,
             &mut self.clipboard,
             &mut messages,

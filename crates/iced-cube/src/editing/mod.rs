@@ -26,6 +26,10 @@ pub(crate) use history::{Edit, History, Restore};
 /// A shortcut that inputs, textareas and the search fields inside other
 /// components add to iced's own editing keys. Each can be switched off in a
 /// [`Shortcuts`] set.
+///
+/// The formatting shortcuts, from [`Bold`](Shortcut::Bold) on, only apply
+/// to the rich text editor; plain fields leave their keys alone and
+/// [`default_keymap`] does not bind them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Shortcut {
     Undo,
@@ -36,11 +40,35 @@ pub enum Shortcut {
     /// around it stays open. Switched off, the field ignores Escape and
     /// leaves it to the app.
     EscapeUnfocus,
+    Bold,
+    Italic,
+    Underline,
+    Strikethrough,
+    BulletedList,
+    NumberedList,
+    /// Asks the app for a link address for the selection.
+    Link,
+    ClearFormatting,
 }
 
 impl Shortcut {
-    const fn bit(self) -> u8 {
-        1 << self as u8
+    const fn bit(self) -> u16 {
+        1 << self as u16
+    }
+
+    /// Whether the shortcut formats rich text rather than editing plain text.
+    pub const fn is_formatting(self) -> bool {
+        matches!(
+            self,
+            Shortcut::Bold
+                | Shortcut::Italic
+                | Shortcut::Underline
+                | Shortcut::Strikethrough
+                | Shortcut::BulletedList
+                | Shortcut::NumberedList
+                | Shortcut::Link
+                | Shortcut::ClearFormatting
+        )
     }
 }
 
@@ -51,6 +79,14 @@ impl keys::Action for Shortcut {
         Shortcut::DeleteWordBackward,
         Shortcut::DeleteWordForward,
         Shortcut::EscapeUnfocus,
+        Shortcut::Bold,
+        Shortcut::Italic,
+        Shortcut::Underline,
+        Shortcut::Strikethrough,
+        Shortcut::BulletedList,
+        Shortcut::NumberedList,
+        Shortcut::Link,
+        Shortcut::ClearFormatting,
     ];
 
     fn defaults() -> Keymap<Self> {
@@ -64,6 +100,14 @@ impl keys::Action for Shortcut {
             Shortcut::DeleteWordBackward => "Delete word backward",
             Shortcut::DeleteWordForward => "Delete word forward",
             Shortcut::EscapeUnfocus => "Unfocus",
+            Shortcut::Bold => "Bold",
+            Shortcut::Italic => "Italic",
+            Shortcut::Underline => "Underline",
+            Shortcut::Strikethrough => "Strikethrough",
+            Shortcut::BulletedList => "Bulleted list",
+            Shortcut::NumberedList => "Numbered list",
+            Shortcut::Link => "Link",
+            Shortcut::ClearFormatting => "Clear formatting",
         }
     }
 
@@ -79,6 +123,16 @@ impl keys::Action for Shortcut {
             }
             Shortcut::EscapeUnfocus => {
                 "Removes focus from the field without closing a dialog around it."
+            }
+            Shortcut::Bold => "Makes the selection bold, or plain again if it all is.",
+            Shortcut::Italic => "Makes the selection italic, or upright again if it all is.",
+            Shortcut::Underline => "Underlines the selection, or removes the underline.",
+            Shortcut::Strikethrough => "Strikes through the selection, or removes the line.",
+            Shortcut::BulletedList => "Turns the selected lines into a bulleted list, or back.",
+            Shortcut::NumberedList => "Turns the selected lines into a numbered list, or back.",
+            Shortcut::Link => "Asks for an address to link the selection to.",
+            Shortcut::ClearFormatting => {
+                "Removes bold, italic, underline, strikethrough, sizes and links from the selection."
             }
         }
     }
@@ -97,7 +151,7 @@ impl keys::Action for Shortcut {
 /// assert!(Shortcuts::none().with(Shortcut::Undo).contains(Shortcut::Undo));
 /// ```
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Shortcuts(u8);
+pub struct Shortcuts(u16);
 
 impl Shortcuts {
     /// Every shortcut, the default.
@@ -182,6 +236,40 @@ pub fn default_keymap() -> Keymap<Shortcut> {
         .bind(Chord::named(Named::Escape), Shortcut::EscapeUnfocus)
 }
 
+/// The [`default_keymap`] plus the formatting shortcuts, for rich text.
+///
+/// | Keys | Shortcut |
+/// | --- | --- |
+/// | `Mod+B` | [`Shortcut::Bold`] |
+/// | `Mod+I` | [`Shortcut::Italic`] |
+/// | `Mod+U` | [`Shortcut::Underline`] |
+/// | `Mod+Shift+X` | [`Shortcut::Strikethrough`] |
+/// | `Mod+Shift+8` | [`Shortcut::BulletedList`] |
+/// | `Mod+Shift+7` | [`Shortcut::NumberedList`] |
+/// | `Mod+K` | [`Shortcut::Link`] |
+/// | `Mod+\` | [`Shortcut::ClearFormatting`] |
+#[cfg(feature = "rich-text-editor")]
+pub fn formatting_keymap() -> Keymap<Shortcut> {
+    default_keymap()
+        .bind(Chord::character('b').command(), Shortcut::Bold)
+        .bind(Chord::character('i').command(), Shortcut::Italic)
+        .bind(Chord::character('u').command(), Shortcut::Underline)
+        .bind(
+            Chord::character('x').command().shift(),
+            Shortcut::Strikethrough,
+        )
+        .bind(
+            Chord::character('8').command().shift(),
+            Shortcut::BulletedList,
+        )
+        .bind(
+            Chord::character('7').command().shift(),
+            Shortcut::NumberedList,
+        )
+        .bind(Chord::character('k').command(), Shortcut::Link)
+        .bind(Chord::character('\\').command(), Shortcut::ClearFormatting)
+}
+
 fn word(key: Named) -> Chord {
     let chord = Chord::named(key);
     if cfg!(target_os = "macos") {
@@ -259,10 +347,34 @@ pub(crate) fn resolve(
     physical_key: keyboard::key::Physical,
     modifiers: Modifiers,
 ) -> Option<Shortcut> {
-    keymap.resolve(key, modifiers).or_else(|| {
-        let latin = key.to_latin(physical_key)?;
-        keymap.resolve(&Key::Character(latin.to_string().into()), modifiers)
-    })
+    let by_character = |c: char| keymap.resolve(&Key::Character(c.to_string().into()), modifiers);
+    keymap
+        .resolve(key, modifiers)
+        .or_else(|| by_character(key.to_latin(physical_key)?))
+        // Some platforms report Shift+8 as `*`, so digits also match by key position.
+        .or_else(|| by_character(digit(physical_key)?))
+}
+
+fn digit(physical_key: keyboard::key::Physical) -> Option<char> {
+    use keyboard::key::{Code, Physical};
+
+    let Physical::Code(code) = physical_key else {
+        return None;
+    };
+    let digit = match code {
+        Code::Digit0 => '0',
+        Code::Digit1 => '1',
+        Code::Digit2 => '2',
+        Code::Digit3 => '3',
+        Code::Digit4 => '4',
+        Code::Digit5 => '5',
+        Code::Digit6 => '6',
+        Code::Digit7 => '7',
+        Code::Digit8 => '8',
+        Code::Digit9 => '9',
+        _ => return None,
+    };
+    Some(digit)
 }
 
 /// A key pressed with Ctrl or Cmd is a shortcut, but some platforms still
@@ -423,6 +535,7 @@ impl<Message, F: Field<Message>> Widget<Message, Theme, Renderer> for Editing<'_
                 ..
             }) = event
             && let Some(shortcut) = resolve(&self.keymap, key, *physical_key, *modifiers)
+                .filter(|shortcut| !shortcut.is_formatting())
         {
             // A shortcut that is off is left to the app: the field does not
             // act on its keys either.
@@ -523,6 +636,8 @@ impl<Message, F: Field<Message>> Editing<'_, Message, F> {
             }
             Shortcut::DeleteWordBackward => Direction::Backward,
             Shortcut::DeleteWordForward => Direction::Forward,
+            // Plain fields have nothing to format.
+            _ => return,
         };
         if self.field.delete_word(child, direction, shell) && self.shortcuts.has_history() {
             history.record(Edit::Other, true, || self.field.text());
@@ -694,11 +809,50 @@ mod tests {
     }
 
     #[test]
-    fn every_shortcut_has_a_default_chord() {
+    fn every_editing_shortcut_has_a_default_chord_and_formatting_has_none() {
         let keymap = default_keymap();
+        for shortcut in <Shortcut as keys::Action>::ALL {
+            assert_eq!(
+                keymap.chords(shortcut).is_empty(),
+                shortcut.is_formatting(),
+                "{shortcut:?}"
+            );
+        }
+    }
+
+    #[cfg(feature = "rich-text-editor")]
+    #[test]
+    fn the_formatting_keymap_binds_every_shortcut() {
+        let keymap = formatting_keymap();
         for shortcut in <Shortcut as keys::Action>::ALL {
             assert!(!keymap.chords(shortcut).is_empty(), "{shortcut:?}");
         }
+        let physical = Physical::Unidentified(NativeCode::Unidentified);
+        let b = Key::Character("b".into());
+        assert_eq!(
+            resolve(&keymap, &b, physical, Modifiers::COMMAND),
+            Some(Shortcut::Bold)
+        );
+        assert_eq!(
+            resolve(&default_keymap(), &b, physical, Modifiers::COMMAND),
+            None
+        );
+    }
+
+    #[cfg(feature = "rich-text-editor")]
+    #[test]
+    fn shifted_digits_match_by_key_position() {
+        let star = Key::Character("*".into());
+        let eight = Physical::Code(keyboard::key::Code::Digit8);
+        assert_eq!(
+            resolve(
+                &formatting_keymap(),
+                &star,
+                eight,
+                Modifiers::COMMAND | Modifiers::SHIFT
+            ),
+            Some(Shortcut::BulletedList)
+        );
     }
 
     #[test]

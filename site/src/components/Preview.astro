@@ -15,9 +15,11 @@ const key = id.replaceAll("/", "-");
 const snapshots = href("/snapshots/");
 const standalone = `${href("/preview/index.html")}?story=${encodeURIComponent(id)}`;
 const name = `${story.title} example`;
-// Components whose point is scrolling take the wheel and touch inside the
-// preview; every other preview lets the page scroll.
+// Components whose point is scrolling, or that scroll their own text, take
+// the wheel and touch inside the preview; every other preview lets the page
+// scroll.
 const scrolling = new Set([
+  "rich-text-editor",
   "scroll-area",
   "virtual-list",
   "log-viewer",

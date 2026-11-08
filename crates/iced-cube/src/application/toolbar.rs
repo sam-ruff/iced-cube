@@ -741,6 +741,7 @@ pub struct Toolbar<'a, Id, Message> {
     tooltip: Option<Position>,
     more: String,
     menu_keymap: Keymap<dropdown_menu::Action>,
+    edge: bool,
     on_event: Option<Box<dyn Fn(Event<Id>) -> Message + 'a>>,
 }
 
@@ -751,6 +752,7 @@ impl<Id: std::fmt::Debug, Message> std::fmt::Debug for Toolbar<'_, Id, Message> 
             .field("tooltip", &self.tooltip)
             .field("more", &self.more)
             .field("menu_keymap", &self.menu_keymap)
+            .field("edge", &self.edge)
             .finish_non_exhaustive()
     }
 }
@@ -763,6 +765,7 @@ pub fn toolbar<'a, Id, Message>(state: &'a State<Id>) -> Toolbar<'a, Id, Message
         tooltip: Some(Position::Bottom),
         more: String::from("More"),
         menu_keymap: dropdown_menu::default_keymap(),
+        edge: true,
         on_event: None,
     }
 }
@@ -788,6 +791,13 @@ impl<'a, Id, Message> Toolbar<'a, Id, Message> {
         self
     }
 
+    /// Whether to draw the line along the bottom of the strip. On by
+    /// default; turn it off when the toolbar sits inside another bar.
+    pub fn edge(mut self, edge: bool) -> Self {
+        self.edge = edge;
+        self
+    }
+
     pub fn on_event(mut self, on_event: impl Fn(Event<Id>) -> Message + 'a) -> Self {
         self.on_event = Some(Box::new(on_event));
         self
@@ -805,6 +815,7 @@ where
             tooltip,
             more,
             menu_keymap,
+            edge,
             on_event,
         } = toolbar;
         let on_event: Option<OnEvent<'a, Id, Message>> = on_event.map(Rc::from);
@@ -827,6 +838,9 @@ where
                 .into(),
             None => strip.into(),
         };
+        if !edge {
+            return measured;
+        }
         column![measured, crate::application::edge()]
             .width(Length::Fill)
             .into()
