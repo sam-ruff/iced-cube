@@ -44,7 +44,7 @@ use crate::overlay::dropdown_menu::{item, separator};
 use crate::overlay::menu::{ICON_SIZE, ROW_PADDING};
 use crate::primitives::button::Size;
 use crate::primitives::icon_button::icon_button;
-use crate::primitives::input::{self, input};
+use crate::primitives::input::{self, Shortcuts, input};
 use crate::theme::{self, Tokens, fade, mix, radius, space, text_size};
 
 /// Height of every row, as in a menu.
@@ -1199,6 +1199,7 @@ pub struct JsonViewer<'a, Message> {
     width: Length,
     height: Length,
     keymap: Keymap<Action>,
+    shortcuts: Shortcuts,
     menu: Option<Box<BuildMenu<'a, Message>>>,
     menu_keymap: Keymap<context_menu::Action>,
     on_event: Option<Box<OnEvent<'a, Message>>>,
@@ -1216,6 +1217,7 @@ pub fn json_viewer<Message>(state: &State) -> JsonViewer<'_, Message> {
         width: Length::Fill,
         height: Length::Shrink,
         keymap: default_keymap(),
+        shortcuts: Shortcuts::all(),
         menu: None,
         menu_keymap: context_menu::default_keymap(),
         on_event: None,
@@ -1285,6 +1287,13 @@ impl<'a, Message> JsonViewer<'a, Message> {
         self
     }
 
+    /// Sets which editing [`Shortcut`](input::Shortcut)s the search field
+    /// handles. All of them by default.
+    pub fn shortcuts(mut self, shortcuts: Shortcuts) -> Self {
+        self.shortcuts = shortcuts;
+        self
+    }
+
     pub fn on_event(mut self, on_event: impl Fn(Event) -> Message + 'a) -> Self {
         self.on_event = Some(Box::new(on_event));
         self
@@ -1343,6 +1352,7 @@ where
             width,
             height,
             keymap,
+            shortcuts,
             menu,
             menu_keymap,
             on_event,
@@ -1421,7 +1431,7 @@ where
         };
         let mut parts = column![].spacing(space::SM).width(width);
         if search_bar {
-            parts = parts.push(toolbar(state, &placeholder, on_event.clone()));
+            parts = parts.push(toolbar(state, &placeholder, shortcuts, on_event.clone()));
         }
         let parts = parts.push(body);
 
@@ -1459,6 +1469,7 @@ pub fn match_label(state: &State) -> String {
 fn toolbar<'a, Message: Clone + 'a>(
     state: &'a State,
     placeholder: &str,
+    shortcuts: Shortcuts,
     on_event: Option<Rc<OnEvent<'a, Message>>>,
 ) -> Element<'a, Message> {
     let id = state.search_id().clone();
@@ -1471,6 +1482,7 @@ fn toolbar<'a, Message: Clone + 'a>(
         input(placeholder, state.query())
             .id(id.clone())
             .icon(crate::lucide!(Search))
+            .shortcuts(shortcuts)
             .size(input::Size::Sm)
             .width(Length::Fill)
             .on_input_maybe(on_input)

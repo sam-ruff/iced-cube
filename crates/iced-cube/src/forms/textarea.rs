@@ -3,6 +3,13 @@
 //! A tap places the caret and a vertical drag scrolls the text, as with the
 //! mouse, so a textarea works on a touch screen.
 //!
+//! Undo, redo, word deletion and Escape follow the same [`Shortcut`]s as
+//! inputs. Undo sends ordinary [`Action`]s, so an app that applies each
+//! action to its [`Content`] needs no changes. Switch some or all of them
+//! off by passing a [`Shortcuts`] set to [`Textarea::shortcuts`].
+//!
+//! [`Shortcut`]: input::Shortcut
+//!
 //! The app owns the [`Content`] and applies each [`Action`] in `update`:
 //!
 //! ```no_run
@@ -22,13 +29,14 @@
 use std::cell::Cell;
 use std::fmt;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::text::highlighter::PlainText;
-use iced::advanced::widget::{Operation, Tree, Widget, tree};
+use iced::advanced::widget::{Operation, Tree, Widget, operation, tree};
 use iced::advanced::{Clipboard, Shell, input_method, overlay, renderer};
 use iced::widget::text::LineHeight;
-use iced::widget::text_editor::{self, Status, Style};
+use iced::widget::text_editor::{self, Edit, Motion, Status, Style};
 use iced::widget::{Id, container, text_input};
 use iced::{
     Color, Element, Event, Length, Padding, Rectangle, Renderer, Size, Theme, Vector, mouse,
@@ -36,7 +44,10 @@ use iced::{
 
 pub use iced::widget::text_editor::{Action, Content};
 
+use crate::editing::{self, Direction, Editing, Restore};
+use crate::keys::Keymap;
 use crate::primitives::input;
+pub use crate::primitives::input::{Shortcut, Shortcuts};
 use crate::primitives::touch_clicks::touch_clicks;
 use crate::theme::{Tokens, space, text_size};
 
@@ -57,6 +68,8 @@ pub struct Textarea<'a, Message> {
     width: Length,
     height: Length,
     min_height: f32,
+    shortcuts: Shortcuts,
+    keymap: Keymap<input::Shortcut>,
 }
 
 /// Creates a textarea editing `content`.
@@ -70,6 +83,8 @@ pub fn textarea<'a, Message>(content: &'a Content) -> Textarea<'a, Message> {
         width: Length::Fill,
         height: Length::Shrink,
         min_height: MIN_HEIGHT,
+        shortcuts: Shortcuts::all(),
+        keymap: input::default_keymap(),
     }
 }
 
@@ -121,6 +136,22 @@ impl<'a, Message> Textarea<'a, Message> {
         self
     }
 
+    /// Sets which [`Shortcut`]s the textarea handles. All
+    /// of them by default; pass [`Shortcuts::none`] to turn them all off.
+    /// The keys of a shortcut that is off reach the app, and iced's own
+    /// editing keys always work.
+    pub fn shortcuts(mut self, shortcuts: Shortcuts) -> Self {
+        self.shortcuts = shortcuts;
+        self
+    }
+
+    /// Replaces the [`input::default_keymap`], to bind the shortcuts to
+    /// other keys.
+    pub fn keymap(mut self, keymap: Keymap<input::Shortcut>) -> Self {
+        self.keymap = keymap;
+        self
+    }
+
     pub fn is_enabled(&self) -> bool {
         self.on_action.is_some()
     }
@@ -136,6 +167,8 @@ impl<Message> fmt::Debug for Textarea<'_, Message> {
             .field("width", &self.width)
             .field("height", &self.height)
             .field("min_height", &self.min_height)
+            .field("shortcuts", &self.shortcuts)
+            .field("keymap", &self.keymap)
             .finish()
     }
 }
@@ -172,14 +205,29 @@ impl<'a, Message: Clone + 'a> From<Textarea<'a, Message>> for Element<'a, Messag
         if let Some(id) = textarea.id {
             editor = editor.id(id);
         }
-        if let Some(on_action) = textarea.on_action {
-            editor = editor.on_action(on_action);
+        let on_action: Option<Rc<dyn Fn(Action) -> Message + 'a>> =
+            textarea.on_action.map(Rc::from);
+        let edited = Rc::new(Cell::new(false));
+        if let Some(on_action) = on_action.clone() {
+            let edited = Rc::clone(&edited);
+            editor = editor.on_action(move |action| {
+                edited.set(true);
+                on_action(action)
+            });
         }
 
-        let editor = Element::new(Composing {
+        let mut editor = Element::new(Composing {
             content: editor.into(),
             composing,
         });
+        if let Some(on_action) = on_action {
+            let field = Editor {
+                content: textarea.content,
+                on_action,
+            };
+            editor =
+                Editing::new(editor, field, textarea.keymap, textarea.shortcuts, edited).into();
+        }
 
         // iced's editor reads only the mouse, so taps and drags are
         // translated for it.
@@ -347,6 +395,71 @@ fn editor_focused(tree: &Tree) -> bool {
         .is_some_and(text_editor::State::is_focused)
 }
 
+/// The editor as seen by the editing shortcuts. Its tree is the
+/// [`Composing`] wrapper's.
+struct Editor<'a, Message> {
+    content: &'a Content,
+    on_action: Rc<dyn Fn(Action) -> Message + 'a>,
+}
+
+impl<Message> editing::Field<Message> for Editor<'_, Message> {
+    fn text(&self) -> String {
+        self.content.text()
+    }
+
+    fn is_focused(&self, tree: &Tree) -> bool {
+        tree.children.first().is_some_and(editor_focused)
+    }
+
+    fn has_selection(&self, _tree: &Tree) -> bool {
+        self.content.cursor().selection.is_some()
+    }
+
+    fn restore(&self, _tree: &mut Tree, restore: Restore, shell: &mut Shell<'_, Message>) {
+        let (head, tail) = restore
+            .text
+            .split_at_checked(restore.caret)
+            .unwrap_or((restore.text.as_str(), ""));
+        // Pasting the text after the caret first, then the text before it
+        // from the start, leaves the caret exactly where it belongs.
+        for action in [
+            Action::SelectAll,
+            Action::Edit(Edit::Paste(Arc::new(tail.to_owned()))),
+            Action::Move(Motion::DocumentStart),
+            Action::Edit(Edit::Paste(Arc::new(head.to_owned()))),
+        ] {
+            shell.publish((self.on_action)(action));
+        }
+    }
+
+    fn delete_word(
+        &self,
+        tree: &mut Tree,
+        direction: Direction,
+        shell: &mut Shell<'_, Message>,
+    ) -> bool {
+        let (motion, edit) = match direction {
+            Direction::Backward => (Motion::WordLeft, Edit::Backspace),
+            Direction::Forward => (Motion::WordRight, Edit::Delete),
+        };
+        if !self.has_selection(tree) {
+            shell.publish((self.on_action)(Action::Select(motion)));
+        }
+        shell.publish((self.on_action)(Action::Edit(edit)));
+        true
+    }
+
+    fn unfocus(&self, tree: &mut Tree) {
+        let Some(tree::State::Some(state)) = tree.children.first_mut().map(|tree| &mut tree.state)
+        else {
+            return;
+        };
+        if let Some(state) = state.downcast_mut::<text_editor::State<PlainText>>() {
+            operation::Focusable::unfocus(state);
+        }
+    }
+}
+
 /// The iced text editor style for a status, matching the input's look.
 pub fn style(tokens: &Tokens, status: Status, invalid: bool) -> Style {
     let status = match status {
@@ -388,6 +501,10 @@ mod tests {
         assert_eq!(t.min_height, MIN_HEIGHT);
         assert!(t.placeholder.is_none() && !t.invalid);
         assert!(!t.is_enabled());
+        assert_eq!(t.shortcuts, Shortcuts::all());
+        assert_eq!(t.keymap, input::default_keymap());
+        let off: Textarea<'_, ()> = textarea(&content).shortcuts(Shortcuts::none());
+        assert_eq!(off.shortcuts, Shortcuts::none());
     }
 
     #[test]

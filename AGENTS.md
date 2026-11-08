@@ -73,6 +73,11 @@ When adding one:
 - Pick defaults that follow common desktop conventions, build chords with `Chord::named(...)` rather than parsing strings, and add the component's slug to `gallery::keymaps::all()` so the docs page shows the table.
 - Give the component a keymap-driven story. Stories with subscriptions opt in with `subscription: true`.
 
+Text fields:
+
+- Every editable text widget, and every component that embeds one (a search, filter or value field), exposes its editing shortcuts as `.shortcuts(Shortcuts)`, taking the `input::Shortcuts` set of `input::Shortcut`s. It defaults to `Shortcuts::all()`, `Shortcuts::none()` turns every one off, and `.without(...)` turns off one, without touching any keymap. A shortcut that is off is left to the app.
+- Build the field with `input(...)`, or wrap an iced field with `input::with_shortcuts`, so it gets the shared undo history and key handling. Corrections such as dropping the text of Ctrl or Cmd chords are not shortcuts and stay on whatever the set.
+
 ## Subscriptions and channels
 
 Anything fed from outside the UI thread (toasts, log viewers, status indicators, streaming lists, async search) uses channels. Nothing shares `Arc<Mutex<_>>` or atomics with worker threads.

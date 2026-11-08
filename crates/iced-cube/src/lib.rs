@@ -30,6 +30,8 @@
 mod after_touch;
 pub mod application;
 pub mod data;
+#[cfg(feature = "input")]
+mod editing;
 pub mod feedback;
 #[cfg(feature = "breadcrumb")]
 mod fit;

@@ -1,13 +1,41 @@
 //! Single-line text inputs with an optional leading icon.
+//!
+//! Besides iced's own editing keys (select all, copy, cut, paste, moving by
+//! word, Home and End), inputs undo and redo, delete a word with
+//! Ctrl+Backspace and Ctrl+Delete, and keep Escape to themselves: see
+//! [`Shortcut`] and [`default_keymap`]. Pass a [`Shortcuts`] set to
+//! [`Input::shortcuts`] to switch some or all of them off, and a keymap to
+//! [`Input::keymap`] to rebind them. Textareas and every component with a
+//! search or filter field take the same set.
+//!
+//! ```no_run
+//! use iced_cube::input;
+//! use iced_cube::primitives::input::{Shortcut, Shortcuts};
+//!
+//! #[derive(Debug, Clone)]
+//! enum Message { Name(String) }
+//!
+//! // The app has its own undo, so the field leaves Ctrl+Z and Ctrl+Y alone.
+//! let view: iced::Element<'_, Message> = input("Name", "Ada")
+//!     .shortcuts(Shortcuts::all().without(Shortcut::Undo).without(Shortcut::Redo))
+//!     .on_input(Message::Name)
+//!     .into();
+//! ```
 
+use std::cell::Cell;
 use std::fmt;
+use std::rc::Rc;
 
 use iced::widget::text::LineHeight;
 use iced::widget::text_input::{Status, Style};
 use iced::widget::{Id, container, stack, text_input};
 use iced::{Alignment, Background, Border, Color, Element, Length, Padding};
 
+pub use crate::editing::{Shortcut, Shortcuts, default_keymap};
+
+use crate::editing::{self, Editing};
 use crate::icon::{Glyph, opacity, themed};
+use crate::keys::Keymap;
 use crate::theme::{Tokens, fade, mix, radius, space, text_size};
 
 const LINE_HEIGHT: f32 = 1.3;
@@ -91,6 +119,8 @@ pub struct Input<'a, Message> {
     invalid: bool,
     size: Size,
     width: Length,
+    shortcuts: Shortcuts,
+    keymap: Keymap<Shortcut>,
 }
 
 /// Creates a text input showing `value`, with `placeholder` while empty.
@@ -106,6 +136,8 @@ pub fn input<'a, Message>(placeholder: &str, value: &str) -> Input<'a, Message> 
         invalid: false,
         size: Size::default(),
         width: Length::Fill,
+        shortcuts: Shortcuts::all(),
+        keymap: default_keymap(),
     }
 }
 
@@ -167,9 +199,55 @@ impl<'a, Message> Input<'a, Message> {
         self
     }
 
+    /// Sets which [`Shortcut`]s the input handles. All of them by default;
+    /// pass [`Shortcuts::none`] to turn them all off. The keys of a shortcut
+    /// that is off reach the app, and iced's own editing keys always work.
+    pub fn shortcuts(mut self, shortcuts: Shortcuts) -> Self {
+        self.shortcuts = shortcuts;
+        self
+    }
+
+    /// Replaces the [`default_keymap`], to bind the shortcuts to other keys.
+    pub fn keymap(mut self, keymap: Keymap<Shortcut>) -> Self {
+        self.keymap = keymap;
+        self
+    }
+
     pub fn is_enabled(&self) -> bool {
         self.on_input.is_some()
     }
+}
+
+/// Builds an iced text input from `field` with `on_input` wired up and the
+/// editing shortcuts around it.
+pub(crate) fn with_shortcuts<'a, Message: Clone + 'a>(
+    field: text_input::TextInput<'a, Message>,
+    value: &str,
+    secure: bool,
+    on_input: Option<Box<dyn Fn(String) -> Message + 'a>>,
+    keymap: Keymap<Shortcut>,
+    shortcuts: Shortcuts,
+) -> Element<'a, Message> {
+    let Some(on_input) = on_input else {
+        return field.into();
+    };
+    let on_input: Rc<dyn Fn(String) -> Message + 'a> = Rc::from(on_input);
+    let edited = Rc::new(Cell::new(false));
+    let field = field.on_input({
+        let (on_input, edited) = (Rc::clone(&on_input), Rc::clone(&edited));
+        move |value| {
+            edited.set(true);
+            on_input(value)
+        }
+    });
+    Editing::new(
+        field,
+        editing::Input::new(value, secure, on_input),
+        keymap,
+        shortcuts,
+        edited,
+    )
+    .into()
 }
 
 impl<Message: fmt::Debug> fmt::Debug for Input<'_, Message> {
@@ -185,6 +263,8 @@ impl<Message: fmt::Debug> fmt::Debug for Input<'_, Message> {
             .field("invalid", &self.invalid)
             .field("size", &self.size)
             .field("width", &self.width)
+            .field("shortcuts", &self.shortcuts)
+            .field("keymap", &self.keymap)
             .finish()
     }
 }
@@ -206,9 +286,14 @@ impl<'a, Message: Clone + 'a> From<Input<'a, Message>> for Element<'a, Message> 
         if let Some(id) = input.id {
             field = field.id(id);
         }
-        if let Some(on_input) = input.on_input {
-            field = field.on_input(on_input);
-        }
+        let field = with_shortcuts(
+            field,
+            &input.value,
+            input.secure,
+            input.on_input,
+            input.keymap,
+            input.shortcuts,
+        );
 
         let Some(glyph) = input.icon else {
             return container(field).width(input.width).into();
@@ -296,6 +381,17 @@ mod tests {
         assert!(!i.secure && !i.invalid);
         assert!(i.icon.is_none() && i.id.is_none());
         assert!(!i.is_enabled());
+        assert_eq!(i.shortcuts, Shortcuts::all());
+        assert_eq!(i.keymap, default_keymap());
+    }
+
+    #[test]
+    fn shortcuts_and_keymap_can_be_changed() {
+        let i: Input<'_, ()> = input("", "")
+            .shortcuts(Shortcuts::none())
+            .keymap(Keymap::new());
+        assert_eq!(i.shortcuts, Shortcuts::none());
+        assert!(i.keymap.is_empty());
     }
 
     #[test]

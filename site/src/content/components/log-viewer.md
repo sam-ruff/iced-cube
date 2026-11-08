@@ -45,6 +45,8 @@ api:
     description: "Hides the toolbar, which leaves its actions on the keyboard, and sets the search placeholder and what shows with no lines."
   - name: ".keymap(keymap)"
     description: "Replaces the default keymap the focused log resolves keys with."
+  - name: ".shortcuts(Shortcuts)"
+    description: "Sets which editing shortcuts the search field handles, as on input: undo, redo, word deletion and Escape. All by default; Shortcuts::none() turns them off."
   - name: ".context_menu(&menu, on_event) / .context_menu_keymap(keymap)"
     description: "Gives every line a context menu keyed by its LineId, opened with a right-click, a long press or Shift+F10 on the highlighted line, and replaces the menu's keymap."
   - name: "log_viewer::menu() / MenuItem::event(id)"

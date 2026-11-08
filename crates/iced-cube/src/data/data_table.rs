@@ -38,7 +38,7 @@ use crate::overlay::dropdown_menu::{self, checkbox_item, dropdown_menu};
 use crate::primitives::button::{self, button};
 use crate::primitives::checkbox::{CheckState, checkbox};
 use crate::primitives::icon_button::icon_button;
-use crate::primitives::input::input;
+use crate::primitives::input::{Shortcuts, input};
 use crate::theme::{Tokens, fade, radius, semibold, space, text_size};
 
 /// Height of the header row.
@@ -1123,6 +1123,7 @@ pub struct DataTable<'a, Row, Key, Message> {
     row_height: f32,
     breakpoint: f32,
     keymap: Keymap<Action>,
+    shortcuts: Shortcuts,
     menu: Option<Box<BuildMenu<'a, Key, Message>>>,
     menu_keymap: Keymap<context_menu::Action>,
     row_actions: bool,
@@ -1143,6 +1144,7 @@ pub fn data_table<Row, Key, Message>(state: &State<Row, Key>) -> DataTable<'_, R
         row_height: ROW_HEIGHT,
         breakpoint: BREAKPOINT,
         keymap: default_keymap(),
+        shortcuts: Shortcuts::all(),
         menu: None,
         menu_keymap: context_menu::default_keymap(),
         row_actions: false,
@@ -1227,6 +1229,13 @@ impl<'a, Row, Key, Message> DataTable<'a, Row, Key, Message> {
         self
     }
 
+    /// Sets which editing [`Shortcut`](crate::primitives::input::Shortcut)s
+    /// the search field handles. All of them by default.
+    pub fn shortcuts(mut self, shortcuts: Shortcuts) -> Self {
+        self.shortcuts = shortcuts;
+        self
+    }
+
     pub fn on_event(mut self, on_event: impl Fn(Event<Key>) -> Message + 'a) -> Self {
         self.on_event = Some(Box::new(on_event));
         self
@@ -1287,6 +1296,7 @@ where
             row_height,
             breakpoint,
             keymap,
+            shortcuts,
             menu,
             menu_keymap,
             row_actions,
@@ -1306,6 +1316,7 @@ where
             height,
             row_height: row_height.max(1.0),
             keymap,
+            shortcuts,
             row_actions: row_actions && menu.is_some(),
             menu,
             on_event,
@@ -1327,6 +1338,7 @@ struct View<'a, Row, Key, Message> {
     height: Length,
     row_height: f32,
     keymap: Keymap<Action>,
+    shortcuts: Shortcuts,
     menu: Option<RowMenu<'a, Key, Message>>,
     row_actions: bool,
     on_event: Option<Rc<OnEvent<'a, Key, Message>>>,
@@ -1398,6 +1410,7 @@ where
             let on_event = self.on_event.clone();
             input(&self.placeholder, state.search())
                 .icon(crate::lucide!(Search))
+                .shortcuts(self.shortcuts)
                 .width(if narrow {
                     Length::Fill
                 } else {

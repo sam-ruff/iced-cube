@@ -39,6 +39,8 @@ api:
     description: "Below this width the rows become cards. Defaults to 560."
   - name: ".context_menu(&menu, f) / .row_actions(bool)"
     description: "Gives every row the same context menu, keyed by row key, and a button at the end of each row that opens it."
+  - name: ".shortcuts(Shortcuts)"
+    description: "Sets which editing shortcuts the search field handles, as on input: undo, redo, word deletion and Escape. All by default; Shortcuts::none() turns them off."
   - name: ".keymap(keymap) / .context_menu_keymap(keymap)"
     description: "Replaces the table's or the context menu's default keymap."
   - name: "data_table::default_keymap() / action.event(&state)"

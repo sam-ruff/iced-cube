@@ -31,6 +31,8 @@ api:
     description: "Overrides the width (240 pixels by default), takes the input sizes Sm, Md (the default) or Lg, and sets the text field's widget id."
   - name: ".invalid(bool)"
     description: "Draws the field with the destructive border, as input does, for example when a required value is missing."
+  - name: ".shortcuts(Shortcuts)"
+    description: "Sets which editing shortcuts the field handles, as on input: undo, redo, word deletion and Escape. All by default; Shortcuts::none() turns them off."
   - name: ".keymap(keymap)"
     description: "Replaces the default keymap. The combobox resolves its own key presses while its field has focus or its list is open."
   - name: "combobox::default_keymap()"

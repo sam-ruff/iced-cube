@@ -74,6 +74,7 @@ use crate::icon::{Glyph, opacity, themed};
 use crate::keys::{self, Chord, Keymap};
 use crate::overlay::anchored::{anchored, surface_style};
 use crate::overlay::menu::{self, Parts, ROW_PADDING, RowStatus};
+use crate::primitives::input::{self, Shortcuts};
 use crate::theme::{Tokens, fade, space, text_size};
 
 /// How many result batches a producer can send before it has to wait.
@@ -774,6 +775,7 @@ pub struct Command<'a, Id, Message> {
     max_height: f32,
     id: Option<widget::Id>,
     keymap: Keymap<Action>,
+    shortcuts: Shortcuts,
     on_event: Option<Box<dyn Fn(Event<Id>) -> Message + 'a>>,
 }
 
@@ -789,6 +791,7 @@ pub fn command<'a, Id, Message>(state: &'a State<Id>) -> Command<'a, Id, Message
         max_height: f32::INFINITY,
         id: None,
         keymap: default_keymap(),
+        shortcuts: Shortcuts::all(),
         on_event: None,
     }
 }
@@ -800,6 +803,7 @@ impl<Id: fmt::Debug, Message> fmt::Debug for Command<'_, Id, Message> {
             .field("placeholder", &self.placeholder)
             .field("empty", &self.empty)
             .field("loading", &self.loading)
+            .field("shortcuts", &self.shortcuts)
             .field("enabled", &self.on_event.is_some())
             .finish_non_exhaustive()
     }
@@ -857,6 +861,14 @@ impl<'a, Id, Message> Command<'a, Id, Message> {
         self
     }
 
+    /// Sets which editing [`Shortcut`](input::Shortcut)s the search field
+    /// handles, as [`Input::shortcuts`](input::Input::shortcuts) does. All of
+    /// them by default.
+    pub fn shortcuts(mut self, shortcuts: Shortcuts) -> Self {
+        self.shortcuts = shortcuts;
+        self
+    }
+
     pub fn on_event(mut self, on_event: impl Fn(Event<Id>) -> Message + 'a) -> Self {
         self.on_event = Some(Box::new(on_event));
         self
@@ -883,6 +895,7 @@ where
             max_height,
             id,
             keymap,
+            shortcuts,
             on_event,
         } = command;
 
@@ -899,7 +912,7 @@ where
         });
 
         let surface = container(column![
-            search_field(&placeholder, &state.query, id, on_input),
+            search_field(&placeholder, &state.query, id, on_input, shortcuts),
             container(widget::space())
                 .width(Length::Fill)
                 .height(1)
@@ -933,11 +946,12 @@ fn search_field<'a, Message: Clone + 'a>(
     placeholder: &str,
     value: &str,
     id: Option<widget::Id>,
-    on_input: Option<impl Fn(String) -> Message + 'a>,
+    on_input: Option<Box<dyn Fn(String) -> Message + 'a>>,
+    shortcuts: Shortcuts,
 ) -> Element<'a, Message> {
     let enabled = on_input.is_some();
     let vertical = (SEARCH_HEIGHT - text_size::SM * LINE_HEIGHT) / 2.0;
-    let mut input = widget::text_input(placeholder, value)
+    let mut text = widget::text_input(placeholder, value)
         .size(text_size::SM)
         .line_height(LineHeight::Relative(LINE_HEIGHT))
         .padding(Padding {
@@ -949,11 +963,10 @@ fn search_field<'a, Message: Clone + 'a>(
         .width(Length::Fill)
         .style(|theme, status| search_style(&Tokens::of(theme), status));
     if let Some(id) = id {
-        input = input.id(id);
+        text = text.id(id);
     }
-    if let Some(on_input) = on_input {
-        input = input.on_input(on_input);
-    }
+    let keymap = input::default_keymap();
+    let input = input::with_shortcuts(text, value, false, on_input, keymap, shortcuts);
 
     let icon = themed(
         crate::lucide!(Search),

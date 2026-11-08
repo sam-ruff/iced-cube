@@ -82,7 +82,7 @@ use crate::overlay::dropdown_menu::{item, separator};
 use crate::overlay::tooltip::Position;
 use crate::primitives::button::{self, button};
 use crate::primitives::icon_button::icon_button;
-use crate::primitives::input::{self, input};
+use crate::primitives::input::{self, Shortcuts, input};
 use crate::primitives::toggle;
 use crate::primitives::toggle_group::{self, toggle_group};
 use crate::theme::{self, Tokens, fade, mix, radius, space, text_size};
@@ -1205,6 +1205,7 @@ pub struct LogViewer<'a, Message> {
     placeholder: String,
     empty: String,
     keymap: Keymap<Action>,
+    shortcuts: Shortcuts,
     menu: Option<Box<BuildMenu<'a, Message>>>,
     menu_keymap: Keymap<context_menu::Action>,
     on_event: Option<Box<OnEvent<'a, Message>>>,
@@ -1222,6 +1223,7 @@ pub fn log_viewer<'a, Message>(state: &'a State) -> LogViewer<'a, Message> {
         placeholder: "Search messages".to_owned(),
         empty: "No log lines yet".to_owned(),
         keymap: default_keymap(),
+        shortcuts: Shortcuts::all(),
         menu: None,
         menu_keymap: context_menu::default_keymap(),
         on_event: None,
@@ -1278,6 +1280,13 @@ impl<'a, Message> LogViewer<'a, Message> {
         self
     }
 
+    /// Sets which editing [`Shortcut`](input::Shortcut)s the search field
+    /// handles. All of them by default.
+    pub fn shortcuts(mut self, shortcuts: Shortcuts) -> Self {
+        self.shortcuts = shortcuts;
+        self
+    }
+
     pub fn on_event(mut self, on_event: impl Fn(Event) -> Message + 'a) -> Self {
         self.on_event = Some(Box::new(on_event));
         self
@@ -1326,6 +1335,7 @@ where
             placeholder,
             empty,
             keymap,
+            shortcuts,
             menu,
             menu_keymap,
             on_event,
@@ -1339,6 +1349,7 @@ where
             toolbar,
             placeholder,
             empty,
+            shortcuts,
             menu: menu.clone(),
             on_event: on_event.clone(),
         });
@@ -1369,6 +1380,7 @@ struct View<'a, Message> {
     toolbar: bool,
     placeholder: String,
     empty: String,
+    shortcuts: Shortcuts,
     menu: Option<Rc<RowMenu<'a, LineId, Message>>>,
     on_event: Option<Rc<OnEvent<'a, Message>>>,
 }
@@ -1396,6 +1408,7 @@ impl<'a, Message: Clone + 'a> View<'a, Message> {
         let field = input(&self.placeholder, state.query())
             .id(state.search_id.clone())
             .icon(crate::lucide!(Search))
+            .shortcuts(self.shortcuts)
             .size(input::Size::Sm)
             .width(if narrow {
                 Length::Fill

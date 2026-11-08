@@ -39,6 +39,8 @@ api:
     description: "A fixed or filling height scrolls the rows, and only the rows in view are built. Keys longer than key_width end in an ellipsis."
   - name: ".context_menu(&menu, f)"
     description: "Gives every row the same context menu, keyed by node, opened by a right-click, a press and hold or Shift+F10; the row it opened on carries the ring while it is open. json_viewer::menu() builds one with Copy value, Copy path, Expand all and Collapse all; MenuItem::event(id) turns the chosen entry into an Event."
+  - name: ".shortcuts(Shortcuts)"
+    description: "Sets which editing shortcuts the search field handles, as on input: undo, redo, word deletion and Escape. All by default; Shortcuts::none() turns them off."
   - name: ".keymap(keymap) / .context_menu_keymap(keymap)"
     description: "Replaces the viewer's or the context menu's default keymap."
   - name: "json_viewer::default_keymap() / action.event(&state)"

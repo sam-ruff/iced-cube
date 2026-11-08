@@ -38,6 +38,8 @@ api:
     description: "Maps palette events to your message, and sets the first page's title, the search placeholder and the empty-state text."
   - name: ".loading(bool) / .max_height(f32) / .size(dialog::Size)"
     description: "Shows that a search is running, caps the list's height (400 by default), and sets the dialog's width."
+  - name: ".shortcuts(Shortcuts)"
+    description: "Sets which editing shortcuts the search field handles, as on input: undo, redo, word deletion and Escape. All by default; Shortcuts::none() turns them off."
   - name: ".keymap(keymap) / .command_keymap(keymap) / .dialog_keymap(keymap)"
     description: "Replace the toggle and Back chords, the list's keys and the dialog's keys."
   - name: "command_palette::default_keymap()"

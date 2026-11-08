@@ -58,7 +58,7 @@ use crate::icon::{opacity, themed};
 use crate::keys::{self, Chord, Keymap};
 use crate::overlay::anchored::{Align, Placement, Side, anchored};
 use crate::overlay::menu::{self, Parts, RowStatus, Trailing};
-use crate::primitives::input::{self, Size};
+use crate::primitives::input::{self, Shortcuts, Size};
 use crate::theme::{Tokens, space};
 
 /// How many suggestions show at once unless the state sets its own number.
@@ -383,6 +383,7 @@ pub struct Combobox<'a, T, Message> {
     id: Option<widget::Id>,
     invalid: bool,
     keymap: Keymap<Action>,
+    shortcuts: Shortcuts,
     on_event: Option<Box<dyn Fn(Event) -> Message + 'a>>,
 }
 
@@ -397,6 +398,7 @@ pub fn combobox<'a, T, Message>(state: &'a State<T>) -> Combobox<'a, T, Message>
         id: None,
         invalid: false,
         keymap: default_keymap(),
+        shortcuts: Shortcuts::all(),
         on_event: None,
     }
 }
@@ -410,6 +412,7 @@ impl<T: fmt::Debug, Message> fmt::Debug for Combobox<'_, T, Message> {
             .field("width", &self.width)
             .field("size", &self.size)
             .field("invalid", &self.invalid)
+            .field("shortcuts", &self.shortcuts)
             .field("enabled", &self.on_event.is_some())
             .finish_non_exhaustive()
     }
@@ -461,6 +464,14 @@ impl<'a, T, Message> Combobox<'a, T, Message> {
         self
     }
 
+    /// Sets which editing [`Shortcut`](input::Shortcut)s the field handles,
+    /// as [`Input::shortcuts`](input::Input::shortcuts) does. All of them by
+    /// default.
+    pub fn shortcuts(mut self, shortcuts: Shortcuts) -> Self {
+        self.shortcuts = shortcuts;
+        self
+    }
+
     /// Maps combobox events to your message. Without it the combobox is
     /// disabled.
     pub fn on_event(mut self, on_event: impl Fn(Event) -> Message + 'a) -> Self {
@@ -488,15 +499,15 @@ where
             id,
             invalid,
             keymap,
+            shortcuts,
             on_event,
         } = combobox;
         let selected = state.selected().map(ToString::to_string);
 
         let Some(on_event) = on_event else {
             let value = selected.unwrap_or_default();
-            return container(field(&placeholder, &value, size, id, None, false, invalid))
-                .width(width)
-                .into();
+            let field = field(&placeholder, &value, size, id, None, false, invalid);
+            return container(field).width(width).into();
         };
         let on_event: Rc<dyn Fn(Event) -> Message + 'a> = Rc::from(on_event);
 
@@ -510,20 +521,15 @@ where
         let list = open.then(|| suggestions(state, &empty, &*on_event));
         let on_anchor_press = (!open).then(|| on_event(Event::Open));
         let on_dismiss = open.then(|| on_event(Event::Close));
-        let on_input: OnInput<'a, Message> = {
-            let on_event = Rc::clone(&on_event);
-            Box::new(move |query| on_event(Event::Input(query)))
+        let editing = Editing {
+            on_input: {
+                let on_event = Rc::clone(&on_event);
+                Box::new(move |query| on_event(Event::Input(query)))
+            },
+            shortcuts,
         };
-        let field = container(field(
-            &hint,
-            &value,
-            size,
-            id,
-            Some(on_input),
-            open,
-            invalid,
-        ))
-        .width(width);
+        let field =
+            container(field(&hint, &value, size, id, Some(editing), open, invalid)).width(width);
         let field = CaretToEnd {
             content: field.into(),
             watch: (open, state.selected),
@@ -547,34 +553,44 @@ where
     }
 }
 
-type OnInput<'a, Message> = Box<dyn Fn(String) -> Message + 'a>;
+/// What an enabled field does with edits.
+struct Editing<'a, Message> {
+    on_input: Box<dyn Fn(String) -> Message + 'a>,
+    shortcuts: Shortcuts,
+}
 
 fn field<'a, Message: Clone + 'a>(
     placeholder: &str,
     value: &str,
     size: Size,
     id: Option<widget::Id>,
-    on_input: Option<OnInput<'a, Message>>,
+    editing: Option<Editing<'a, Message>>,
     open: bool,
     invalid: bool,
 ) -> Element<'a, Message> {
-    let enabled = on_input.is_some();
+    let enabled = editing.is_some();
     let metrics = size.metrics();
     let mut padding = metrics.padding(false);
     padding.right += metrics.icon + space::SM;
 
-    let mut input = widget::text_input(placeholder, value)
+    let mut text = widget::text_input(placeholder, value)
         .size(metrics.text)
         .line_height(LineHeight::Relative(LINE_HEIGHT))
         .padding(padding)
         .width(Length::Fill)
         .style(move |theme, status| style(&Tokens::of(theme), status, open, invalid));
     if let Some(id) = id {
-        input = input.id(id);
+        text = text.id(id);
     }
-    if let Some(on_input) = on_input {
-        input = input.on_input(on_input);
-    }
+    let (on_input, shortcuts) = match editing {
+        Some(Editing {
+            on_input,
+            shortcuts,
+        }) => (Some(on_input), shortcuts),
+        None => (None, Shortcuts::none()),
+    };
+    let keymap = input::default_keymap();
+    let input = input::with_shortcuts(text, value, false, on_input, keymap, shortcuts);
 
     let chevron = themed(
         crate::lucide!(ChevronsUpDown),

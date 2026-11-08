@@ -11,7 +11,7 @@ use iced_cube::navigation::{
     bottom_nav, breadcrumb, command, document_tabs, pagination, sidebar, tabs,
 };
 use iced_cube::overlay::{context_menu, dialog, dropdown_menu, popover, toast};
-use iced_cube::primitives::{checkbox, slider, switch, toggle, toggle_group};
+use iced_cube::primitives::{checkbox, input, slider, switch, toggle, toggle_group};
 use serde::Serialize;
 
 /// One action and the chords that trigger it by default.
@@ -50,6 +50,7 @@ pub fn all() -> BTreeMap<&'static str, Vec<Binding>> {
         ("dialog", bindings::<dialog::Action>()),
         ("document-tabs", bindings::<document_tabs::Action>()),
         ("dropdown-menu", bindings::<dropdown_menu::Action>()),
+        ("input", bindings::<input::Shortcut>()),
         ("json-viewer", bindings::<json_viewer::Action>()),
         ("log-viewer", bindings::<log_viewer::Action>()),
         ("menubar", bindings::<menubar::Action>()),
@@ -63,6 +64,7 @@ pub fn all() -> BTreeMap<&'static str, Vec<Binding>> {
         ("split-pane", bindings::<resizable_panel::Action>()),
         ("switch", bindings::<switch::Action>()),
         ("tabs", bindings::<tabs::Action>()),
+        ("textarea", bindings::<input::Shortcut>()),
         ("toast", bindings::<toast::Action>()),
         ("toggle", bindings::<toggle::Action>()),
         ("toggle-group", bindings::<toggle_group::Action>()),

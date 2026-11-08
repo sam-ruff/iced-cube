@@ -46,7 +46,7 @@ use crate::overlay::tooltip::tooltip;
 use crate::primitives::button;
 use crate::primitives::checkbox::checkbox;
 use crate::primitives::icon_button::icon_button;
-use crate::primitives::input::{self, input};
+use crate::primitives::input::{self, Shortcuts, input};
 use crate::primitives::switch::switch;
 use crate::theme::{self, Tokens, fade, mix, radius, space, text_size};
 
@@ -1786,6 +1786,7 @@ pub struct PropertyGrid<'a, Id, Message> {
     width: Length,
     height: Length,
     keymap: Keymap<Action>,
+    shortcuts: Shortcuts,
     menu: Option<Box<BuildMenu<'a, Id, Message>>>,
     menu_keymap: Keymap<context_menu::Action>,
     on_event: Option<Box<OnEvent<'a, Id, Message>>>,
@@ -1803,6 +1804,7 @@ pub fn property_grid<Id, Message>(state: &State<Id>) -> PropertyGrid<'_, Id, Mes
         width: Length::Fill,
         height: Length::Shrink,
         keymap: default_keymap(),
+        shortcuts: Shortcuts::all(),
         menu: None,
         menu_keymap: context_menu::default_keymap(),
         on_event: None,
@@ -1859,6 +1861,13 @@ impl<'a, Id, Message> PropertyGrid<'a, Id, Message> {
     /// Replaces the [`default_keymap`] the focused grid resolves keys with.
     pub fn keymap(mut self, keymap: Keymap<Action>) -> Self {
         self.keymap = keymap;
+        self
+    }
+
+    /// Sets which editing [`Shortcut`](input::Shortcut)s the filter and
+    /// value fields handle. All of them by default.
+    pub fn shortcuts(mut self, shortcuts: Shortcuts) -> Self {
+        self.shortcuts = shortcuts;
         self
     }
 
@@ -1929,6 +1938,7 @@ where
             width,
             height,
             keymap,
+            shortcuts,
             menu,
             menu_keymap,
             on_event,
@@ -1944,6 +1954,7 @@ where
             placeholder,
             height,
             keymap,
+            shortcuts,
             menu,
             entries: state.entries(),
             on_event: on_event.map(Rc::from),
@@ -1964,6 +1975,7 @@ struct View<'a, Id, Message> {
     placeholder: String,
     height: Length,
     keymap: Keymap<Action>,
+    shortcuts: Shortcuts,
     menu: Option<RowMenu<'a, Id, Message>>,
     entries: Vec<Entry<Id>>,
     on_event: Option<Rc<OnEvent<'a, Id, Message>>>,
@@ -2081,6 +2093,7 @@ where
         let field = input(&self.placeholder, state.query())
             .id(SEARCH)
             .icon(crate::lucide!(Search))
+            .shortcuts(self.shortcuts)
             .size(input::Size::Sm)
             .width(Length::Fill)
             .on_input_maybe(on_event.map(|on_event| move |query| on_event(Event::Search(query))));
@@ -2418,6 +2431,7 @@ where
     fn field(&self, property: &'a Property<Id>, draft: &'a Draft) -> Element<'a, Message> {
         let id = property.id;
         let mut field = input("", &draft.text)
+            .shortcuts(self.shortcuts)
             .size(input::Size::Sm)
             .invalid(draft.error.is_some())
             .on_input_maybe(

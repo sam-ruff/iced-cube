@@ -46,6 +46,8 @@ api:
     description: "Gives every property row the same context menu, keyed by property id. property_grid::menu() builds one with Copy value and Reset to default; MenuItem::event(id) turns the chosen entry into an Event, and property_grid::sync_menu(&mut menu, &state) after each menu event disables Reset on a property already at its default."
   - name: ".width(length) / .height(length)"
     description: "A fixed or filling height scrolls the rows, and only the rows in view are built."
+  - name: ".shortcuts(Shortcuts)"
+    description: "Sets which editing shortcuts the filter and value fields handle, as on input: undo, redo, word deletion and Escape. All by default; Shortcuts::none() turns them off."
   - name: ".keymap(keymap) / property_grid::default_keymap() / action.event(&state)"
     description: "Replaces the default shortcuts, and the Event a resolved Action sends. State::key_event does both."
   - name: "property_grid::row_style(tokens, Status) / name_width(requested, width)"

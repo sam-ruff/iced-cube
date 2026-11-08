@@ -79,6 +79,7 @@ use crate::navigation::command::{self, Group, Item, command, group};
 use crate::overlay::anchored::anchored;
 use crate::overlay::dialog::{self, dialog};
 use crate::primitives::button::{self, Variant, button};
+use crate::primitives::input::Shortcuts;
 
 /// The widget id of the search field, to focus it or find it in tests.
 pub const SEARCH_ID: widget::Id = widget::Id::new("iced-cube-command-palette-search");
@@ -464,6 +465,7 @@ pub struct CommandPalette<'a, Id, Message> {
     keymap: Keymap<Action>,
     command_keymap: Keymap<command::Action>,
     dialog_keymap: Keymap<dialog::Action>,
+    shortcuts: Shortcuts,
     on_event: Option<Box<dyn Fn(Event<Id>) -> Message + 'a>>,
 }
 
@@ -498,6 +500,7 @@ pub fn command_palette<'a, Id, Message>(
         keymap: default_keymap(),
         command_keymap: command::default_keymap(),
         dialog_keymap: dialog::default_keymap(),
+        shortcuts: Shortcuts::all(),
         on_event: None,
     }
 }
@@ -551,6 +554,13 @@ impl<'a, Id, Message> CommandPalette<'a, Id, Message> {
         self
     }
 
+    /// Sets which editing [`Shortcut`](crate::primitives::input::Shortcut)s
+    /// the search field handles. All of them by default.
+    pub fn shortcuts(mut self, shortcuts: Shortcuts) -> Self {
+        self.shortcuts = shortcuts;
+        self
+    }
+
     /// Replaces the [dialog keys](dialog::default_keymap).
     pub fn dialog_keymap(mut self, keymap: Keymap<dialog::Action>) -> Self {
         self.dialog_keymap = keymap;
@@ -581,6 +591,7 @@ where
             keymap,
             command_keymap,
             dialog_keymap,
+            shortcuts,
             on_event,
         } = palette;
         let on_event: Option<OnEvent<'a, Id, Message>> = on_event.map(Rc::from);
@@ -600,7 +611,8 @@ where
             .loading(loading)
             .max_height(max_height)
             .id(SEARCH_ID)
-            .keymap(command_keymap);
+            .keymap(command_keymap)
+            .shortcuts(shortcuts);
         if let Some(empty) = empty {
             list = list.empty(empty);
         }

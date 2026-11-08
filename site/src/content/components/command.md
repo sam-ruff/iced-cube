@@ -43,6 +43,8 @@ api:
     description: "The width fills by default. A fixed height stops the list resizing as results change."
   - name: ".max_height(f32)"
     description: "Caps the height while the list still shrinks to fit a few results, as a palette should. Keep with_visible_rows within the cap, since rows past it are clipped."
+  - name: ".shortcuts(Shortcuts)"
+    description: "Sets which editing shortcuts the search field handles, as on input: undo, redo, word deletion and Escape. All by default; Shortcuts::none() turns them off."
   - name: ".keymap(keymap)"
     description: "Replaces the default keymap. The list resolves its own key presses while its search field has focus."
   - name: "command::default_keymap()"

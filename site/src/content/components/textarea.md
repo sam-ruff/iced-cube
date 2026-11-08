@@ -7,6 +7,7 @@ module: forms::textarea
 imports: |
   use iced::widget::text_editor;
   use iced_cube::textarea;
+  use iced_cube::textarea::{Shortcut, Shortcuts};
 keywords: [multiline]
 related: [input, field]
 hero: textarea/default
@@ -26,16 +27,26 @@ api:
     description: "Draws a destructive border."
   - name: ".id(id) / .width(length)"
     description: "Sets the widget id and overrides the width. Textareas fill the available width by default."
+  - name: ".shortcuts(Shortcuts)"
+    description: "Sets which shortcuts the textarea handles: undo, redo, word deletion and Escape. Shortcuts::all() is the default, Shortcuts::none() turns them all off, and .without(Shortcut::EscapeUnfocus) turns off one. The keys of a shortcut that is off reach your app."
+  - name: ".keymap(keymap)"
+    description: "Binds the shortcuts to other keys. Starts from input::default_keymap()."
 keyboard:
   - keys: "Enter"
     action: "Inserts a new line."
-  - keys: "Escape"
-    action: "Removes focus from the textarea."
+  - keys: "Ctrl + A, C, X, V (Cmd on macOS)"
+    action: "Selects all, copies, cuts and pastes."
   - keys: "Arrow keys, Home, End, Page Up, Page Down"
     action: "Moves the cursor. Hold Shift to select."
+  - keys: "Ctrl + Arrow, Ctrl + Home / End (Alt on macOS)"
+    action: "Moves by word, or to the start or end of the text."
 ---
 
-The textarea wraps iced's text editor, so your app owns the `text_editor::Content` and applies every `Action` it receives. This keeps undo, validation and limits in your own `update`, as the character count example shows.
+The textarea wraps iced's text editor, so your app owns the `text_editor::Content` and applies every `Action` it receives. This keeps validation and limits in your own `update`, as the character count example shows.
+
+Undo works with that as it is. The textarea keeps its own history and, on Ctrl+Z, sends the actions that put the earlier text back, which your `update` applies like any others. Typing undoes a word at a time. If your app replaces the content itself, for example to open another document, the history starts again.
+
+Escape removes focus from the textarea and stops there, so a dialog around it stays open. Switch that off on its own with `.shortcuts(Shortcuts::all().without(Shortcut::EscapeUnfocus))`, or every shortcut with `Shortcuts::none()`; the keys then reach your app. `Shortcut` and `Shortcuts` are the same types the [input](../input/) takes.
 
 Read the text back with `content.text()`. Wrap the textarea in [`field`](../field/) to give it a label and helper text.
 
