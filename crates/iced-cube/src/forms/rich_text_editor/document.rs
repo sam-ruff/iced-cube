@@ -644,8 +644,8 @@ impl Document {
     pub fn slice(&self, start: Position, end: Position) -> Document {
         let (start, end) = (start.min(end), start.max(end));
         let mut blocks = Vec::new();
-        for index in start.block..=end.block.min(self.blocks.len().saturating_sub(1)) {
-            let block = &self.blocks[index];
+        let range = self.blocks.iter().enumerate().take(end.block + 1);
+        for (index, block) in range.skip(start.block) {
             let from = if index == start.block {
                 start.offset
             } else {
@@ -755,8 +755,8 @@ impl Document {
     /// block in the range keeps the style for what is typed into it.
     pub fn restyle(&mut self, start: Position, end: Position, change: impl Fn(&mut Style)) {
         let (start, end) = (self.clamp(start.min(end)), self.clamp(start.max(end)));
-        for index in start.block..=end.block {
-            let block = &mut self.blocks[index];
+        let range = self.blocks.iter_mut().enumerate().take(end.block + 1);
+        for (index, block) in range.skip(start.block) {
             let from = if index == start.block {
                 start.offset
             } else {
@@ -801,8 +801,8 @@ impl Document {
     /// how many bytes of each are in the range.
     fn styles_between(&self, start: Position, end: Position) -> Vec<(&Style, usize)> {
         let mut styles = Vec::new();
-        for index in start.block..=end.block.min(self.blocks.len().saturating_sub(1)) {
-            let block = &self.blocks[index];
+        let range = self.blocks.iter().enumerate().take(end.block + 1);
+        for (index, block) in range.skip(start.block) {
             let from = if index == start.block {
                 start.offset
             } else {
