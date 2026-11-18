@@ -1,3 +1,9 @@
+## [0.0.13](https://github.com/sam-ruff/iced-cube/compare/v0.0.12...v0.0.13) (2026-11-18)
+
+### Features
+
+* **selectable-text:** add rich text that can be selected and copied ([#8](https://github.com/sam-ruff/iced-cube/issues/8)) ([9c08b6a](https://github.com/sam-ruff/iced-cube/commit/9c08b6ae216e78fd2f1f4e831ea8b92c001d1fd1))
+
 ## [0.0.12](https://github.com/sam-ruff/iced-cube/compare/v0.0.11...v0.0.12) (2026-11-08)
 
 ### Features
