@@ -3,7 +3,9 @@
 use std::collections::BTreeMap;
 
 use iced_cube::application::{command_palette, menubar, toolbar};
-use iced_cube::data::{data_table, json_viewer, log_viewer, property_grid, tree, virtual_list};
+use iced_cube::data::{
+    data_table, json_viewer, log_viewer, property_grid, selectable_text, tree, virtual_list,
+};
 use iced_cube::forms::{combobox, rich_text_editor, select};
 use iced_cube::keys::{Action, Keymap};
 use iced_cube::layout::{accordion, resizable_panel};
@@ -70,6 +72,7 @@ pub fn all() -> BTreeMap<&'static str, Vec<Binding>> {
             bindings_of(&rich_text_editor::default_keymap()),
         ),
         ("select", bindings::<select::Action>()),
+        ("selectable-text", bindings::<selectable_text::Action>()),
         ("sidebar", bindings::<sidebar::Action>()),
         ("slider", bindings::<slider::Action>()),
         ("split-pane", bindings::<resizable_panel::Action>()),

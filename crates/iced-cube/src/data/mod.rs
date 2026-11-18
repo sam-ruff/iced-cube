@@ -1,5 +1,5 @@
-//! Data display: trees, tables, long lists, logs, JSON documents and property
-//! grids.
+//! Data display: trees, tables, long lists, logs, JSON documents, property
+//! grids and text that can be selected and copied.
 
 #[cfg(feature = "data-table")]
 pub mod data_table;
@@ -37,6 +37,8 @@ pub mod property_grid;
     feature = "virtual-list"
 ))]
 mod rows;
+#[cfg(feature = "selectable-text")]
+pub mod selectable_text;
 #[cfg(feature = "tree")]
 pub mod tree;
 #[cfg(feature = "virtual-list")]
@@ -50,6 +52,8 @@ pub use json_viewer::{JsonViewer, json_viewer};
 pub use log_viewer::{LogViewer, log_viewer};
 #[cfg(feature = "property-grid")]
 pub use property_grid::{PropertyGrid, property_grid};
+#[cfg(feature = "selectable-text")]
+pub use selectable_text::{SelectableText, SelectionArea, selectable_text, selection_area};
 #[cfg(feature = "tree")]
 pub use tree::{Tree, tree};
 #[cfg(feature = "virtual-list")]
