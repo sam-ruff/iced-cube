@@ -63,7 +63,15 @@ navigation = [
 overlay = ["tooltip", "toast", "dialog", "popover", "dropdown-menu", "context-menu"]
 feedback = ["alert", "avatar", "badge", "progress", "spinner"]
 application = ["menubar", "toolbar", "status-bar", "command-palette", "formatting-toolbar"]
-data = ["tree", "data-table", "json-viewer", "log-viewer", "property-grid", "virtual-list"]
+data = [
+    "tree",
+    "data-table",
+    "json-viewer",
+    "log-viewer",
+    "property-grid",
+    "virtual-list",
+    "selectable-text",
+]
 
 button = ["iced/advanced"]
 icon-button = ["button", "tooltip"]
@@ -145,6 +153,7 @@ property-grid = [
 virtual-list = ["iced/advanced", "context-menu", "scroll-area"]
 log-viewer = ["virtual-list", "button", "context-menu", "icon-button", "input", "toggle-group"]
 rich-text-editor = ["iced/advanced", "input", "dep:unicode-segmentation"]
+selectable-text = ["iced/advanced"]
 formatting-toolbar = [
     "rich-text-editor",
     "toolbar",

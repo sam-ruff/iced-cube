@@ -55,6 +55,8 @@ mod natural;
 pub mod navigation;
 pub mod overlay;
 pub mod primitives;
+#[cfg(any(feature = "rich-text-editor", feature = "selectable-text"))]
+mod shaped;
 #[cfg(any(feature = "dialog", feature = "sidebar", feature = "toast"))]
 mod solid;
 pub mod theme;
@@ -85,6 +87,8 @@ pub use data::property_grid;
 pub use data::tree;
 #[cfg(feature = "virtual-list")]
 pub use data::virtual_list;
+#[cfg(feature = "selectable-text")]
+pub use data::{selectable_text, selection_area};
 
 #[cfg(feature = "alert")]
 pub use feedback::alert;

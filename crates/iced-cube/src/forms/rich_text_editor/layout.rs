@@ -1,36 +1,17 @@
 //! Each block laid out as one paragraph of styled spans, with the caret,
 //! hit testing and selection worked out from the shaped glyphs.
 
-use iced::advanced::graphics::text::cosmic_text::{Buffer, LayoutGlyph, LayoutRun};
+use iced::advanced::graphics::text::cosmic_text::{LayoutGlyph, LayoutRun};
 use iced::advanced::text::{self, Paragraph as _, Span};
 use iced::alignment;
 use iced::font::Style as FontStyle;
 use iced::widget::text::{LineHeight, Shaping, Wrapping};
-use iced::{Color, Font, Pixels, Point, Renderer, Size};
+use iced::{Color, Font, Pixels, Point, Size};
 
 use super::document::{Block, BlockKind, Document, Position, Style};
 use crate::theme;
 
-/// The renderer's paragraph: the shaped text of a backend, or nothing when
-/// the library is built without one.
-pub type Paragraph = <Renderer as text::Renderer>::Paragraph;
-
-/// Access to the glyphs a paragraph was shaped into.
-pub trait Shaped {
-    fn shaped(&self) -> Option<&Buffer>;
-}
-
-impl Shaped for () {
-    fn shaped(&self) -> Option<&Buffer> {
-        None
-    }
-}
-
-impl Shaped for iced::advanced::graphics::text::Paragraph {
-    fn shaped(&self) -> Option<&Buffer> {
-        Some(self.buffer())
-    }
-}
+pub use crate::shaped::{Paragraph, Shaped};
 
 /// Line height as a multiple of each span's text size.
 pub const LINE_HEIGHT: f32 = 1.5;

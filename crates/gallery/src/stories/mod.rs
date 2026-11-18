@@ -38,6 +38,7 @@ pub mod resizable_panel;
 pub mod rich_text_editor;
 pub mod scroll_area;
 pub mod select;
+pub mod selectable_text;
 pub mod separator;
 pub mod showcase;
 pub mod sidebar;
@@ -830,6 +831,16 @@ crate::stories! {
         id: "json-viewer/parse-errors", component: "json-viewer", title: "Parse errors",
         description: "JSON text is parsed as it is typed. Invalid text shows the problem and where it is in place of the rows.",
         file: "json_viewer/parse_errors.rs", height: 200, task: true,
+    }
+    SelectableTextArticle => selectable_text::article {
+        id: "selectable-text/article", component: "selectable-text", title: "Article",
+        description: "A heading and two paragraphs in one area. Drag across them, double click a word or triple click a paragraph, then press Ctrl+C. A click on a link still opens it.",
+        file: "selectable_text/article.rs", height: 260, task: true,
+    }
+    SelectableTextMenu => selectable_text::menu {
+        id: "selectable-text/menu", component: "selectable-text", title: "Scrolling with a context menu",
+        description: "Notes in a scrollable inside the area: drag past its top or bottom edge and it scrolls while the selection grows. Right-click or press and hold for a menu whose items ask the area for its text.",
+        file: "selectable_text/menu.rs", height: 300, task: true,
     }
     VirtualListLarge => virtual_list::large {
         id: "virtual-list/large", component: "virtual-list", title: "100,000 rows",
