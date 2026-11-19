@@ -553,6 +553,34 @@ fn a_column_cannot_be_dragged_past_what_the_others_can_give() {
 }
 
 #[test]
+fn a_column_grows_into_room_no_column_uses() {
+    let state = state(3)
+        .with_width("email", 200.0)
+        .with_width("status", 100.0)
+        .with_width("amount", 100.0);
+    let mut ui = desktop(view(&state));
+    let from = edge(ui.find("Amount").expect("header").bounds(), 400.0);
+    drag(&mut ui, from, Point::new(450.0, from.y));
+    assert_eq!(
+        changes(ui),
+        [Event::Resize(vec![
+            ("email", 200.0),
+            ("status", 100.0),
+            ("amount", 150.0)
+        ])]
+    );
+}
+
+#[test]
+fn an_unsteady_press_on_an_edge_resizes_nothing() {
+    let state = state(3);
+    let mut ui = desktop(view(&state));
+    let from = edge(ui.find("Email").expect("header").bounds(), 480.0);
+    drag(&mut ui, from, Point::new(481.0, from.y));
+    assert_eq!(changes(ui), []);
+}
+
+#[test]
 fn a_double_click_on_a_header_edge_resets_the_width() {
     let mut state = state(3).with_width("email", 300.0);
     let mut ui = desktop(view(&state));

@@ -312,6 +312,53 @@ fn the_table_follows_the_worker() {
 }
 
 #[test]
+fn a_row_that_leaves_the_filter_takes_its_menu_with_it() {
+    let mut example = Example::default();
+    filter_status(&mut example, Status::Running);
+    let row = JobId(1043);
+    send(
+        &mut example,
+        Message::RowMenu(context_menu::Event::Open(row, iced::Point::ORIGIN)),
+    );
+    assert!(example.row_menu.is_open_on(&row));
+    feed(&mut example, vec![Update::Succeeded(row)]);
+    assert!(!example.row_menu.is_open(), "no menu is left without a row");
+
+    send(&mut example, Message::Submit);
+    assert!(example.fresh.is_empty(), "new jobs are no longer held back");
+}
+
+#[test]
+fn a_new_job_is_pointed_at_on_whatever_page_it_lands() {
+    let mut example = Example::default();
+    table(&mut example, data_table::Event::PageSize(5));
+    table(&mut example, data_table::Event::Page(1));
+    table(&mut example, data_table::Event::Press(JobId(1048)));
+    assert_eq!(example.cursor(), Some(JobId(1048)));
+
+    send(&mut example, Message::OpenNewJob);
+    send(
+        &mut example,
+        Message::Draft(super::new_job::Message::Name("tax-export".into())),
+    );
+    send(
+        &mut example,
+        Message::Draft(super::new_job::Message::Source(
+            iced_cube::forms::combobox::Event::Activate(0),
+        )),
+    );
+    send(
+        &mut example,
+        Message::Draft(super::new_job::Message::Schedule(Schedule::Once)),
+    );
+    send(&mut example, Message::CreateJob);
+    let created = example.jobs.first().map(|job| job.id);
+    assert_ne!(created, Some(JobId(1041)), "the draft was accepted");
+    assert_eq!(example.table.page(), 0);
+    assert_eq!(example.cursor(), created);
+}
+
+#[test]
 fn dragging_a_column_edge_keeps_its_width_as_jobs_change() {
     let mut example = Example::default();
     table(

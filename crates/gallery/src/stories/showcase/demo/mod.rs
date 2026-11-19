@@ -795,6 +795,12 @@ impl Example {
     /// the list.
     fn point_at(&mut self, id: JobId) {
         self.sync_table();
+        // The row may be on another page. A filter may hide it, and then
+        // nothing is pointed at.
+        if let Some(position) = self.shown().iter().position(|shown| *shown == id) {
+            let page = position / self.table.page_size();
+            let _ = self.table.update(data_table::Event::Page(page));
+        }
         let _ = self.table.update(data_table::Event::Press(id));
     }
 
@@ -832,6 +838,18 @@ impl Example {
             .cloned()
             .collect();
         self.table.set_rows(rows);
+
+        // A row can leave under its own menu, when its job no longer
+        // passes a filter. The menu goes with it.
+        let orphaned = self.row_menu.is_open()
+            && self
+                .row_menu
+                .target()
+                .is_some_and(|target| !self.shown().contains(target));
+        if orphaned {
+            let close = context_menu::Event::Menu(dropdown_menu::Event::Close);
+            let _ = self.row_menu.update(close);
+        }
     }
 
     fn menu_event(&mut self, event: dropdown_menu::Event<MenuItem>) {
@@ -1374,20 +1392,22 @@ impl Example {
         self.jobs.iter_mut().find(|job| job.id == id)
     }
 
-    /// Whether a job passes the table's search and filters.
+    /// Whether a job the table does not hold yet would pass its search
+    /// and filters, read through the table's own columns.
     fn matches(&self, job: &Job) -> bool {
         let query = self.table.search().trim().to_lowercase();
-        let passes = |column, value: &str| {
+        let columns = self.table.visible_columns();
+        let filtered = self.table.columns().iter().all(|column| {
             self.table
-                .filter(column)
-                .is_none_or(|filter| filter == value)
-        };
-        passes(jobs::STATUS, job.status.label())
-            && passes(jobs::OWNER, job.owner)
-            && (query.is_empty()
-                || job.name.to_lowercase().contains(&query)
-                || job.owner.to_lowercase().contains(&query)
-                || job.id.to_string().to_lowercase().contains(&query))
+                .filter(column.id)
+                .is_none_or(|filter| filter == column.text(job))
+        });
+        let searched = query.is_empty()
+            || columns
+                .iter()
+                .filter(|column| column.searchable)
+                .any(|column| column.text(job).to_lowercase().contains(&query));
+        filtered && searched
     }
 
     /// How many held jobs the list would show once they are let in.

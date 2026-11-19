@@ -847,15 +847,18 @@ impl<Message> Widget<Message, Theme, Renderer> for Rows<'_, Message> {
         let rows_layout = children.next();
         if let (Some(header), Some(child), Some(header_tree)) =
             (&self.header, children.next(), tree.children.get(1))
-            && cursor.is_over(child.bounds())
         {
-            return header.as_widget().mouse_interaction(
+            let interaction = header.as_widget().mouse_interaction(
                 header_tree,
                 child,
                 cursor,
                 viewport,
                 renderer,
             );
+            // A drag begun in the header keeps its cursor over the rows.
+            if cursor.is_over(child.bounds()) || interaction != mouse::Interaction::None {
+                return interaction;
+            }
         }
         if !cursor.is_over(rows) {
             return mouse::Interaction::None;

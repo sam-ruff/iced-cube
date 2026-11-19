@@ -7,6 +7,7 @@ use iced::advanced::overlay;
 use iced::advanced::renderer::{self, Quad};
 use iced::advanced::widget::{Operation, Tree, Widget, tree};
 use iced::advanced::{Clipboard, Renderer as _, Shell};
+use iced::touch::Finger;
 use iced::{
     Background, Color, Element, Event, Length, Point, Rectangle, Renderer, Size, Theme, Vector,
     mouse, touch,
@@ -15,6 +16,8 @@ use iced::{
 /// How far either side of a column's right edge a press takes hold of it.
 pub(crate) const GRIP: f32 = 5.0;
 const LINE: f32 = 2.0;
+/// How far the pointer moves before a press on an edge becomes a drag.
+const SLOP: f32 = 2.0;
 
 /// What the edge of one column may do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -116,22 +119,37 @@ fn widest(cells: &[Rectangle], edges: &[Edge], index: usize, unused: f32, minimu
     (cell.width + unused.max(0.0) + give).max(minimum)
 }
 
+/// What holds an edge: the mouse, or one finger among several.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Pointer {
+    Mouse,
+    Finger(Finger),
+}
+
 #[derive(Debug, Clone, PartialEq)]
 struct Dragging {
+    pointer: Pointer,
     index: usize,
     origin: f32,
     /// Widths of the columns up to and including the dragged one.
     widths: Vec<f32>,
     widest: f32,
+    /// Whether the pointer has moved past [`SLOP`], so a double click
+    /// with an unsteady hand resizes nothing.
+    moved: bool,
 }
 
 impl Dragging {
-    fn widths_at(&self, x: f32, minimum: f32) -> Vec<f32> {
+    fn widths_at(&mut self, x: f32, minimum: f32) -> Option<Vec<f32>> {
+        self.moved |= (x - self.origin).abs() > SLOP;
+        if !self.moved {
+            return None;
+        }
         let mut widths = self.widths.clone();
         if let Some(width) = widths.last_mut() {
             *width = (*width + x - self.origin).clamp(minimum, self.widest.max(minimum));
         }
-        widths
+        Some(widths)
     }
 }
 
@@ -142,28 +160,38 @@ struct Grip {
     last_click: Option<Click>,
 }
 
-fn is_press(event: &Event) -> bool {
-    matches!(
-        event,
-        Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
-            | Event::Touch(touch::Event::FingerPressed { .. })
-    )
+fn pressed(event: &Event) -> Option<Pointer> {
+    match event {
+        Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => Some(Pointer::Mouse),
+        Event::Touch(touch::Event::FingerPressed { id, .. }) => Some(Pointer::Finger(*id)),
+        _ => None,
+    }
 }
 
-fn is_move(event: &Event) -> bool {
-    matches!(
-        event,
-        Event::Mouse(mouse::Event::CursorMoved { .. })
-            | Event::Touch(touch::Event::FingerMoved { .. })
-    )
+fn moved(event: &Event) -> Option<Pointer> {
+    match event {
+        Event::Mouse(mouse::Event::CursorMoved { .. }) => Some(Pointer::Mouse),
+        Event::Touch(touch::Event::FingerMoved { id, .. }) => Some(Pointer::Finger(*id)),
+        _ => None,
+    }
 }
 
-fn is_release(event: &Event) -> bool {
-    matches!(
-        event,
-        Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
-            | Event::Touch(touch::Event::FingerLifted { .. } | touch::Event::FingerLost { .. })
-    )
+/// The pointer an event lets go of. Leaving the window lets go of the
+/// mouse, whose release may then never arrive.
+fn released(event: &Event) -> Option<Pointer> {
+    match event {
+        Event::Mouse(
+            mouse::Event::ButtonReleased(mouse::Button::Left) | mouse::Event::CursorLeft,
+        ) => Some(Pointer::Mouse),
+        Event::Touch(
+            touch::Event::FingerLifted { id, .. } | touch::Event::FingerLost { id, .. },
+        ) => Some(Pointer::Finger(*id)),
+        _ => None,
+    }
+}
+
+fn is_pointer(event: &Event) -> bool {
+    matches!(event, Event::Mouse(_) | Event::Touch(_))
 }
 
 impl<Message> Widget<Message, Theme, Renderer> for Resizer<'_, Message> {
@@ -272,19 +300,38 @@ impl<Message> Widget<Message, Theme, Renderer> for Resizer<'_, Message> {
         } = tree;
         let grip = state.downcast_mut::<Grip>();
 
-        if let Some(dragging) = &grip.dragging {
-            if is_release(event) {
+        if let Some(dragging) = &mut grip.dragging {
+            let lost_window = matches!(event, Event::Window(iced::window::Event::Unfocused));
+            if released(event) == Some(dragging.pointer) || lost_window || self.on_resize.is_none()
+            {
                 grip.dragging = None;
                 shell.request_redraw();
                 return;
             }
-            if is_move(event)
-                && let Some(position) = cursor.position()
+            // A layer floating over the header leaves the cursor
+            // levitating, and the drag goes on under it.
+            if moved(event) == Some(dragging.pointer)
+                && let Some(position) = cursor.land().position()
                 && let Some(on_resize) = &self.on_resize
             {
-                let widths = dragging.widths_at(position.x, self.minimum);
-                shell.publish(on_resize(dragging.index, widths));
+                if let Some(widths) = dragging.widths_at(position.x, self.minimum) {
+                    shell.publish(on_resize(dragging.index, widths));
+                }
                 shell.capture_event();
+            }
+            // The header keeps redrawing and hearing keys, but no pointer
+            // reaches it until the edge is let go.
+            if !is_pointer(event) {
+                self.content.as_widget_mut().update(
+                    &mut children[0],
+                    event,
+                    layout,
+                    mouse::Cursor::Unavailable,
+                    renderer,
+                    clipboard,
+                    shell,
+                    viewport,
+                );
             }
             return;
         }
@@ -297,7 +344,7 @@ impl<Message> Widget<Message, Theme, Renderer> for Resizer<'_, Message> {
             shell.request_redraw();
         }
 
-        if is_press(event)
+        if let Some(pointer) = pressed(event)
             && let Some(index) = over
             && let Some(position) = cursor.position()
         {
@@ -314,6 +361,8 @@ impl<Message> Widget<Message, Theme, Renderer> for Resizer<'_, Message> {
             let used: f32 = layout.children().map(|cell| cell.bounds().width).sum();
             let unused = layout.bounds().width - used;
             grip.dragging = Some(Dragging {
+                pointer,
+                moved: false,
                 index,
                 origin: position.x,
                 widths: cells
@@ -458,14 +507,49 @@ mod tests {
 
     #[test]
     fn a_drag_keeps_the_columns_before_it_and_clamps_the_dragged_one() {
-        let dragging = Dragging {
+        let mut dragging = Dragging {
+            pointer: Pointer::Mouse,
             index: 1,
             origin: 300.0,
             widths: vec![100.0, 200.0],
             widest: 260.0,
+            moved: false,
         };
-        assert_eq!(dragging.widths_at(320.0, 40.0), vec![100.0, 220.0]);
-        assert_eq!(dragging.widths_at(900.0, 40.0), vec![100.0, 260.0]);
-        assert_eq!(dragging.widths_at(0.0, 40.0), vec![100.0, 40.0]);
+        assert_eq!(dragging.widths_at(301.0, 40.0), None, "an unsteady press");
+        assert_eq!(dragging.widths_at(320.0, 40.0), Some(vec![100.0, 220.0]));
+        assert_eq!(
+            dragging.widths_at(301.0, 40.0),
+            Some(vec![100.0, 201.0]),
+            "once moving, every move counts"
+        );
+        assert_eq!(dragging.widths_at(900.0, 40.0), Some(vec![100.0, 260.0]));
+        assert_eq!(dragging.widths_at(0.0, 40.0), Some(vec![100.0, 40.0]));
+    }
+
+    #[test]
+    fn each_pointer_only_lets_go_of_itself() {
+        let finger = |id| touch::Event::FingerLifted {
+            id: Finger(id),
+            position: Point::ORIGIN,
+        };
+        assert_eq!(
+            released(&Event::Touch(finger(1))),
+            Some(Pointer::Finger(Finger(1)))
+        );
+        assert_ne!(
+            released(&Event::Touch(finger(2))),
+            Some(Pointer::Finger(Finger(1)))
+        );
+        assert_eq!(
+            released(&Event::Mouse(mouse::Event::CursorLeft)),
+            Some(Pointer::Mouse)
+        );
+        assert_eq!(
+            moved(&Event::Mouse(mouse::Event::CursorMoved {
+                position: Point::ORIGIN
+            })),
+            Some(Pointer::Mouse)
+        );
+        assert_eq!(pressed(&Event::Mouse(mouse::Event::CursorLeft)), None);
     }
 }

@@ -335,11 +335,14 @@ pub enum Event<Key> {
     ActivateHighlighted,
     /// Navigation and choices in the Columns menu.
     Columns(dropdown_menu::Event<ColumnId>),
-    /// Sets columns to widths in pixels. Dragging a header's right edge
-    /// sends the column and those before it, which then hold still.
+    /// Sets columns to widths in pixels. The last is the column resized;
+    /// any before it are only held at the width they have, so they stay
+    /// still. Dragging a header's right edge sends the column and those
+    /// before it.
     Resize(Vec<(ColumnId, f32)>),
-    /// Gives a column back the width it was declared with. A double click
-    /// on a header's right edge sends this.
+    /// Gives a column back the width it was declared with. Once no resized
+    /// column is left, the held ones go back too. A double click on a
+    /// header's right edge sends this.
     ResetWidth(ColumnId),
     /// The table gained or lost focus. The widget sends this itself.
     Focus(bool),
@@ -363,6 +366,8 @@ pub struct State<Row, Key> {
     hidden: HashSet<ColumnId>,
     /// Widths the reader dragged columns to, in pixels.
     widths: Vec<(ColumnId, f32)>,
+    /// Columns in `widths` that were only held still beside a drag.
+    held: HashSet<ColumnId>,
     columns_menu: dropdown_menu::State<ColumnId>,
     sort: Option<(ColumnId, Direction)>,
     search: String,
@@ -393,6 +398,7 @@ impl<Row, Key: Clone + Eq + Hash> State<Row, Key> {
             key,
             hidden: HashSet::new(),
             widths: Vec::new(),
+            held: HashSet::new(),
             columns_menu: dropdown_menu::State::new([]),
             sort: None,
             search: String::new(),
@@ -445,7 +451,7 @@ impl<Row, Key: Clone + Eq + Hash> State<Row, Key> {
     /// Starts a column at a width in pixels, as if it had been dragged
     /// there, such as a width saved from the last run.
     pub fn with_width(mut self, column: ColumnId, width: f32) -> Self {
-        self.set_width(column, width);
+        self.set_width(column, width, false);
         self
     }
 
@@ -738,11 +744,23 @@ impl<Row, Key: Clone + Eq + Hash> State<Row, Key> {
                 }
             }
             Event::Resize(widths) => {
-                for (id, width) in widths {
-                    self.set_width(id, width);
+                let last = widths.len().saturating_sub(1);
+                for (position, (id, width)) in widths.into_iter().enumerate() {
+                    self.set_width(id, width, position < last);
                 }
             }
-            Event::ResetWidth(id) => self.widths.retain(|(column, _)| *column != id),
+            Event::ResetWidth(id) => {
+                self.widths.retain(|(column, _)| *column != id);
+                let _ = self.held.remove(id);
+                if self
+                    .widths
+                    .iter()
+                    .all(|(column, _)| self.held.contains(column))
+                {
+                    self.widths.clear();
+                    self.held.clear();
+                }
+            }
             Event::Focus(focused) => {
                 self.focused = focused;
                 // Focus lands on the first selected row of the page, or its
@@ -767,14 +785,24 @@ impl<Row, Key: Clone + Eq + Hash> State<Row, Key> {
             .and_then(|action| action.event(self))
     }
 
-    fn set_width(&mut self, id: ColumnId, width: f32) {
+    /// Sets a column's width. `held` marks one that is only kept still
+    /// beside a drag, unless the reader has already resized it.
+    fn set_width(&mut self, id: ColumnId, width: f32, held: bool) {
         if self.column(id).is_none() || !width.is_finite() {
             return;
         }
         let width = width.max(MIN_COLUMN_WIDTH);
         match self.widths.iter_mut().find(|(column, _)| *column == id) {
             Some((_, current)) => *current = width,
-            None => self.widths.push((id, width)),
+            None => {
+                self.widths.push((id, width));
+                if held {
+                    let _ = self.held.insert(id);
+                }
+            }
+        }
+        if !held {
+            let _ = self.held.remove(id);
         }
     }
 
@@ -1616,13 +1644,20 @@ where
         let state = self.state;
         let columns = state.visible_columns();
         let leading = if state.is_selectable() { 1 } else { 0 };
-        let mut room = width - leading as f32 * CHECK_WIDTH;
+        // Rows that scroll keep a gutter for the scrollbar, so dragged
+        // widths are fitted to the room that leaves.
+        let mut room = width - leading as f32 * CHECK_WIDTH - crate::data::rows::GUTTER;
         if self.row_actions {
             room -= ACTIONS_WIDTH;
         }
         let lengths: Rc<[Length]> = state.lengths(room).into();
 
-        let mut header = row![].height(Length::Fill).align_y(Alignment::Center);
+        // The header fills the table, so room no column uses shows up as
+        // the header's own spare width.
+        let mut header = row![]
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_y(Alignment::Center);
         if state.is_selectable() {
             let page_empty = state.page_range().is_empty();
             let on_event = self
@@ -2835,8 +2870,35 @@ mod tests {
         assert_eq!(state.width("id"), None);
         let _ = state.update(Event::ResetWidth("email"));
         assert_eq!(state.width("email"), None);
-        assert_eq!(state.width("status"), Some(120.0));
+        assert_eq!(
+            state.width("status"),
+            None,
+            "a column only held beside the drag goes back with it"
+        );
         assert_eq!(state.with_width("id", 64.0).width("id"), Some(64.0));
+    }
+
+    #[test]
+    fn held_columns_stay_while_a_resized_column_remains() {
+        let mut state = state(3);
+        let _ = state.update(Event::Resize(vec![("status", 120.0), ("email", 300.0)]));
+        let _ = state.update(Event::Resize(vec![("status", 150.0)]));
+        let _ = state.update(Event::ResetWidth("email"));
+        assert_eq!(
+            state.width("status"),
+            Some(150.0),
+            "the reader resized it since"
+        );
+
+        let _ = state.update(Event::Resize(vec![
+            ("status", 150.0),
+            ("email", 200.0),
+            ("amount", 90.0),
+        ]));
+        let _ = state.update(Event::ResetWidth("status"));
+        assert_eq!(state.width("email"), Some(200.0), "amount is still resized");
+        let _ = state.update(Event::ResetWidth("amount"));
+        assert_eq!(state.width("email"), None);
     }
 
     #[test]
