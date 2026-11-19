@@ -281,7 +281,7 @@ impl Example {
             .entry(id)
             .or_insert_with(|| Inspector::new(job, retries));
         self.documents.open(document(Doc::Job(id), label));
-        self.cursor = Some(id);
+        self.point_at(id);
         self.go(super::Page::Jobs);
     }
 

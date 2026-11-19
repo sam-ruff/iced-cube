@@ -23,6 +23,7 @@ use iced::time::Instant;
 use iced::widget::{Text, column, container, responsive, row, sensor, space, text};
 use iced::{Element, Length, Size, Subscription, Task, Theme};
 use iced_cube::context_menu;
+use iced_cube::data::data_table;
 use iced_cube::data::json_viewer::{self, NodeId};
 use iced_cube::data::log_viewer::{self, Level, LineId};
 use iced_cube::data::property_grid;
@@ -38,16 +39,13 @@ use iced_cube::navigation::tabs::{self, tab};
 use iced_cube::overlay::dialog;
 use iced_cube::overlay::popover;
 use iced_cube::overlay::toast::{self, Variant as ToastVariant, toast, toasts};
-use iced_cube::primitives::checkbox::{self, CheckState};
 use iced_cube::primitives::toggle_group;
 use iced_cube::theme::{self, Tokens, text_size};
 use iced_cube::{alert, separator, vertical_separator};
 
 use crate::app::ThemeChoice;
 use crate::bridge;
-use data::{
-    Environment, Job, JobId, Queue, Range, Runbook, Schedule, Status, StatusFilter, TEMPLATES,
-};
+use data::{Environment, Job, JobId, Queue, Range, Runbook, Schedule, Status, TEMPLATES};
 use feed::{Update, Worker};
 use inspector::{Doc, Field, Inspector, Pane};
 use new_job::Draft;
@@ -60,6 +58,8 @@ const WIDE: f32 = 1100.0;
 const SIDEBAR: f32 = 248.0;
 const LOG_LIMIT: usize = 2000;
 const JOB_LIMIT: usize = 16;
+/// Rows per page in the job list. The first holds every job at once.
+const PAGE_SIZES: [usize; 3] = [20, 10, 5];
 const QUEUE_LIMIT: usize = 4;
 /// Jobs that had finished before the demo started, for the Succeeded total.
 const EARLIER_SUCCESSES: usize = 214;
@@ -163,11 +163,7 @@ pub enum Message {
     CloseNewJob,
     Draft(new_job::Message),
     CreateJob,
-    Search(String),
-    Filter(StatusFilter),
-    Check(JobId, bool),
-    CheckAll(bool),
-    Cursor(JobId),
+    Table(data_table::Event<JobId>),
     RowMenu(context_menu::Event<RowAction, JobId>),
     ListHover(bool),
     ShowNew,
@@ -214,7 +210,7 @@ struct Keymaps {
     command: Keymap<command::Action>,
     combobox: Keymap<combobox::Action>,
     dialog: Keymap<dialog::Action>,
-    checkbox: Keymap<checkbox::Action>,
+    table: Keymap<data_table::Action>,
     log: Keymap<log_viewer::Action>,
     grid: Keymap<property_grid::Action>,
     json: Keymap<json_viewer::Action>,
@@ -252,7 +248,7 @@ impl Default for Keymaps {
             command: command::default_keymap(),
             combobox: combobox::default_keymap(),
             dialog: dialog::default_keymap(),
-            checkbox: checkbox::default_keymap(),
+            table: data_table::default_keymap(),
             log: log_viewer::default_keymap(),
             grid: property_grid::default_keymap(),
             json: json_viewer::default_keymap(),
@@ -295,16 +291,13 @@ pub struct Example {
     next_id: u32,
     next_template: usize,
     succeeded: usize,
-    search: String,
-    filter: StatusFilter,
-    cursor: Option<JobId>,
+    /// The job list: a copy of the jobs on show, with its search, filters,
+    /// sort, ticked rows and column widths. `sync_table` keeps it up to date.
+    table: data_table::State<Job, JobId>,
     row_menu: context_menu::State<RowAction, JobId>,
     list_hovered: bool,
     /// Submitted jobs held back behind the "new jobs" pill.
     fresh: Vec<JobId>,
-    /// The rows on show, kept while something points at the list so no row
-    /// moves under the pointer or an open menu.
-    frozen: Option<Vec<JobId>>,
     /// The job list and the jobs opened beside it.
     documents: document_tabs::State<Doc>,
     inspectors: HashMap<JobId, Inspector>,
@@ -336,6 +329,9 @@ impl Default for Example {
                 .iter()
                 .filter(|job| job.status == Status::Succeeded)
                 .count();
+        let table = data_table::State::new(jobs::columns(), jobs.clone(), |job: &Job| job.id)
+            .with_selection(true)
+            .with_page_sizes(PAGE_SIZES);
         let mut logs = log_viewer::State::new().with_limit(LOG_LIMIT);
         logs.extend(data::logs());
         Self {
@@ -368,13 +364,10 @@ impl Default for Example {
             next_id,
             next_template: 0,
             succeeded,
-            search: String::new(),
-            filter: StatusFilter::All,
-            cursor: None,
+            table,
             row_menu: context_menu::State::new(jobs::row_menu_entries()),
             list_hovered: false,
             fresh: Vec::new(),
-            frozen: None,
             documents: inspector::documents(),
             inspectors: HashMap::new(),
             grid_menu: property_grid::menu(),
@@ -401,6 +394,7 @@ impl Example {
         let task = self.handle(message);
         self.sync_documents();
         self.settle_list();
+        self.sync_table();
         task
     }
 
@@ -440,28 +434,7 @@ impl Example {
             Message::CloseNewJob => self.new_job_open = false,
             Message::Draft(message) => self.draft.update(message),
             Message::CreateJob => self.create_job(),
-            Message::Search(search) => {
-                self.search = search;
-                self.untick_hidden();
-            }
-            Message::Filter(filter) => {
-                self.filter = filter;
-                self.untick_hidden();
-            }
-            Message::Check(id, checked) => {
-                if let Some(job) = self.job_mut(id) {
-                    job.checked = checked;
-                }
-            }
-            Message::CheckAll(checked) => {
-                let visible: Vec<JobId> = self.visible_jobs().map(|job| job.id).collect();
-                for job in &mut self.jobs {
-                    if visible.contains(&job.id) {
-                        job.checked = checked;
-                    }
-                }
-            }
-            Message::Cursor(id) => self.cursor = Some(id),
+            Message::Table(event) => self.table_event(event),
             Message::RowMenu(event) => return self.row_menu_event(event),
             Message::ListHover(hovered) => self.list_hovered = hovered,
             Message::ShowNew => self.show_new(),
@@ -784,8 +757,6 @@ impl Example {
 
     /// The job tabs first, then search, then the list while it shows.
     fn jobs_key(&mut self, key: &keys::Event) -> Option<Task<Message>> {
-        use iced::keyboard::Key;
-
         if self.documents_key(key) {
             return Some(Task::none());
         }
@@ -797,42 +768,88 @@ impl Example {
             return None;
         }
 
-        if let Some(id) = self.cursor {
+        if let Some(id) = self.cursor() {
             if let Some(event) = self.row_menu.key_event(&self.keys.row_menu, key, id) {
                 return Some(self.row_menu_event(event));
-            }
-            if let Some(action) = self.keys.checkbox.resolve_event(key) {
-                let checked = self.job(id).is_some_and(|job| job.checked);
-                let checked = action.apply(CheckState::from(checked));
-                return Some(self.handle(Message::Check(id, checked)));
             }
             if Chord::named(Named::Delete).matches(&key.key, key.modifiers) {
                 self.pending = Some(Pending::Delete(id));
                 return Some(Task::none());
             }
-            if Chord::named(Named::Enter).matches(&key.key, key.modifiers) {
-                self.open_job(id);
-                return Some(Task::none());
-            }
         }
 
-        if !key.modifiers.is_empty() {
-            return None;
-        }
-        let visible: Vec<JobId> = self.visible_jobs().map(|job| job.id).collect();
-        let current = self
-            .cursor
-            .and_then(|id| visible.iter().position(|visible| *visible == id));
-        let last = visible.len().saturating_sub(1);
-        let target = match (&key.key, current) {
-            (Key::Named(Named::ArrowDown), Some(index)) => (index + 1).min(last),
-            (Key::Named(Named::ArrowUp), Some(index)) => index.saturating_sub(1),
-            (Key::Named(Named::ArrowDown | Named::Home), None) | (Key::Named(Named::Home), _) => 0,
-            (Key::Named(Named::ArrowUp | Named::End), None) | (Key::Named(Named::End), _) => last,
-            _ => return None,
-        };
-        self.cursor = visible.get(target).copied();
+        // The table resolves these itself while it has focus. Here they
+        // drive it from anywhere on the page, and its ring shows where.
+        let event = self.table.key_event(&self.keys.table, key)?;
+        self.table_event(event);
+        let _ = self.table.update(data_table::Event::Focus(true));
         Some(Task::none())
+    }
+
+    /// The row the keyboard acts on in the job list.
+    fn cursor(&self) -> Option<JobId> {
+        self.table.highlighted().copied()
+    }
+
+    /// Moves the keyboard to a job's row, which may have only just joined
+    /// the list.
+    fn point_at(&mut self, id: JobId) {
+        self.sync_table();
+        // The row may be on another page. A filter may hide it, and then
+        // nothing is pointed at.
+        if let Some(position) = self.shown().iter().position(|shown| *shown == id) {
+            let page = position / self.table.page_size();
+            let _ = self.table.update(data_table::Event::Page(page));
+        }
+        let _ = self.table.update(data_table::Event::Press(id));
+    }
+
+    fn table_event(&mut self, event: data_table::Event<JobId>) {
+        use data_table::Event;
+
+        let filtered = matches!(
+            event,
+            Event::Search(_) | Event::Filter(..) | Event::ClearFilters
+        );
+        // Phones have no double click, so a tap opens the job.
+        let tapped = match event {
+            Event::Press(id) if self.width < NARROW => Some(id),
+            _ => None,
+        };
+        let output = self.table.update(event);
+        if filtered {
+            self.untick_hidden();
+        }
+        if let Some(data_table::Output::Activated(id)) = output {
+            self.open_job(id);
+        }
+        if let Some(id) = tapped {
+            self.open_job(id);
+        }
+    }
+
+    /// Brings the table's rows up to date with the jobs, leaving out new
+    /// jobs held behind the pill.
+    fn sync_table(&mut self) {
+        let rows: Vec<Job> = self
+            .jobs
+            .iter()
+            .filter(|job| !self.fresh.contains(&job.id))
+            .cloned()
+            .collect();
+        self.table.set_rows(rows);
+
+        // A row can leave under its own menu, when its job no longer
+        // passes a filter. The menu goes with it.
+        let orphaned = self.row_menu.is_open()
+            && self
+                .row_menu
+                .target()
+                .is_some_and(|target| !self.shown().contains(target));
+        if orphaned {
+            let close = context_menu::Event::Menu(dropdown_menu::Event::Close);
+            let _ = self.row_menu.update(close);
+        }
     }
 
     fn menu_event(&mut self, event: dropdown_menu::Event<MenuItem>) {
@@ -908,9 +925,9 @@ impl Example {
     fn run(&mut self, cmd: Cmd) {
         match cmd {
             Cmd::Go(page) => self.go(page),
-            Cmd::FailedJobs => self.show_jobs(StatusFilter::Only(Status::Failed), ""),
-            Cmd::RunningJobs => self.show_jobs(StatusFilter::Only(Status::Running), ""),
-            Cmd::MyJobs => self.show_jobs(StatusFilter::All, data::ME),
+            Cmd::FailedJobs => self.show_jobs(jobs::STATUS, Status::Failed.label()),
+            Cmd::RunningJobs => self.show_jobs(jobs::STATUS, Status::Running.label()),
+            Cmd::MyJobs => self.show_jobs(jobs::OWNER, data::ME),
             Cmd::NewJob => {
                 let _ = self.handle(Message::OpenNewJob);
             }
@@ -951,10 +968,10 @@ impl Example {
         let _ = self.page.update(tabs::Event::Select(page));
     }
 
-    fn show_jobs(&mut self, filter: StatusFilter, search: &str) {
-        self.filter = filter;
-        self.search = search.to_owned();
-        self.untick_hidden();
+    /// Shows the job list filtered to one value of one column.
+    fn show_jobs(&mut self, column: data_table::ColumnId, value: &str) {
+        self.table_event(data_table::Event::ClearFilters);
+        self.table_event(data_table::Event::Filter(column, Some(value.to_owned())));
         self.go(Page::Jobs);
     }
 
@@ -982,18 +999,15 @@ impl Example {
                 .variant(ToastVariant::Success),
         );
         self.jobs.insert(0, job);
-        if let Some(frozen) = &mut self.frozen {
-            frozen.push(id);
-        }
         self.new_job_open = false;
-        self.cursor = Some(id);
+        self.point_at(id);
         self.schedule();
     }
 
     fn row_menu_event(&mut self, event: context_menu::Event<RowAction, JobId>) -> Task<Message> {
         if let context_menu::Event::Open(id, _) | context_menu::Event::OpenFromKeyboard(id) = event
         {
-            self.cursor = Some(id);
+            self.point_at(id);
             self.prepare_row_menu(id);
         }
         let output = self.row_menu.update(event);
@@ -1077,12 +1091,12 @@ impl Example {
             .iter_mut()
             .filter(|job| selected.contains(&job.id))
         {
-            job.checked = false;
             if job.status == Status::Running {
                 job.status = Status::Paused;
                 paused += 1;
             }
         }
+        let _ = self.table.update(data_table::Event::ClearSelection);
         self.notify(toast(format!("Paused {}", count(paused, "job"))));
         self.schedule();
     }
@@ -1104,12 +1118,6 @@ impl Example {
         self.jobs = kept.into_iter().map(|(_, job)| job).collect();
         if removed.is_empty() {
             return;
-        }
-        if self
-            .cursor
-            .is_some_and(|id| removed.iter().any(|(_, job)| job.id == id))
-        {
-            self.cursor = None;
         }
 
         let title = match removed.as_slice() {
@@ -1133,9 +1141,6 @@ impl Example {
             jobs => format!("Restored {}", count(jobs.len(), "job")),
         };
         for (index, job) in jobs {
-            if let Some(frozen) = &mut self.frozen {
-                frozen.push(job.id);
-            }
             let index = index.min(self.jobs.len());
             self.jobs.insert(index, job);
         }
@@ -1287,7 +1292,7 @@ impl Example {
     }
 
     /// Whether something points at the job list: a menu, a dialog or the
-    /// pointer itself. New jobs wait and rows stay put until it stops.
+    /// pointer itself. New jobs wait until it stops.
     fn holding(&self) -> bool {
         self.row_menu.is_open()
             || self.menu.is_open()
@@ -1300,12 +1305,8 @@ impl Example {
 
     fn settle_list(&mut self) {
         if self.holding() {
-            if self.frozen.is_none() {
-                self.frozen = Some(self.filtered().map(|job| job.id).collect());
-            }
             return;
         }
-        self.frozen = None;
         if !self.fresh.is_empty() {
             self.fresh.clear();
             self.trim_jobs();
@@ -1315,18 +1316,16 @@ impl Example {
     /// Lets the held jobs into the list, from the "new jobs" pill.
     fn show_new(&mut self) {
         self.fresh.clear();
-        self.frozen = None;
         self.trim_jobs();
     }
 
-    /// Unticks jobs that the search or filter has hidden, so bulk actions
+    /// Unticks jobs that the search or a filter has hidden, so bulk actions
     /// only ever act on rows people can see.
     fn untick_hidden(&mut self) {
-        self.frozen = None;
-        let shown: Vec<JobId> = self.filtered().map(|job| job.id).collect();
-        for job in &mut self.jobs {
-            if !shown.contains(&job.id) {
-                job.checked = false;
+        let shown = self.shown();
+        for id in self.table.selected() {
+            if !shown.contains(&id) {
+                let _ = self.table.update(data_table::Event::Select(id, false));
             }
         }
     }
@@ -1393,22 +1392,22 @@ impl Example {
         self.jobs.iter_mut().find(|job| job.id == id)
     }
 
-    /// Jobs that pass the search and the status filter, leaving out new
-    /// jobs held behind the pill, in list order.
-    fn filtered(&self) -> impl Iterator<Item = &Job> {
-        self.jobs
-            .iter()
-            .filter(move |job| !self.fresh.contains(&job.id) && self.matches(job))
-    }
-
-    /// Whether a job passes the search and the status filter.
+    /// Whether a job the table does not hold yet would pass its search
+    /// and filters, read through the table's own columns.
     fn matches(&self, job: &Job) -> bool {
-        let query = self.search.trim().to_lowercase();
-        self.filter.allows(job.status)
-            && (query.is_empty()
-                || job.name.to_lowercase().contains(&query)
-                || job.owner.to_lowercase().contains(&query)
-                || job.id.to_string().to_lowercase().contains(&query))
+        let query = self.table.search().trim().to_lowercase();
+        let columns = self.table.visible_columns();
+        let filtered = self.table.columns().iter().all(|column| {
+            self.table
+                .filter(column.id)
+                .is_none_or(|filter| filter == column.text(job))
+        });
+        let searched = query.is_empty()
+            || columns
+                .iter()
+                .filter(|column| column.searchable)
+                .any(|column| column.text(job).to_lowercase().contains(&query));
+        filtered && searched
     }
 
     /// How many held jobs the list would show once they are let in.
@@ -1419,20 +1418,22 @@ impl Example {
             .count()
     }
 
-    /// The rows on show: the filtered jobs, or the rows that were on show
-    /// when something started pointing at the list.
-    fn visible_jobs(&self) -> impl Iterator<Item = &Job> {
-        self.jobs.iter().filter(move |job| match &self.frozen {
-            Some(frozen) => frozen.contains(&job.id),
-            None => self.filtered().any(|shown| shown.id == job.id),
-        })
+    /// The jobs that pass the table's search and filters, in its order.
+    fn shown(&self) -> Vec<JobId> {
+        self.table
+            .filtered_rows()
+            .into_iter()
+            .map(|job| job.id)
+            .collect()
     }
 
     /// The ticked jobs among the rows on show.
     fn selected(&self) -> Vec<JobId> {
-        self.visible_jobs()
-            .filter(|job| job.checked)
-            .map(|job| job.id)
+        let shown = self.shown();
+        self.table
+            .selected()
+            .into_iter()
+            .filter(|id| shown.contains(id))
             .collect()
     }
 
