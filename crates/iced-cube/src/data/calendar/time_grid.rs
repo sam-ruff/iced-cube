@@ -22,7 +22,7 @@ use super::parts::{
     Handler, LANE_GAP, day_heading, day_number, lanes, selection_of, send, time_label,
     weekday_label,
 };
-use super::state::{Event, SLOT_MINUTES, Selection, State};
+use super::state::{Allow, Event, SLOT_MINUTES, Selection, State};
 use super::style;
 use crate::data::ellipsis::ellipsis;
 use crate::primitives::scroll_area;
@@ -417,6 +417,7 @@ fn hours<'a, Message: Clone + 'a>(
         today: days.iter().position(|day| *day == state.today()),
         now,
         slot,
+        allow: state.allow(),
         on_event: on_event.clone(),
     })
 }
@@ -476,6 +477,24 @@ enum Grab {
     /// A block that cannot be moved from here, because it began on an
     /// earlier day. It can still be pressed.
     Hold { index: usize },
+    /// Empty space on a calendar that takes no new entries. It can still
+    /// be pressed.
+    Point,
+}
+
+impl Grab {
+    /// The grab as far as `allow` lets it go: without leave to create,
+    /// empty space is only a point to press, and without leave to
+    /// reschedule a block is only held.
+    fn limited_to(self, allow: Allow) -> Self {
+        match self {
+            Grab::Create { .. } if !allow.create => Grab::Point,
+            Grab::Move { index, .. } | Grab::Resize { index } if !allow.reschedule => {
+                Grab::Hold { index }
+            }
+            grab => grab,
+        }
+    }
 }
 
 fn grab(placed: &[Placed], hit: Hit, first_minute: u16) -> Option<Grab> {
@@ -511,7 +530,7 @@ fn span(grid: &Grid, placed: &[Placed], grab: Grab, point: Point) -> Option<Span
     let (first, last) = grid.minutes();
     let pointer = grid.minutes_at(point.y);
     match grab {
-        Grab::Hold { .. } => None,
+        Grab::Hold { .. } | Grab::Point => None,
         Grab::Create { day, anchor } => {
             let (from, to) = (
                 snap(anchor.min(pointer), SNAP_MINUTES),
@@ -558,7 +577,7 @@ fn dropped(
 ) -> Option<Event> {
     let date = *days.get(span.day)?;
     match grab {
-        Grab::Hold { .. } => None,
+        Grab::Hold { .. } | Grab::Point => None,
         Grab::Create { .. } => Some(Event::Request(Draft {
             when: When::timed(
                 instant_at(date, span.top, time_zone),
@@ -636,6 +655,7 @@ struct Hours<'a, Message> {
     today: Option<usize>,
     now: Option<(usize, u16)>,
     slot: Option<(usize, u16)>,
+    allow: Allow,
     on_event: Handler<'a, Message>,
 }
 
@@ -791,9 +811,10 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for Hours<'_, Message> {
                     return;
                 };
                 let target = hit(&grid, &self.placed, point);
-                let Some(mut grab) = grab(&self.placed, target, grid.minutes().0) else {
+                let Some(grab) = grab(&self.placed, target, grid.minutes().0) else {
                     return;
                 };
+                let mut grab = grab.limited_to(self.allow);
                 if let Grab::Move { index, offset } = &mut grab
                     && let Some(placed) = self.placed.get(*index)
                 {
@@ -910,6 +931,7 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for Hours<'_, Message> {
                 Grab::Move { .. } => mouse::Interaction::Grabbing,
                 Grab::Resize { .. } | Grab::Create { .. } => mouse::Interaction::ResizingVertically,
                 Grab::Hold { .. } => mouse::Interaction::Pointer,
+                Grab::Point => mouse::Interaction::None,
             };
         }
         let bounds = layout.bounds();
@@ -917,7 +939,9 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for Hours<'_, Message> {
             return mouse::Interaction::None;
         };
         match hit(&self.grid(bounds.width), &self.placed, local(bounds, point)) {
-            Hit::Block { edge: true, .. } => mouse::Interaction::ResizingVertically,
+            Hit::Block { edge: true, .. } if self.allow.reschedule => {
+                mouse::Interaction::ResizingVertically
+            }
             Hit::Block { .. } => mouse::Interaction::Pointer,
             Hit::Slot { .. } | Hit::Nothing => mouse::Interaction::None,
         }
@@ -1380,6 +1404,36 @@ mod tests {
             },
             "ends below the last hour"
         );
+    }
+
+    #[test]
+    fn grabs_go_only_as_far_as_they_are_allowed() {
+        let create = Grab::Create {
+            day: 1,
+            anchor: 600.0,
+        };
+        let moving = Grab::Move {
+            index: 2,
+            offset: 5.0,
+        };
+        let resizing = Grab::Resize { index: 2 };
+
+        for grab in [create, moving, resizing, Grab::Hold { index: 2 }] {
+            assert_eq!(grab.limited_to(Allow::ALL), grab);
+        }
+        assert_eq!(create.limited_to(Allow::NONE), Grab::Point);
+        assert_eq!(moving.limited_to(Allow::NONE), Grab::Hold { index: 2 });
+        assert_eq!(resizing.limited_to(Allow::NONE), Grab::Hold { index: 2 });
+
+        let no_new = Allow {
+            create: false,
+            ..Allow::ALL
+        };
+        assert_eq!(create.limited_to(no_new), Grab::Point);
+        assert_eq!(moving.limited_to(no_new), moving);
+
+        // A press that cannot drag leaves nothing behind when it moves.
+        assert_eq!(span(&grid(), &[], Grab::Point, point(1, 700.0)), None);
     }
 
     #[test]

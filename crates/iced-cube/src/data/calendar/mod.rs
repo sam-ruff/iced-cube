@@ -110,7 +110,7 @@ pub use jiff;
 pub use parts::{bar_label, is_line, span_label, time_label, weekday_label, when_label};
 pub use repeat::{Ends, Frequency, Repeat};
 pub use state::{
-    Action, Event, FOUR_DAYS, Output, SLOT_MINUTES, Selection, State, View, default_keymap,
+    Action, Allow, Event, FOUR_DAYS, Output, SLOT_MINUTES, Selection, State, View, default_keymap,
 };
 pub use time_grid::{SNAP_MINUTES, hour_offset, scroll_id, scroll_to_hour};
 

@@ -496,6 +496,56 @@ fn the_agenda_lists_the_month_and_a_press_selects() {
 }
 
 #[test]
+fn a_read_only_calendar_selects_and_opens_but_takes_no_changes() {
+    let mut state = state(View::Week).read_only();
+    let before = state.entries().clone();
+    let (events, outputs) = drive(&mut state, DESKTOP, |ui| {
+        // Drags across empty space, on an entry and on its lower edge.
+        let from = slot(ui, "WED", 10.0);
+        let to = slot(ui, "WED", 11.5);
+        drag(ui, from, to);
+        let from = slot(ui, "TUE", 9.25);
+        let to = slot(ui, "FRI", 11.25);
+        drag(ui, from, to);
+        let ten = slot(ui, "TUE", 10.0);
+        let to = slot(ui, "TUE", 11.5);
+        drag(ui, Point::new(ten.x, ten.y - 4.0), to);
+    });
+    assert_eq!(events, vec![], "no drag sends anything");
+    assert_eq!(outputs, vec![]);
+
+    // Presses still select, and a second press opens an entry but asks
+    // for nothing on empty time.
+    let (events, outputs) = drive(&mut state, DESKTOP, |ui| {
+        let empty = slot(ui, "FRI", 11.7);
+        click_at(ui, empty);
+        click_at(ui, empty);
+        let stand_up = centre(ui, "Stand-up");
+        click_at(ui, stand_up);
+    });
+    assert_eq!(events.len(), 3);
+    assert_eq!(outputs.len(), 2, "two selections, and no request");
+    let (_, outputs) = drive(&mut state, DESKTOP, |ui| {
+        let stand_up = centre(ui, "Stand-up");
+        click_at(ui, stand_up);
+    });
+    assert_eq!(
+        outputs,
+        vec![Output::Opened {
+            entry: EntryId(1),
+            start: at(17, 9, 0)
+        }]
+    );
+    assert_eq!(state.entries(), &before);
+
+    // The app can still add to it.
+    let added = Entry::new(EntryId(9), "Added by the app", at(18, 9, 0), at(18, 10, 0));
+    assert!(state.update(Event::Insert(added)).is_some());
+    let mut ui = Simulator::with_size(Settings::default(), DESKTOP, view(&state));
+    assert!(shows(&mut ui, "Added by the app"));
+}
+
+#[test]
 fn four_days_start_on_the_day_on_show() {
     let mut state = state(View::FourDays);
     let (events, _) = drive(&mut state, DESKTOP, |ui| {

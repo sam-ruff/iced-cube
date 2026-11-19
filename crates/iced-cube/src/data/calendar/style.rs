@@ -471,6 +471,73 @@ mod tests {
     }
 
     #[test]
+    fn a_custom_theme_reaches_every_part() {
+        use crate::theme::Config;
+        use iced::color;
+
+        let theme = Config::light()
+            .primary(color!(0x6d28d9))
+            .accent(color!(0xede9fe))
+            .border(color!(0xddd6fe))
+            .success(color!(0x0d9488))
+            .warning(color!(0xea580c))
+            .destructive(color!(0xe11d48))
+            .foreground(color!(0x1e1b2e))
+            .build();
+        let tokens = Tokens::of(&theme);
+
+        assert_eq!(tone(&tokens, Tone::Primary), color!(0x6d28d9));
+        assert_eq!(tone(&tokens, Tone::Success), color!(0x0d9488));
+        assert_eq!(tone(&tokens, Tone::Warning), color!(0xea580c));
+        assert_eq!(tone(&tokens, Tone::Destructive), color!(0xe11d48));
+        assert_eq!(
+            chip(&tokens, Tone::Primary, true, Status::Active).background,
+            color!(0x6d28d9)
+        );
+        assert_eq!(
+            chip(&tokens, Tone::Success, false, Status::Active).foreground,
+            color!(0x1e1b2e)
+        );
+
+        let today = Day {
+            today: true,
+            in_month: true,
+            selected: false,
+        };
+        assert_eq!(
+            day_number(&tokens, today).background,
+            Some(color!(0x6d28d9))
+        );
+        assert_eq!(
+            year_day(&tokens, today, Status::Active).background,
+            Some(Background::Color(color!(0x6d28d9)))
+        );
+
+        let selected = Day {
+            selected: true,
+            in_month: true,
+            today: false,
+        };
+        assert_eq!(
+            cell(&tokens, selected, Status::Active).background,
+            Some(Background::Color(color!(0xede9fe)))
+        );
+        assert_eq!(
+            row(&tokens, true, false).background,
+            Some(Background::Color(color!(0xede9fe)))
+        );
+        assert_eq!(
+            entry_line(&tokens, Tone::Primary, false, Status::Hovered).background,
+            Some(Background::Color(color!(0xede9fe)))
+        );
+
+        assert_eq!(line(&tokens), color!(0xddd6fe));
+        assert_eq!(frame(&tokens).border.color, color!(0xddd6fe));
+        assert_eq!(now_line(&tokens), color!(0xe11d48));
+        assert_eq!(preview(&tokens).border, color!(0x6d28d9));
+    }
+
+    #[test]
     fn lines_frames_and_previews_come_from_the_tokens() {
         for theme in [light(), dark()] {
             let tokens = Tokens::of(&theme);

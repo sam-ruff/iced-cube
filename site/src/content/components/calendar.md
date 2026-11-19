@@ -11,12 +11,14 @@ imports: |
 keywords: [events, schedule, scheduler, reminders, alarm, agenda, month, week, date, appointment]
 related: [toast, data-table, dialog]
 hero: calendar/month
-stories: [calendar/month, calendar/week, calendar/agenda, calendar/year, calendar/create, calendar/repeating, calendar/keyboard, calendar/reminders, calendar/missed, calendar/triggers]
+stories: [calendar/month, calendar/week, calendar/agenda, calendar/year, calendar/create, calendar/read-only, calendar/repeating, calendar/themed, calendar/keyboard, calendar/reminders, calendar/missed, calendar/triggers]
 api:
   - name: "State::new(today) / State::at(now, entries)"
     description: "A calendar showing the month of today. The calendar never reads the clock, so today's date, or the current time for the now line, is passed in."
   - name: ".with_entries(entries) / .with_view(View) / .with_week_start(weekday) / .with_cursor(date) / .with_selection(selection)"
     description: "Sets the entries, the starting view (Day, Week, Month, Year, Agenda or FourDays), the day weeks start on (Monday by default), the period on show and what is selected."
+  - name: ".read_only() / .with_allow(Allow) / state.set_allow(Allow)"
+    description: "Limits what the user may do through the calendar itself: Allow has create, reschedule and remove, and Allow::NONE is read-only. Insert and Remove events from the app always apply."
   - name: "Entries::utc() / Entries::system() / Entries::new(time_zone)"
     description: "An empty collection shown in UTC, the system's time zone or one you name. Add to it with .with([...]) or .insert(entry)."
   - name: "Entry::new(id, title, start, end) / Entry::all_day(id, title, first, last)"
@@ -98,6 +100,14 @@ In the week and day views a mouse can also drag: across empty space to ask for a
 
 The calendar has no editor of its own. `Requested` and `Opened` are where the app shows its dialog or side panel, as the "Creating and editing" example does.
 
+## Read-only calendars and your own controls
+
+`State::read_only()` makes a calendar people can look through but not change: days and entries can still be selected, entries opened, and the period and view switched, but a second press or a drag asks for nothing, entries cannot be dragged, and the Remove shortcut does nothing. For something in between, `with_allow(Allow { .. })` sets `create`, `reschedule` and `remove` one by one, and `set_allow` changes them later, such as when a shared calendar comes on show.
+
+These limits are about the calendar's own gestures and shortcuts. `Event::Insert` and `Event::Remove` always apply, so anything in your app can change the entries: a form, a toolbar button, a context menu, a sync from a server. Build whatever controls suit the app and send those events; the "Read-only, with your own controls" example does this with a text field and two buttons. The same works on an editable calendar, where your controls sit beside the built-in gestures, and with `.header(false)` you can replace the header too, using `state.title()` and the navigation events.
+
+A calendar with no `.on_event` at all is a picture: it shows the entries and responds to nothing.
+
 ## Repeating entries
 
 A repeating entry is one entry with a rule. Occurrences are counted from the first, so an entry on the 31st that repeats monthly uses the last day of shorter months and returns to the 31st afterwards, and a timed entry keeps its local time when the clocks change. Dragging one occurrence moves the whole series by the same amount. Rules are simple: there is no "last Friday of the month" and no way to skip a single occurrence.
@@ -105,6 +115,12 @@ A repeating entry is one entry with a rule. Occurrences are counted from the fir
 ## Triggers
 
 Triggers tell the app when an entry is created, due, almost due or over. They are built from a few base parts and carry a key of your own type. The [Calendar events](../../calendar-events/) guide works through them, from a single reminder to catching up on the ones missed while the app was closed.
+
+## Theming
+
+The calendar has no colours of its own. Surfaces, lines, text, today's pill, the selection ring and the now line come from the theme's tokens, so it follows the light and dark themes and any palette built with `theme::Config`, like every other component; see [Theming](../../theming/).
+
+An entry's `Tone` names a token, not a colour: `Primary`, `Neutral` (the muted text colour), `Success`, `Warning` and `Destructive`. An entry is drawn as a wash of that colour over the background, and filled with it when selected. With the default palettes the primary is near black or near white, so `Primary` and `Neutral` look alike; give the theme a coloured primary, as the "Custom theme" example does, to tell them apart. For finer control, the functions in `calendar::style` return each part's colours from a `Tokens` value.
 
 ## Narrow screens
 

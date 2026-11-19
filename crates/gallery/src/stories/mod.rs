@@ -913,10 +913,20 @@ crate::stories! {
         description: "Drag across empty space, or press a time twice, and the calendar asks for an entry there; the app shows a dialog and inserts it. Press an entry twice to rename or delete it.",
         file: "calendar/create.rs", height: 480, edge: true,
     }
+    CalendarReadOnly => calendar::read_only {
+        id: "calendar/read-only", component: "calendar", title: "Read-only, with your own controls",
+        description: "A calendar that takes no changes by pointer or keyboard: days and entries can be selected and views switched, but nothing is created, dragged or removed from it. The field and buttons above are the app's own, and add to and remove from the same calendar.",
+        file: "calendar/read_only.rs", height: 480,
+    }
     CalendarRepeating => calendar::repeating {
         id: "calendar/repeating", component: "calendar", title: "Repeating entries",
         description: "Daily, weekly and monthly entries with an interval, a count or an end date. Each one is a single entry that the calendar expands for the period on show.",
         file: "calendar/repeating.rs", height: 480,
+    }
+    CalendarThemed => calendar::themed {
+        id: "calendar/themed", component: "calendar", title: "Custom theme",
+        description: "The same calendar under a brand palette built with theme::Config. Today, the selection, the lines and each entry tone all follow the theme; switch views to see the rest.",
+        file: "calendar/themed.rs", height: 480, theme: true,
     }
     CalendarKeyboard => calendar::keyboard {
         id: "calendar/keyboard", component: "calendar", title: "Keyboard shortcuts",

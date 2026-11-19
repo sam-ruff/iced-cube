@@ -62,6 +62,47 @@ impl std::fmt::Display for View {
     }
 }
 
+/// What the user may change through the calendar's own gestures and
+/// shortcuts. Everything is allowed by default.
+///
+/// This only limits what the calendar offers. [`Event::Insert`] and
+/// [`Event::Remove`] always apply, so the app, or controls of its own, can
+/// still add, change and remove entries on a calendar that is read-only
+/// to the pointer and the keyboard.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Allow {
+    /// Asking for a new entry: a second press on a day or a time, a drag
+    /// across empty space, or [`Action::Activate`] on a day.
+    pub create: bool,
+    /// Dragging an entry to move it or to change when it ends.
+    pub reschedule: bool,
+    /// Removing the selected entry with [`Action::Remove`].
+    pub remove: bool,
+}
+
+impl Allow {
+    /// Everything: the default.
+    pub const ALL: Allow = Allow {
+        create: true,
+        reschedule: true,
+        remove: true,
+    };
+
+    /// Nothing: a read-only calendar. Days and entries can still be
+    /// selected, entries opened and the period and view changed.
+    pub const NONE: Allow = Allow {
+        create: false,
+        reschedule: false,
+        remove: false,
+    };
+}
+
+impl Default for Allow {
+    fn default() -> Self {
+        Self::ALL
+    }
+}
+
 /// What is selected: at most one thing at a time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Selection {
@@ -160,6 +201,7 @@ pub struct State {
     now: Option<Timestamp>,
     selection: Option<Selection>,
     week_start: Weekday,
+    allow: Allow,
 }
 
 impl State {
@@ -176,6 +218,7 @@ impl State {
             now: None,
             selection: None,
             week_start: Weekday::Monday,
+            allow: Allow::ALL,
         }
     }
 
@@ -213,6 +256,29 @@ impl State {
     pub fn with_selection(mut self, selection: Selection) -> Self {
         self.selection = Some(selection);
         self
+    }
+
+    /// Limits what the user may change through the calendar itself.
+    pub fn with_allow(mut self, allow: Allow) -> Self {
+        self.allow = allow;
+        self
+    }
+
+    /// A calendar the user can look through but not change: nothing can
+    /// be created, dragged or removed from it. The same as
+    /// [`with_allow`](State::with_allow) with [`Allow::NONE`].
+    pub fn read_only(self) -> Self {
+        self.with_allow(Allow::NONE)
+    }
+
+    /// Changes what the user may do, such as when they sign in or a
+    /// calendar they cannot edit comes on show.
+    pub fn set_allow(&mut self, allow: Allow) {
+        self.allow = allow;
+    }
+
+    pub fn allow(&self) -> Allow {
+        self.allow
     }
 
     pub fn entries(&self) -> &Entries {
@@ -392,8 +458,11 @@ impl State {
                 self.set_view(View::Day);
                 Some(self.viewed())
             }
-            Event::Request(draft) => Some(Output::Requested(draft)),
+            Event::Request(draft) => self.allow.create.then_some(Output::Requested(draft)),
             Event::Reschedule { entry, start, to } => {
+                if !self.allow.reschedule {
+                    return None;
+                }
                 let moved = self.rescheduled(entry, start, to)?;
                 let changed = self.entries.insert(moved)?;
                 if let Some(Selection::Entry {
@@ -461,11 +530,15 @@ impl State {
 
     fn activate(&mut self) -> Option<Output> {
         let time_zone = self.entries.time_zone();
+        if let Some(Selection::Entry { entry, start }) = self.selection {
+            self.entries.get(entry)?;
+            return Some(Output::Opened { entry, start });
+        }
+        if !self.allow.create {
+            return None;
+        }
         Some(match self.selection {
-            Some(Selection::Entry { entry, start }) => {
-                self.entries.get(entry)?;
-                Output::Opened { entry, start }
-            }
+            Some(Selection::Entry { entry, start }) => Output::Opened { entry, start },
             Some(Selection::Slot { date, minute }) => {
                 let end = minute.saturating_add(SLOT_MINUTES).min(DAY_MINUTES);
                 Output::Requested(Draft {
@@ -597,9 +670,11 @@ impl Action {
             Action::Agenda => show(View::Agenda),
             Action::Year => show(View::Year),
             Action::FourDays => show(View::FourDays),
-            Action::Activate => Some(Event::Activate),
+            Action::Activate => (state.selected_entry().is_some() || state.allow().create)
+                .then_some(Event::Activate),
             Action::Remove => state
                 .selected_entry()
+                .filter(|_| state.allow().remove)
                 .map(|entry| Event::Remove(entry.id())),
             Action::Close => state.selection().map(|_| Event::Clear),
         }
@@ -1058,6 +1133,104 @@ mod tests {
         let mut state = state().with_selection(entry(9, 19, 9));
         assert_eq!(state.update(Event::Activate), None);
         assert_eq!(state.selected_entry(), None);
+    }
+
+    #[test]
+    fn everything_is_allowed_unless_set() {
+        assert_eq!(Allow::default(), Allow::ALL);
+        assert_eq!(state().allow(), Allow::ALL);
+        assert_eq!(state().read_only().allow(), Allow::NONE);
+        let mut state = state();
+        state.set_allow(Allow {
+            remove: false,
+            ..Allow::ALL
+        });
+        assert!(state.allow().create && !state.allow().remove);
+    }
+
+    #[test]
+    fn a_read_only_calendar_can_be_looked_through_but_not_changed() {
+        let mut state = state().read_only();
+        let day = Selection::Day(date(2026, 11, 3));
+        let slot = Selection::Slot {
+            date: today(),
+            minute: 600,
+        };
+
+        // Selecting and moving about still work.
+        assert_eq!(
+            state.update(Event::Press(day)),
+            Some(Output::Selected(Some(day)))
+        );
+        assert!(state.update(Event::Next).is_some());
+        assert!(state.update(Event::Show(View::Week)).is_some());
+
+        // A second press, Enter or a drag asks for nothing.
+        let _ = state.update(Event::Press(day));
+        assert_eq!(state.update(Event::Press(day)), None);
+        assert_eq!(state.update(Event::Activate), None);
+        let _ = state.update(Event::Press(slot));
+        assert_eq!(state.update(Event::Press(slot)), None);
+        let draft = Draft {
+            when: When::day(today()),
+        };
+        assert_eq!(state.update(Event::Request(draft)), None);
+        let _ = state.update(Event::Clear);
+        assert_eq!(state.update(Event::Activate), None);
+        assert_eq!(Action::Activate.event(&state), None);
+
+        // An entry can still be opened, but not dragged or removed by key.
+        let picked = entry(1, 19, 9);
+        let _ = state.update(Event::Press(picked));
+        assert_eq!(
+            state.update(Event::Press(picked)),
+            Some(Output::Opened {
+                entry: EntryId(1),
+                start: at(19, 9)
+            })
+        );
+        assert_eq!(Action::Activate.event(&state), Some(Event::Activate));
+        assert_eq!(Action::Remove.event(&state), None);
+        let drag = Event::Reschedule {
+            entry: EntryId(1),
+            start: at(19, 9),
+            to: (at(20, 9), at(20, 10)),
+        };
+        assert_eq!(state.update(drag), None);
+        assert_eq!(
+            state.entries().get(EntryId(1)).map(Entry::when),
+            Some(meeting(1, 19, 9).when())
+        );
+    }
+
+    #[test]
+    fn the_app_can_still_change_a_read_only_calendar() {
+        let mut state = state().read_only();
+        assert!(state.update(Event::Insert(meeting(7, 21, 9))).is_some());
+        assert!(state.update(Event::Insert(meeting(7, 22, 9))).is_some());
+        assert!(state.update(Event::Remove(EntryId(7))).is_some());
+        assert_eq!(state.entries().len(), 3);
+    }
+
+    #[test]
+    fn each_permission_stands_alone() {
+        let mut state = state().with_allow(Allow {
+            create: false,
+            ..Allow::ALL
+        });
+        let _ = state.update(Event::Press(entry(1, 19, 9)));
+        assert_eq!(
+            Action::Remove.event(&state),
+            Some(Event::Remove(EntryId(1)))
+        );
+        let drag = Event::Reschedule {
+            entry: EntryId(1),
+            start: at(19, 9),
+            to: (at(20, 9), at(20, 10)),
+        };
+        assert!(state.update(drag).is_some());
+        let _ = state.update(Event::Clear);
+        assert_eq!(state.update(Event::Activate), None);
     }
 
     #[test]
