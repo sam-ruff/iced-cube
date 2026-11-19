@@ -1,9 +1,12 @@
 //! Data display: trees, tables, long lists, logs, JSON documents, property
 //! grids and text that can be selected and copied.
 
+#[cfg(feature = "calendar")]
+pub mod calendar;
 #[cfg(feature = "data-table")]
 pub mod data_table;
 #[cfg(any(
+    feature = "calendar",
     feature = "data-table",
     feature = "document-tabs",
     feature = "json-viewer",
@@ -44,6 +47,8 @@ pub mod tree;
 #[cfg(feature = "virtual-list")]
 pub mod virtual_list;
 
+#[cfg(feature = "calendar")]
+pub use calendar::{Calendar, calendar};
 #[cfg(feature = "data-table")]
 pub use data_table::{DataTable, data_table};
 #[cfg(feature = "json-viewer")]

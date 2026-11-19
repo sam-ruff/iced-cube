@@ -584,33 +584,7 @@ pub fn timer<A>(state: &State<A>) -> Subscription<Event> {
     if !state.needs_tick() {
         return Subscription::none();
     }
-    every(TICK).map(|_| Event::Tick(Instant::now()))
-}
-
-#[cfg(any(target_arch = "wasm32", feature = "tokio"))]
-fn every(period: Duration) -> Subscription<()> {
-    iced::time::every(period).map(|_| ())
-}
-
-/// A sleeping thread feeds a channel, so no async runtime timer is needed.
-#[cfg(not(any(target_arch = "wasm32", feature = "tokio")))]
-fn every(period: Duration) -> Subscription<()> {
-    Subscription::run_with(period, |period| {
-        let period = *period;
-        let (mut sender, receiver) = mpsc::channel(1);
-        std::thread::spawn(move || {
-            loop {
-                std::thread::sleep(period);
-                if sender
-                    .try_send(())
-                    .is_err_and(|error| error.is_disconnected())
-                {
-                    break;
-                }
-            }
-        });
-        receiver
-    })
+    crate::ticker::every(TICK).map(|_| Event::Tick(Instant::now()))
 }
 
 /// The widget id of a toast's close button, for tests and focus.

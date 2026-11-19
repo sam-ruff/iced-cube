@@ -80,6 +80,7 @@ pub(crate) fn ellipsis<'a>(content: impl Into<Cow<'a, str>>) -> Ellipsis<'a> {
 
 impl<'a> Ellipsis<'a> {
     #[cfg(any(
+        feature = "calendar",
         feature = "data-table",
         feature = "json-viewer",
         feature = "property-grid"
@@ -101,6 +102,7 @@ impl<'a> Ellipsis<'a> {
     }
 
     #[cfg(any(
+        feature = "calendar",
         feature = "json-viewer",
         feature = "log-viewer",
         feature = "property-grid"

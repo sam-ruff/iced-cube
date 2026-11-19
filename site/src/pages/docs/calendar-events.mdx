@@ -1,0 +1,317 @@
+---
+layout: ../../layouts/Guide.astro
+title: Calendar events
+description: Telling your app when a calendar entry is created, due or almost due, including the reminders it missed while it was closed.
+---
+
+import Preview from "../../components/Preview.astro";
+
+A [calendar](../components/calendar/) is more use when the app hears about what happens in it: an entry was added, a meeting starts in ten minutes, a deadline passed while the laptop was asleep. iced-cube does this with triggers.
+
+iced has no callbacks to register. Messages go into `update` and that is the only place state changes. So a trigger is not a closure: it is a small value with a key of your own, and when it goes off the scheduler hands the key back. Your `update` matches on the key and does whatever that reminder means in your app.
+
+## The parts
+
+There are four types, all in `iced_cube::data::calendar::schedule`:
+
+- A **`Trigger<K>`** is a rule. It is built from one of two base events: a change to an entry (`Change::Created`, `Updated` or `Removed`), or a moment measured from where an occurrence starts or ends (`Anchor::Start`, `Anchor::End`). `K` is your key, usually an enum.
+- A **`Scheduler<K>`** holds the triggers and works out which have gone off.
+- A **`Fired<K>`** is one trigger going off for one entry. It carries your key, the entry's id and why it fired.
+- **`Delivery`** says whether a timed trigger arrived when it was due or was missed.
+
+The scheduler never reads the clock. You tell it what time it is, and it tells you what came due. That is what lets it catch up after a restart, and it means every rule below can be tested with made-up times.
+
+## A first reminder
+
+One trigger, for when an entry starts. `schedule::timer` supplies the time: it ticks every 30 seconds while the scheduler has a timed trigger and the calendar has entries, and is idle otherwise.
+
+```rust
+use iced::{Element, Subscription};
+use iced_cube::data::calendar::schedule::{self, Anchor, Scheduler, Trigger};
+use iced_cube::data::calendar::{self, calendar};
+use jiff::Timestamp;
+
+#[derive(Debug, Clone, PartialEq)]
+enum Reminder {
+    Starting,
+}
+
+#[derive(Debug, Clone)]
+enum Message {
+    Calendar(calendar::Event),
+    Clock(Timestamp),
+}
+
+struct App {
+    calendar: calendar::State,
+    scheduler: Scheduler<Reminder>,
+}
+
+impl App {
+    fn new() -> Self {
+        Self {
+            calendar: calendar::State::at(Timestamp::now(), calendar::Entries::system()),
+            scheduler: Scheduler::new()
+                .with(Trigger::new(Reminder::Starting).at(Anchor::Start)),
+        }
+    }
+
+    fn update(&mut self, message: Message) {
+        match message {
+            Message::Calendar(event) => {
+                let _ = self.calendar.update(event);
+            }
+            Message::Clock(now) => {
+                // Keeps "today" and the now line current.
+                let _ = self.calendar.update(calendar::Event::Tick(now));
+
+                for fired in self.scheduler.poll(self.calendar.entries(), now) {
+                    let Some(entry) = self.calendar.entries().get(fired.entry) else {
+                        continue;
+                    };
+                    match fired.trigger {
+                        Reminder::Starting => println!("{} is starting", entry.title()),
+                    }
+                }
+            }
+        }
+    }
+
+    fn view(&self) -> Element<'_, Message> {
+        calendar(&self.calendar).on_event(Message::Calendar).into()
+    }
+
+    fn subscription(&self) -> Subscription<Message> {
+        schedule::timer(&self.scheduler, self.calendar.entries()).map(Message::Clock)
+    }
+}
+```
+
+`poll` returns everything that came due since the last poll, earliest first, and each thing once. Call it as often or as rarely as you like; nothing is lost in between.
+
+## Due, almost due and over
+
+A trigger's moment is an anchor and a distance from it:
+
+```rust
+use std::time::Duration;
+
+const MINUTE: Duration = Duration::from_secs(60);
+
+#[derive(Debug, Clone, PartialEq)]
+enum Reminder {
+    Soon,
+    Starting,
+    FollowUp,
+}
+
+let scheduler = Scheduler::new()
+    // Almost due.
+    .with(Trigger::new(Reminder::Soon).before(Anchor::Start, 10 * MINUTE))
+    // Due.
+    .with(Trigger::new(Reminder::Starting).at(Anchor::Start))
+    // An hour after it ends.
+    .with(Trigger::new(Reminder::FollowUp).after(Anchor::End, 60 * MINUTE));
+```
+
+Here the first two raise toasts while a simulated clock runs. The story advances its own clock and passes it to `poll`, which is all a real app does with real time:
+
+<Preview id="calendar/reminders" height={480} />
+
+A whole-day entry starts at midnight and ends at the midnight after its last day, in the calendar's time zone. A reminder "the evening before" is `before(Anchor::Start, ...)` with six hours.
+
+## When entries change
+
+Triggers on changes are not polled, because they do not depend on the time. Every change to the entries comes back from `state.update` as `Output::Changed`, and `observe` turns it into the triggers that apply:
+
+```rust
+use iced_cube::data::calendar::{Change, Output};
+
+let scheduler = Scheduler::new()
+    .with(Trigger::new(Sync::Upload).on(Change::Created))
+    .with(Trigger::new(Sync::Upload).on(Change::Updated))
+    .with(Trigger::new(Sync::Delete).on(Change::Removed));
+
+// In update:
+if let Some(Output::Changed(changed)) = self.calendar.update(event) {
+    for fired in self.scheduler.observe(&changed) {
+        match fired.trigger {
+            Sync::Upload => self.upload(&changed.entry),
+            Sync::Delete => self.delete(changed.entry.id()),
+        }
+    }
+}
+```
+
+`changed.entry` is the entry as it is now, or as it was when removed, and `changed.before` is what an update replaced. A drag in the week view arrives the same way, as an update.
+
+Two triggers can share a key, as `Upload` does above. The key says what to do, not which rule fired.
+
+## Limiting a trigger
+
+By default a trigger applies to every entry. A scope narrows it to entries with a tag, or to one entry:
+
+```rust
+use iced_cube::data::calendar::schedule::Scope;
+use iced_cube::data::calendar::{Entry, EntryId};
+
+let stand_up = Entry::new(EntryId(1), "Stand-up", start, end).tag("work");
+
+let scheduler = Scheduler::new()
+    .with(
+        Trigger::new(Reminder::Soon)
+            .before(Anchor::Start, 10 * MINUTE)
+            .scope(Scope::tagged("work")),
+    )
+    .with(
+        Trigger::new(Reminder::Leave)
+            .before(Anchor::Start, 45 * MINUTE)
+            .scope(Scope::Entry(EntryId(7))),
+    );
+```
+
+For a reminder the user sets on a single entry, add a trigger scoped to that entry with `scheduler.add(trigger)` and take it away with `scheduler.remove(&key)`. Put what you need in the key, such as the entry's id.
+
+## Reminding more than once
+
+`every` repeats a trigger set before its anchor until the anchor is reached. This one goes off 15, 10 and 5 minutes before the start:
+
+```rust
+Trigger::new(Reminder::Nag)
+    .before(Anchor::Start, 15 * MINUTE)
+    .every(5 * MINUTE)
+```
+
+If several repeats come due between two polls, only the latest is delivered. An app that was closed for an hour gets one nag, not twelve.
+
+This example puts the pieces together: triggers on changes, one limited to a tag, a repeating one for a single entry and one for when an entry ends, each with its own key:
+
+<Preview id="calendar/triggers" height={480} />
+
+## Missed reminders
+
+A reminder can come due when nothing is there to hear it: the app was closed, the machine was asleep, a long task held up the timer. The scheduler delivers it anyway on the next poll, and says so.
+
+```rust
+use iced_cube::data::calendar::schedule::{Delivery, Kind};
+
+for fired in self.scheduler.poll(self.calendar.entries(), now) {
+    match fired.kind {
+        Kind::Due { delivery: Delivery::OnTime, .. } => self.notify(&fired),
+        Kind::Due { delivery: Delivery::Missed { late_by }, due, .. } => {
+            // Your call: show it as overdue, fold it into a summary, or drop it.
+            self.overdue.push((fired.entry, due, late_by));
+        }
+        Kind::Changed(_) => {}
+    }
+}
+```
+
+`fired.is_missed()` and `fired.late_by()` are shorter when that is all you need. What to do with a missed reminder is the app's decision. One for a meeting that ended yesterday may be worth a line in a "while you were away" list; one for a meeting that started two minutes ago probably still deserves a notification.
+
+A trigger counts as missed when it is delivered more than the grace late. The grace is a minute by default, two ticks of the timer, so an ordinary tick never reports a miss. Change it with `.grace(duration)`, and keep it at least twice the interval you poll at.
+
+### Catching up after a restart
+
+Between polls the scheduler remembers one thing: the time of the last poll, its watermark. Each poll covers the time from the watermark to now. Save the watermark, and a new scheduler can carry on from it:
+
+```rust
+// When the app starts.
+let mut scheduler = Scheduler::new()
+    .with(Trigger::new(Reminder::Starting).at(Anchor::Start));
+if let Some(watermark) = settings.last_poll {
+    scheduler = scheduler.resume_from(watermark);
+}
+
+// After each poll, or when the app closes.
+settings.last_poll = self.scheduler.watermark();
+```
+
+A `Timestamp` prints and parses as text such as `2026-11-19T09:30:00Z`, so it fits in any settings file. Without `resume_from`, a new scheduler starts from its first poll and nothing counts as missed.
+
+Here the app was last open on Wednesday afternoon and is opened again on Thursday at 09:30. Three reminders arrive at once, each flagged with how late it is, and the fourth arrives on time ten minutes later:
+
+<Preview id="calendar/missed" height={480} />
+
+The scheduler works from the entries as they are when it polls. A meeting moved to tomorrow while the app was closed is not reported as missed today, and one that was removed is not reported at all.
+
+A repeating entry that was missed many times arrives once per trigger, for its latest occurrence. After a fortnight away there is one overdue stand-up to deal with, not ten.
+
+If the clock goes backwards, as when the user corrects it, a poll at or before the watermark delivers nothing and leaves the watermark where it was. Nothing goes off twice. A poll more than a day before the watermark is different: it means the watermark was written by a clock that was wrong, so the scheduler drops it and starts again from the time it is given.
+
+Keep polling even when nothing is due, as `schedule::timer` does. The scheduler judges a new entry against the time of the last poll, so one that stopped polling at lunchtime would report an entry added at 15:00 for 14:00 as missed.
+
+## Snoozing
+
+To put a reminder off, hand it back with a time:
+
+```rust
+let until = now.checked_add(jiff::SignedDuration::from_mins(10))?;
+self.scheduler.snooze(&fired, until);
+```
+
+It comes back from `poll` once, at or after that time, with `due` set to the time it was snoozed until. Snoozing the same reminder again replaces the earlier snooze, and snoozes for entries that have since been removed are dropped. To keep them across a restart, save `scheduler.snoozed()` with the watermark and restore each one with `.with_snooze(snooze)`.
+
+Dismissing needs nothing: a trigger that has been delivered is not delivered again.
+
+## Repeating entries
+
+A repeating entry fires for each occurrence. `Kind::Due` carries the start of the occurrence, which tells Monday's stand-up from Tuesday's:
+
+```rust
+if let Kind::Due { start, .. } = fired.kind {
+    println!("the occurrence starting at {start}");
+}
+```
+
+## Without the calendar
+
+The scheduler needs the entries, not the view. An app that only wants reminders can keep an `Entries` collection and never draw a calendar. `insert` and `remove` return the same `Changed` that `observe` takes:
+
+```rust
+use iced_cube::data::calendar::Entries;
+
+let mut entries = Entries::system();
+if let Some(changed) = entries.insert(entry) {
+    for fired in scheduler.observe(&changed) {
+        // ...
+    }
+}
+```
+
+If the 30 second timer is not what you want, `scheduler.next_due(&entries, now)` gives the next time anything will come due, for scheduling a wake-up of your own. Poll when it arrives, and again whenever the entries change. Being woken late is fine: the poll still delivers everything, flagged if it is past the grace.
+
+## Time zones and clock changes
+
+Timed entries are instants, so a trigger for one goes off at the same moment whatever time zone the calendar shows. Whole-day entries and repeat rules follow the time zone of the `Entries` collection: a daily 09:00 entry stays at 09:00 local time when the clocks change, and its reminders move with it.
+
+## Testing your triggers
+
+Because the time is passed in, a test is a few lines and never waits:
+
+```rust
+#[test]
+fn a_reminder_arrives_ten_minutes_before() {
+    let entries = Entries::utc().with([Entry::new(EntryId(1), "Stand-up", at(9, 0), at(9, 15))]);
+    let mut scheduler = Scheduler::new()
+        .with(Trigger::new(Reminder::Soon).before(Anchor::Start, 10 * MINUTE));
+
+    assert!(scheduler.poll(&entries, at(8, 0)).is_empty());
+    let fired = scheduler.poll(&entries, at(8, 50));
+
+    assert_eq!(fired.len(), 1);
+    assert_eq!(fired[0].trigger, Reminder::Soon);
+    assert!(!fired[0].is_missed());
+}
+```
+
+## The rules in short
+
+| Rule | Behaviour |
+| --- | --- |
+| Once each | A trigger is delivered once per occurrence, however often you poll. |
+| Late, not lost | Anything that came due since the last poll is delivered on the next one, flagged as missed when it is past the grace. |
+| Current entries | A poll uses the entries as they are now. Moved entries fire at their new times and removed ones do not fire. |
+| Repeats collapse | When several repeats of an `every` trigger pile up, only the latest arrives. The same goes for missed occurrences of a repeating entry. |
+| Clock set back | A poll at or before the watermark delivers nothing. More than a day before it, the watermark is dropped and the scheduler starts again. |
+| Changes are immediate | Triggers on `Created`, `Updated` and `Removed` come from `observe`, not `poll`, and are never missed. |

@@ -60,6 +60,8 @@ mod shaped;
 #[cfg(any(feature = "dialog", feature = "sidebar", feature = "toast"))]
 mod solid;
 pub mod theme;
+#[cfg(any(feature = "calendar", feature = "toast"))]
+mod ticker;
 
 pub use icon::{Glyph, Icon};
 pub use keys::{Chord, Keymap};
@@ -75,6 +77,8 @@ pub use application::status_bar;
 #[cfg(feature = "toolbar")]
 pub use application::toolbar;
 
+#[cfg(feature = "calendar")]
+pub use data::calendar;
 #[cfg(feature = "data-table")]
 pub use data::data_table;
 #[cfg(feature = "json-viewer")]

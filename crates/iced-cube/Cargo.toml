@@ -71,6 +71,7 @@ data = [
     "property-grid",
     "virtual-list",
     "selectable-text",
+    "calendar",
 ]
 
 button = ["iced/advanced"]
@@ -162,9 +163,19 @@ formatting-toolbar = [
     "icon-button",
     "input",
 ]
+calendar = [
+    "iced/advanced",
+    "button",
+    "icon-button",
+    "scroll-area",
+    "select",
+    "tappable",
+    "dep:jiff",
+]
 
 [dependencies]
 iced = { version = "0.14.0", default-features = false, features = ["svg", "advanced"] }
+jiff = { version = "1.0.1", features = ["js"], optional = true }
 lucide-static-svg = "=1.48.0"
 num-traits = { version = "0.2.19", optional = true }
 serde_json = { version = "1.0.154", optional = true, features = ["preserve_order"] }
@@ -174,6 +185,7 @@ unicode-segmentation = { version = "1.13.3", optional = true }
 futures = "0.3.34"
 iced = { version = "0.14.0", default-features = false, features = ["svg", "advanced", "tiny-skia"] }
 iced_test = "0.14.0"
+jiff = { version = "1.0.1", features = ["tzdb-bundle-always"] }
 png = "0.18.1"
 
 [lints]
