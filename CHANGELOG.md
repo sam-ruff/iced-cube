@@ -1,3 +1,9 @@
+## [0.0.14](https://github.com/sam-ruff/iced-cube/compare/v0.0.13...v0.0.14) (2026-11-19)
+
+### Features
+
+* **data-table:** resizable columns, and the demo's job list as a data table ([#9](https://github.com/sam-ruff/iced-cube/issues/9)) ([d65bed4](https://github.com/sam-ruff/iced-cube/commit/d65bed4bdddb6601139a8d10c3a69d2f05f7407d))
+
 ## [0.0.13](https://github.com/sam-ruff/iced-cube/compare/v0.0.12...v0.0.13) (2026-11-18)
 
 ### Features
