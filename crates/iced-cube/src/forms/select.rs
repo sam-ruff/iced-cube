@@ -11,7 +11,7 @@ use std::borrow::Cow;
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::widget::{Operation, Tree, Widget, tree};
 use iced::advanced::{Clipboard, Shell, overlay, renderer};
-use iced::keyboard::key::Named;
+use iced::keyboard::{self, key::Named};
 use iced::widget::pick_list::{self, Status};
 use iced::widget::{self, Column, row};
 use iced::{
@@ -318,6 +318,13 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for Picker<'_, Message> {
             return;
         }
         let state = tree.state.downcast_mut::<PickerState>();
+        // An open list keeps every key press its panel leaves, so keymaps
+        // behind it do not act while it is open.
+        if state.panel.open && matches!(event, Event::Keyboard(keyboard::Event::KeyPressed { .. }))
+        {
+            shell.capture_event();
+            return;
+        }
         let over = cursor.is_over(layout.bounds());
         if over != state.hovered {
             state.hovered = over;
