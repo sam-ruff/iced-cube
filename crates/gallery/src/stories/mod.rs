@@ -11,6 +11,7 @@ pub mod badge;
 pub mod bottom_nav;
 pub mod breadcrumb;
 pub mod button;
+pub mod calendar;
 pub mod card;
 pub mod checkbox;
 pub mod combobox;
@@ -886,6 +887,66 @@ crate::stories! {
         id: "theme/tokens", component: "theme", title: "Tokens",
         description: "Every semantic colour token, as resolved from the current theme.",
         file: "theme/tokens.rs", height: 260,
+    }
+    CalendarMonth => calendar::month {
+        id: "calendar/month", component: "calendar", title: "Month",
+        description: "Whole-day entries as bars across the days of a month, and timed ones as a dot, a time and a title. Press a day or an entry to select it, and use the header to move between months and views. On a narrow screen days show dots and the selected day's entries are listed below.",
+        file: "calendar/month.rs", height: 480,
+    }
+    CalendarWeek => calendar::week {
+        id: "calendar/week", component: "calendar", title: "Week",
+        description: "Seven days against the hours, with whole-day entries along the top and a line at the current time. Drag empty space to ask for an entry, drag an entry to move it, or drag its lower edge to change when it ends.",
+        file: "calendar/week.rs", height: 480,
+    }
+    CalendarAgenda => calendar::agenda {
+        id: "calendar/agenda", component: "calendar", title: "Schedule",
+        description: "The month's entries as a list, each day's date beside its entries, with repeating entries expanded.",
+        file: "calendar/agenda.rs", height: 420,
+    }
+    CalendarYear => calendar::year {
+        id: "calendar/year", component: "calendar", title: "Year",
+        description: "Twelve small months, with today marked and a dot under each day that has an entry. Press a day to select it, then open it in another view from the menu.",
+        file: "calendar/year.rs", height: 480,
+    }
+    CalendarCreate => calendar::create {
+        id: "calendar/create", component: "calendar", title: "Creating and editing",
+        description: "Drag across empty space, or press a time twice, and the calendar asks for an entry there. The app opens the entry form in a dialog: title, all day, start and end date and time, repeat and colour. Press an entry twice to change or delete it.",
+        file: "calendar/create.rs", height: 480, edge: true,
+    }
+    CalendarReadOnly => calendar::read_only {
+        id: "calendar/read-only", component: "calendar", title: "Read-only, with your own controls",
+        description: "A calendar that takes no changes by pointer or keyboard: days and entries can be selected and views switched, but nothing is created, dragged or removed from it. The field and buttons above are the app's own, and add to and remove from the same calendar.",
+        file: "calendar/read_only.rs", height: 480,
+    }
+    CalendarRepeating => calendar::repeating {
+        id: "calendar/repeating", component: "calendar", title: "Repeating entries",
+        description: "Daily, weekly and monthly entries with an interval, a count or an end date. Each one is a single entry that the calendar expands for the period on show.",
+        file: "calendar/repeating.rs", height: 480,
+    }
+    CalendarThemed => calendar::themed {
+        id: "calendar/themed", component: "calendar", title: "Custom theme",
+        description: "The same calendar under a brand palette built with theme::Config. Today, the selection, the lines and each entry tone all follow the theme; switch views to see the rest.",
+        file: "calendar/themed.rs", height: 480, theme: true,
+    }
+    CalendarKeyboard => calendar::keyboard {
+        id: "calendar/keyboard", component: "calendar", title: "Keyboard shortcuts",
+        description: "Moving the selected day, picking entries, turning pages and switching views through the default keymap.",
+        file: "calendar/keyboard.rs", height: 480, subscription: true,
+    }
+    CalendarReminders => calendar::reminders {
+        id: "calendar/reminders", component: "calendar", title: "Reminders",
+        description: "Two triggers, ten minutes before an entry and when it starts, raise toasts as a simulated clock runs. The scheduler is given the time and returns what came due.",
+        file: "calendar/reminders.rs", height: 480, subscription: true,
+    }
+    CalendarMissed => calendar::missed {
+        id: "calendar/missed", component: "calendar", title: "Missed reminders",
+        description: "A scheduler resumed from the time the app was last open. Everything that came due in between arrives at once, flagged as missed with how late it is, and can be snoozed or dismissed.",
+        file: "calendar/missed.rs", height: 480,
+    }
+    CalendarTriggers => calendar::triggers {
+        id: "calendar/triggers", component: "calendar", title: "Custom triggers",
+        description: "Rules built from base parts: changes to entries, a reminder limited to a tag, one that repeats before a single entry, and one for when an entry ends. Each carries the app's own key.",
+        file: "calendar/triggers.rs", height: 480,
     }
     ShowcaseSettings => showcase::settings {
         id: "showcase/settings", component: "showcase", title: "Preferences",

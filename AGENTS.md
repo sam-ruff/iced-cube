@@ -52,6 +52,7 @@ cd site && npm run test:e2e                    # Playwright, mobile and desktop
 - Colours only come from `theme::Tokens::of(theme)`. Never hard-code a colour in a component. Put the style resolution in a pure `pub fn style(tokens, variant, status) -> Style` (or similar) so it can be unit-tested without a renderer.
 - Stateful components (tabs, accordion, tree, table, command palette and so on) expose a plain `State` struct with a pure `update(&mut self, Event) -> Option<Output>`. The view reads `&State`. The app owns the state and routes messages; components never hide state behind interior mutability.
 - A component without a message renders disabled, as iced's own widgets do.
+- A component never reads the clock or the system time zone on its own. The current time and today's date are passed in (the calendar's `State::new(today)` and `Event::Tick(now)`, the scheduler's `poll(&entries, now)`), and only a subscription such as `schedule::clock()` reads the real time. Stories pass a fixed date so snapshots do not change from day to day, and tests never wait.
 - Colours reach components only through `Tokens`. `theme::Config` builds the light, dark and custom themes; it writes secondary into the extended palette's `secondary.base`, accent into `secondary.weak` and border into `background.strong`, and `Tokens::of` reads them from there.
 - The library makes no network calls. If that ever changes, the call goes behind a trait with `mockall` tests.
 

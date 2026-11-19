@@ -88,6 +88,23 @@ fn escape_and_outside_clicks_close_the_list_without_choosing() {
 }
 
 #[test]
+fn an_open_list_keeps_keys_from_what_is_behind_it() {
+    let mut ui = simulator(view(Some("Apple"), true));
+    for key in [Named::ArrowDown, Named::Enter, Named::Backspace] {
+        let status = ui.tap_key(key);
+        assert_eq!(status, iced::event::Status::Ignored, "closed: {key:?}");
+    }
+
+    open(&mut ui);
+    for key in [Named::ArrowDown, Named::Enter, Named::Backspace] {
+        let status = ui.tap_key(key);
+        assert_eq!(status, iced::event::Status::Captured, "open: {key:?}");
+    }
+    assert!(ui.find("Banana").is_ok(), "the list stays open");
+    assert_eq!(ui.into_messages().count(), 0);
+}
+
+#[test]
 fn clicking_the_field_again_closes_the_list() {
     let mut ui = simulator(view(None, true));
     open(&mut ui);

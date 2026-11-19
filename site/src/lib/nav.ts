@@ -22,6 +22,7 @@ export const guides: NavLink[] = [
   { title: "Theming", href: href("/docs/theming/"), description: "Light and dark themes, tokens and custom palettes." },
   { title: "Icons", href: href("/docs/icons/"), description: "Lucide icons resolved at compile time." },
   { title: "Subscriptions", href: href("/docs/subscriptions/"), description: "Feeding components from background work with channels." },
+  { title: "Calendar events", href: href("/docs/calendar-events/"), description: "Triggers for when calendar entries are created, due or almost due, and catching up on missed ones." },
   { title: "Keyboard shortcuts", href: href("/docs/keyboard/"), description: "Default shortcuts and how to change them with a keymap." },
   { title: "Testing", href: href("/docs/testing/"), description: "Headless tests for your own UI with iced_test." },
   { title: "Status", href: href("/docs/status/"), description: "Version, platforms, minimum Rust and what is planned." },

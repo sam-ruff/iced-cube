@@ -6,7 +6,9 @@ description: Sending toasts from threads and async tasks through a channel, and 
 
 Some UI updates start outside the UI: an export finishing on a worker thread, a sync task failing, a download completing. In iced-cube these reach the app through a channel owned by a subscription, never through shared `Arc<Mutex<_>>` state.
 
-[Toast](../components/toast/) is currently the only component fed this way. Later components that stream data in will use the same pattern.
+[Toast](../components/toast/) is the example used here. Components that stream data in use the same pattern.
+
+Not everything needs a channel. A [calendar](../components/calendar/) only needs to know what time it is, so its subscription is a plain timer and the work happens in `update`; see [Calendar events](../calendar-events/).
 
 ## How the toast channel works
 
