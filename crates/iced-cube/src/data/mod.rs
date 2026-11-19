@@ -2,6 +2,8 @@
 //! grids and text that can be selected and copied.
 
 #[cfg(feature = "data-table")]
+mod column_resize;
+#[cfg(feature = "data-table")]
 pub mod data_table;
 #[cfg(any(
     feature = "data-table",

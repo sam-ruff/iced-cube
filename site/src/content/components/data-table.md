@@ -14,13 +14,15 @@ api:
   - name: "State::new(columns, rows, key)"
     description: "Holds your own row type, the columns that read it, and a key function giving each row an identity that survives sorting, such as its id."
   - name: "data_table::column(id, header, value)"
-    description: "A sortable, searchable and hideable column. value reads a Value (text, a number or empty) from a row. Add .width(length), .align(Align::End), .format(fn) for the text shown, .filterable(true) for a filter of its values, .sortable(false), .hideable(false) or .searchable(false)."
-  - name: ".with_selection(bool) / .with_page_sizes(sizes) / .with_sort(id, direction) / .with_hidden(ids)"
-    description: "Row checkboxes, the page sizes offered (the first is used), a starting sort and columns hidden to start with."
+    description: "A sortable, searchable, hideable and resizable column. value reads a Value (text, a number or empty) from a row. Add .width(length), .align(Align::End), .format(fn) for the text shown, .filterable(true) for a filter of its values, .sortable(false), .hideable(false), .resizable(false) or .searchable(false)."
+  - name: ".with_selection(bool) / .with_page_sizes(sizes) / .with_sort(id, direction) / .with_hidden(ids) / .with_width(id, pixels)"
+    description: "Row checkboxes, the page sizes offered (the first is used), a starting sort, columns hidden to start with and a column width to start from, such as one saved from the last run."
   - name: "state.update(Event)"
-    description: "Handles sorting, searching, filters, pages, selection, the keyboard and the Columns menu. Returns Output::Activated(key) or Output::Selected(keys)."
-  - name: "state.page_rows() / state.selected() / state.highlighted()"
-    description: "The rows on the current page, every selected key in row order, and the row the keyboard acts on."
+    description: "Handles sorting, searching, filters, pages, selection, column widths, the keyboard and the Columns menu. Returns Output::Activated(key) or Output::Selected(keys)."
+  - name: "state.page_rows() / state.filtered_rows() / state.selected() / state.highlighted()"
+    description: "The rows on the current page, every row that passes the search and filters, every selected key in row order, and the row the keyboard acts on."
+  - name: "state.width(id) / Event::Resize(widths) / Event::ResetWidth(id)"
+    description: "The width a column was dragged to, if it has been, and the events that set widths in pixels and give a column back its declared width."
   - name: "state.set_rows(rows) / state.push(row) / state.update_row(&key, f) / state.retain(f)"
     description: "Changes the rows. The sort, filters and the selection of rows that remain are kept."
   - name: "state.showing() / state.page() / state.page_count() / state.filtered_len()"
@@ -29,12 +31,12 @@ api:
     description: "Renders the toolbar, the table and the footer. Controls render disabled until .on_event is set."
   - name: ".cell(id, f)"
     description: "Draws a column's cells with your own element, such as a badge or a progress bar."
-  - name: ".toolbar(bool) / .placeholder(text)"
-    description: "Shows or hides the search box, column filters and Columns menu, and sets the search placeholder."
+  - name: ".toolbar(bool) / .placeholder(text) / .search_id(id)"
+    description: "Shows or hides the search box, column filters and Columns menu, sets the search placeholder, and gives the search box a widget id to focus it by."
   - name: ".loading(bool) / .empty(text)"
     description: "Placeholder rows while loading, and the message when nothing matches."
   - name: ".height(length) / .row_height(f32)"
-    description: "A fixed or filling height scrolls the rows under a header that stays put. Rows are 44 pixels tall unless set, such as 32 for a compact table."
+    description: "A fixed or filling height scrolls the rows under a header that stays put, with the footer below them. Rows are 44 pixels tall unless set, such as 32 for a compact table."
   - name: ".breakpoint(width)"
     description: "Below this width the rows become cards. Defaults to 560."
   - name: ".context_menu(&menu, f) / .row_actions(bool)"
@@ -52,6 +54,8 @@ api:
 A data table shows records that share the same fields, such as payments or invoices. `State` is generic over your own row type: the columns read each row through plain functions, so sorting, searching and filtering work on your data without copying it into strings first. The app owns the state, routes the table's events into it and acts on the outputs.
 
 Pressing a header sorts by that column, then reverses the order, then restores the original order. The search box looks through every visible searchable column, and a filterable column adds a select of its values to the toolbar. The Columns menu hides and shows columns, but always leaves one. The footer changes the page size and turns the pages, and only the rows of the current page that are in view are built, so a table of thousands of rows stays quick.
+
+Dragging the right edge of a column heading resizes that column. The columns before it hold still, and the columns after it that share the spare room give way, down to 40 pixels each. A double click on the edge gives the column back the width it was declared with. Widths live in the state, so `state.width(id)` can be saved and handed back with `.with_width` on the next run. If the table later becomes too narrow for the dragged widths, they shrink together rather than push columns out of view.
 
 With selection on, every row has a checkbox and the header has one that selects or clears the rows on the current page only. The selection belongs to row keys, so it survives sorting, filtering and turning pages. Build bulk actions from `state.selected()` next to the table, as the selection example does.
 

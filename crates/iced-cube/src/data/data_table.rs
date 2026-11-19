@@ -27,6 +27,7 @@ use iced::keyboard::key::Named;
 use iced::widget::{self, Space, container, responsive, row, space as spacer, text};
 use iced::{Alignment, Background, Border, Color, Element, Length, Padding, Theme};
 
+use crate::data::column_resize::{Edge, resizer};
 use crate::data::ellipsis::ellipsis;
 use crate::data::interaction::{Look, RowMenu, pressable, ringed, row_menu, scope};
 use crate::data::rows::rows;
@@ -53,6 +54,8 @@ pub const PAGE_SIZES: [usize; 4] = [10, 20, 50, 100];
 pub const SKELETON_ROWS: usize = 5;
 /// Height of one labelled line in a card.
 pub const CARD_LINE: f32 = 28.0;
+/// The narrowest a column can be dragged.
+pub const MIN_COLUMN_WIDTH: f32 = 40.0;
 const CARD_PADDING: f32 = 12.0;
 const CARD_GAP: f32 = 8.0;
 const CHECK_WIDTH: f32 = 40.0;
@@ -177,6 +180,8 @@ pub struct Column<Row> {
     pub align: Align,
     pub sortable: bool,
     pub hideable: bool,
+    /// Whether dragging the header's right edge changes the width.
+    pub resizable: bool,
     /// Offers a filter of the column's distinct values in the toolbar.
     pub filterable: bool,
     /// Whether the search box looks in this column.
@@ -185,8 +190,8 @@ pub struct Column<Row> {
     format: Option<fn(&Row) -> String>,
 }
 
-/// A sortable, searchable and hideable column that fills an equal share
-/// of the width. `value` reads the cell from a row.
+/// A sortable, searchable, hideable and resizable column that fills an
+/// equal share of the width. `value` reads the cell from a row.
 pub fn column<Row>(
     id: ColumnId,
     header: impl Into<String>,
@@ -199,6 +204,7 @@ pub fn column<Row>(
         align: Align::Start,
         sortable: true,
         hideable: true,
+        resizable: true,
         filterable: false,
         searchable: true,
         value,
@@ -224,6 +230,7 @@ impl<Row> fmt::Debug for Column<Row> {
             .field("align", &self.align)
             .field("sortable", &self.sortable)
             .field("hideable", &self.hideable)
+            .field("resizable", &self.resizable)
             .field("filterable", &self.filterable)
             .field("searchable", &self.searchable)
             .finish_non_exhaustive()
@@ -250,6 +257,11 @@ impl<Row> Column<Row> {
 
     pub fn hideable(mut self, hideable: bool) -> Self {
         self.hideable = hideable;
+        self
+    }
+
+    pub fn resizable(mut self, resizable: bool) -> Self {
+        self.resizable = resizable;
         self
     }
 
@@ -323,6 +335,12 @@ pub enum Event<Key> {
     ActivateHighlighted,
     /// Navigation and choices in the Columns menu.
     Columns(dropdown_menu::Event<ColumnId>),
+    /// Sets columns to widths in pixels. Dragging a header's right edge
+    /// sends the column and those before it, which then hold still.
+    Resize(Vec<(ColumnId, f32)>),
+    /// Gives a column back the width it was declared with. A double click
+    /// on a header's right edge sends this.
+    ResetWidth(ColumnId),
     /// The table gained or lost focus. The widget sends this itself.
     Focus(bool),
 }
@@ -343,6 +361,8 @@ pub struct State<Row, Key> {
     columns: Vec<Column<Row>>,
     key: fn(&Row) -> Key,
     hidden: HashSet<ColumnId>,
+    /// Widths the reader dragged columns to, in pixels.
+    widths: Vec<(ColumnId, f32)>,
     columns_menu: dropdown_menu::State<ColumnId>,
     sort: Option<(ColumnId, Direction)>,
     search: String,
@@ -372,6 +392,7 @@ impl<Row, Key: Clone + Eq + Hash> State<Row, Key> {
             columns: columns.into_iter().collect(),
             key,
             hidden: HashSet::new(),
+            widths: Vec::new(),
             columns_menu: dropdown_menu::State::new([]),
             sort: None,
             search: String::new(),
@@ -421,8 +442,23 @@ impl<Row, Key: Clone + Eq + Hash> State<Row, Key> {
         self
     }
 
+    /// Starts a column at a width in pixels, as if it had been dragged
+    /// there, such as a width saved from the last run.
+    pub fn with_width(mut self, column: ColumnId, width: f32) -> Self {
+        self.set_width(column, width);
+        self
+    }
+
     pub fn rows(&self) -> &[Row] {
         &self.rows
+    }
+
+    /// The width a column was dragged to, in pixels, if it has been.
+    pub fn width(&self, column: ColumnId) -> Option<f32> {
+        self.widths
+            .iter()
+            .find(|(id, _)| *id == column)
+            .map(|(_, width)| *width)
     }
 
     pub fn columns(&self) -> &[Column<Row>] {
@@ -556,6 +592,14 @@ impl<Row, Key: Clone + Eq + Hash> State<Row, Key> {
         self.page_indices()
             .into_iter()
             .filter_map(|index| self.rows.get(index))
+            .collect()
+    }
+
+    /// Every row that passes the search and filters, on any page, in order.
+    pub fn filtered_rows(&self) -> Vec<&Row> {
+        self.order
+            .iter()
+            .filter_map(|&index| self.rows.get(index))
             .collect()
     }
 
@@ -693,6 +737,12 @@ impl<Row, Key: Clone + Eq + Hash> State<Row, Key> {
                     self.show_column(id, shown);
                 }
             }
+            Event::Resize(widths) => {
+                for (id, width) in widths {
+                    self.set_width(id, width);
+                }
+            }
+            Event::ResetWidth(id) => self.widths.retain(|(column, _)| *column != id),
             Event::Focus(focused) => {
                 self.focused = focused;
                 // Focus lands on the first selected row of the page, or its
@@ -715,6 +765,50 @@ impl<Row, Key: Clone + Eq + Hash> State<Row, Key> {
         keymap
             .resolve_event(key)
             .and_then(|action| action.event(self))
+    }
+
+    fn set_width(&mut self, id: ColumnId, width: f32) {
+        if self.column(id).is_none() || !width.is_finite() {
+            return;
+        }
+        let width = width.max(MIN_COLUMN_WIDTH);
+        match self.widths.iter_mut().find(|(column, _)| *column == id) {
+            Some((_, current)) => *current = width,
+            None => self.widths.push((id, width)),
+        }
+    }
+
+    /// The width each visible column is laid out with when `room` pixels
+    /// are shared between them: dragged columns keep their width, shrunk
+    /// together when they no longer fit, and the others keep their own.
+    fn lengths(&self, room: f32) -> Vec<Length> {
+        let columns = self.visible_columns();
+        let dragged: Vec<Option<f32>> =
+            columns.iter().map(|column| self.width(column.id)).collect();
+        let total: f32 = dragged.iter().flatten().sum();
+        let others: f32 = columns
+            .iter()
+            .zip(&dragged)
+            .filter(|(_, dragged)| dragged.is_none())
+            .map(|(column, _)| match column.width {
+                Length::Fixed(width) => width,
+                _ => MIN_COLUMN_WIDTH,
+            })
+            .sum();
+        let over = total + others - room;
+        let scale = if over > 0.0 && total > 0.0 {
+            ((total - over) / total).max(0.0)
+        } else {
+            1.0
+        };
+        columns
+            .iter()
+            .zip(dragged)
+            .map(|(column, dragged)| match dragged {
+                Some(width) => Length::Fixed((width * scale).max(MIN_COLUMN_WIDTH)),
+                None => column.width,
+            })
+            .collect()
     }
 
     fn page_indices(&self) -> Vec<usize> {
@@ -1117,6 +1211,7 @@ pub struct DataTable<'a, Row, Key, Message> {
     cells: Vec<(ColumnId, Cell<'a, Row, Message>)>,
     toolbar: bool,
     placeholder: String,
+    search_id: Option<widget::Id>,
     loading: bool,
     empty: String,
     height: Length,
@@ -1138,6 +1233,7 @@ pub fn data_table<Row, Key, Message>(state: &State<Row, Key>) -> DataTable<'_, R
         cells: Vec::new(),
         toolbar: true,
         placeholder: "Search...".to_owned(),
+        search_id: None,
         loading: false,
         empty: "No results.".to_owned(),
         height: Length::Shrink,
@@ -1188,6 +1284,13 @@ impl<'a, Row, Key, Message> DataTable<'a, Row, Key, Message> {
     /// The search box placeholder.
     pub fn placeholder(mut self, placeholder: impl Into<String>) -> Self {
         self.placeholder = placeholder.into();
+        self
+    }
+
+    /// Sets the widget id of the search box, to focus it or find it in
+    /// tests.
+    pub fn search_id(mut self, id: impl Into<widget::Id>) -> Self {
+        self.search_id = Some(id.into());
         self
     }
 
@@ -1290,6 +1393,7 @@ where
             cells,
             toolbar,
             placeholder,
+            search_id,
             loading,
             empty,
             height,
@@ -1311,6 +1415,7 @@ where
             cells,
             toolbar,
             placeholder,
+            search_id,
             loading,
             empty,
             height,
@@ -1321,8 +1426,14 @@ where
             menu,
             on_event,
         });
-        responsive(move |size| view.body(size.width < breakpoint))
-            .height(Length::Shrink)
+        // A filling table takes the room it is given, so the footer keeps
+        // its place under rows that scroll.
+        let outer = match height {
+            Length::Fill | Length::FillPortion(_) => height,
+            _ => Length::Shrink,
+        };
+        responsive(move |size| view.body(size.width < breakpoint, size.width))
+            .height(outer)
             .into()
     }
 }
@@ -1333,6 +1444,7 @@ struct View<'a, Row, Key, Message> {
     cells: Vec<(ColumnId, Cell<'a, Row, Message>)>,
     toolbar: bool,
     placeholder: String,
+    search_id: Option<widget::Id>,
     loading: bool,
     empty: String,
     height: Length,
@@ -1367,12 +1479,16 @@ where
         self.on_event.as_ref().map(|on_event| on_event(event))
     }
 
-    fn body(self: &Rc<Self>, narrow: bool) -> Element<'a, Message> {
+    fn body(self: &Rc<Self>, narrow: bool, width: f32) -> Element<'a, Message> {
         let mut parts = widget::column![].spacing(space::MD);
         if self.toolbar {
             parts = parts.push(self.toolbar(narrow));
         }
-        let grid = if narrow { self.cards() } else { self.table() };
+        let grid = if narrow {
+            self.cards()
+        } else {
+            self.table(width)
+        };
         parts
             .push(self.scoped(grid))
             .push(self.footer(narrow))
@@ -1408,7 +1524,7 @@ where
         let state = self.state;
         let search = {
             let on_event = self.on_event.clone();
-            input(&self.placeholder, state.search())
+            let search = input(&self.placeholder, state.search())
                 .icon(crate::lucide!(Search))
                 .shortcuts(self.shortcuts)
                 .width(if narrow {
@@ -1418,7 +1534,11 @@ where
                 })
                 .on_input_maybe(
                     on_event.map(|on_event| move |query| on_event(Event::Search(query))),
-                )
+                );
+            match self.search_id.clone() {
+                Some(id) => search.id(id),
+                None => search,
+            }
         };
 
         let filters = state
@@ -1492,9 +1612,15 @@ where
             .into()
     }
 
-    fn table(self: &Rc<Self>) -> Element<'a, Message> {
+    fn table(self: &Rc<Self>, width: f32) -> Element<'a, Message> {
         let state = self.state;
         let columns = state.visible_columns();
+        let leading = if state.is_selectable() { 1 } else { 0 };
+        let mut room = width - leading as f32 * CHECK_WIDTH;
+        if self.row_actions {
+            room -= ACTIONS_WIDTH;
+        }
+        let lengths: Rc<[Length]> = state.lengths(room).into();
 
         let mut header = row![].height(Length::Fill).align_y(Alignment::Center);
         if state.is_selectable() {
@@ -1510,11 +1636,37 @@ where
                 .center_x(CHECK_WIDTH),
             );
         }
-        for column in &columns {
-            header = header.push(self.header_cell(column));
+        for (column, length) in columns.iter().zip(lengths.iter()) {
+            header = header.push(self.header_cell(column, *length));
         }
         if self.row_actions {
             header = header.push(Space::new().width(ACTIONS_WIDTH));
+        }
+        let edges = columns
+            .iter()
+            .zip(lengths.iter())
+            .map(|(column, length)| Edge {
+                resizable: column.resizable,
+                flexes: !matches!(length, Length::Fixed(_)),
+            })
+            .collect();
+        let mut header = resizer(header, leading, edges, MIN_COLUMN_WIDTH, |theme| {
+            Tokens::of(theme).ring
+        });
+        if let Some(on_event) = self.on_event.clone().filter(|_| !self.loading) {
+            let ids: Rc<[ColumnId]> = columns.iter().map(|column| column.id).collect();
+            let on_reset = on_event.clone();
+            let reset_ids = Rc::clone(&ids);
+            header = header
+                .on_resize(move |_, widths| {
+                    on_event(Event::Resize(ids.iter().copied().zip(widths).collect()))
+                })
+                .on_reset(move |index| {
+                    on_reset(match reset_ids.get(index) {
+                        Some(id) => Event::ResetWidth(id),
+                        None => Event::Resize(Vec::new()),
+                    })
+                });
         }
         let divider = container(Space::new())
             .width(Length::Fill)
@@ -1525,14 +1677,14 @@ where
             });
         let header = widget::column![container(header).height(HEADER_HEIGHT), divider];
 
-        container(self.table_body(header.into()))
+        container(self.table_body(header.into(), lengths))
             .width(Length::Fill)
             .clip(true)
             .style(|theme| frame_style(&Tokens::of(theme)))
             .into()
     }
 
-    fn header_cell(&self, column: &Column<Row>) -> Element<'a, Message> {
+    fn header_cell(&self, column: &Column<Row>, width: Length) -> Element<'a, Message> {
         let state = self.state;
         let align = column.align.horizontal();
         let label = ellipsis(column.header.clone())
@@ -1541,7 +1693,7 @@ where
             .colour(muted);
         let cell = |content: Element<'a, Message>| -> Element<'a, Message> {
             container(content)
-                .width(column.width)
+                .width(width)
                 .height(Length::Fill)
                 .padding([0.0, space::SM])
                 .align_x(align)
@@ -1585,7 +1737,8 @@ where
             None => press,
         };
         container(press)
-            .width(column.width)
+            .width(width)
+            .clip(true)
             .height(Length::Fill)
             .padding([0.0, space::XS])
             .align_x(align)
@@ -1595,11 +1748,15 @@ where
 
     /// The header above the rows of the page, placeholder rows while
     /// loading, or the empty message.
-    fn table_body(self: &Rc<Self>, header: Element<'a, Message>) -> Element<'a, Message> {
+    fn table_body(
+        self: &Rc<Self>,
+        header: Element<'a, Message>,
+        lengths: Rc<[Length]>,
+    ) -> Element<'a, Message> {
         let state = self.state;
         if self.loading {
-            let skeleton =
-                (0..SKELETON_ROWS).map(|index| self.skeleton_row(index + 1 == SKELETON_ROWS));
+            let skeleton = (0..SKELETON_ROWS)
+                .map(|index| self.skeleton_row(index + 1 == SKELETON_ROWS, &lengths));
             return widget::column(std::iter::once(header).chain(skeleton)).into();
         }
         let page = state.page_indices();
@@ -1615,7 +1772,9 @@ where
                     .unwrap_or_default()
                     .iter()
                     .zip(range)
-                    .map(|(&index, position)| view.table_row(index, position + 1 == count)),
+                    .map(|(&index, position)| {
+                        view.table_row(index, position + 1 == count, &lengths)
+                    }),
             )
             .into()
         })
@@ -1677,7 +1836,7 @@ where
         ellipsis(column.text(row)).align_x(align).into()
     }
 
-    fn table_row(&self, index: usize, last: bool) -> Element<'a, Message> {
+    fn table_row(&self, index: usize, last: bool, lengths: &[Length]) -> Element<'a, Message> {
         let state = self.state;
         let Some(row_data) = state.rows.get(index) else {
             return Space::new().into();
@@ -1687,10 +1846,11 @@ where
         if state.is_selectable() {
             cells = cells.push(container(self.checkbox_for(&key)).center_x(CHECK_WIDTH));
         }
-        for column in state.visible_columns() {
+        for (column, length) in state.visible_columns().into_iter().zip(lengths) {
             cells = cells.push(
                 container(self.content_for(column, row_data, column.align.horizontal()))
-                    .width(column.width)
+                    .width(*length)
+                    .clip(true)
                     .padding([0.0, space::SM])
                     .align_x(column.align.horizontal())
                     .center_y(Length::Fill),
@@ -1739,7 +1899,7 @@ where
         }
     }
 
-    fn skeleton_row(&self, last: bool) -> Element<'a, Message> {
+    fn skeleton_row(&self, last: bool, lengths: &[Length]) -> Element<'a, Message> {
         let state = self.state;
         let bar = || {
             container(Space::new())
@@ -1751,12 +1911,8 @@ where
         if state.is_selectable() {
             cells = cells.push(Space::new().width(CHECK_WIDTH));
         }
-        for column in state.visible_columns() {
-            cells = cells.push(
-                container(bar())
-                    .width(column.width)
-                    .padding([0.0, space::SM]),
-            );
+        for length in lengths {
+            cells = cells.push(container(bar()).width(*length).padding([0.0, space::SM]));
         }
         if self.row_actions {
             cells = cells.push(Space::new().width(ACTIONS_WIDTH));
@@ -2659,6 +2815,70 @@ mod tests {
             label: "Default order".into(),
         };
         assert_eq!(sort.to_string(), "Default order");
+    }
+
+    #[test]
+    fn resizing_sets_widths_and_a_reset_restores_the_declared_one() {
+        let mut state = state(3);
+        assert_eq!(state.width("email"), None);
+        let _ = state.update(Event::Resize(vec![("status", 120.0), ("email", 300.0)]));
+        assert_eq!(state.width("status"), Some(120.0));
+        assert_eq!(state.width("email"), Some(300.0));
+        let _ = state.update(Event::Resize(vec![("email", 5.0)]));
+        assert_eq!(
+            state.width("email"),
+            Some(MIN_COLUMN_WIDTH),
+            "never narrower than the minimum"
+        );
+        let _ = state.update(Event::Resize(vec![("missing", 90.0), ("id", f32::NAN)]));
+        assert_eq!(state.width("missing"), None);
+        assert_eq!(state.width("id"), None);
+        let _ = state.update(Event::ResetWidth("email"));
+        assert_eq!(state.width("email"), None);
+        assert_eq!(state.width("status"), Some(120.0));
+        assert_eq!(state.with_width("id", 64.0).width("id"), Some(64.0));
+    }
+
+    #[test]
+    fn dragged_columns_keep_their_width_and_the_rest_share_the_room() {
+        let state = state(3)
+            .with_width("status", 120.0)
+            .with_width("email", 300.0);
+        assert_eq!(
+            state.lengths(800.0),
+            [
+                Length::Fixed(120.0),
+                Length::Fixed(300.0),
+                Length::FillPortion(1),
+                Length::FillPortion(1),
+            ]
+        );
+    }
+
+    #[test]
+    fn dragged_columns_shrink_together_when_the_table_narrows() {
+        let state = state(3)
+            .with_width("status", 200.0)
+            .with_width("email", 400.0);
+        // 600 dragged and two flexing columns at the minimum need 680.
+        assert_eq!(
+            state.lengths(380.0),
+            [
+                Length::Fixed(100.0),
+                Length::Fixed(200.0),
+                Length::FillPortion(1),
+                Length::FillPortion(1),
+            ]
+        );
+        let lengths = state.lengths(100.0);
+        assert_eq!(lengths[0], Length::Fixed(MIN_COLUMN_WIDTH));
+        assert_eq!(lengths[1], Length::Fixed(MIN_COLUMN_WIDTH));
+    }
+
+    #[test]
+    fn hidden_columns_take_no_room() {
+        let state = state(3).with_width("status", 200.0).with_hidden(["status"]);
+        assert_eq!(state.lengths(300.0), [Length::FillPortion(1); 3]);
     }
 
     #[test]

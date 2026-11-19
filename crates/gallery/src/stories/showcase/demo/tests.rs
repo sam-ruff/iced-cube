@@ -2,6 +2,7 @@ use iced::futures::StreamExt;
 use iced::futures::executor::block_on;
 use iced::keyboard::{Key, Modifiers, key::Named};
 use iced_cube::context_menu;
+use iced_cube::data::data_table;
 use iced_cube::data::log_viewer;
 use iced_cube::data::property_grid::{self, Value};
 use iced_cube::dropdown_menu;
@@ -10,11 +11,11 @@ use iced_cube::navigation::document_tabs::{self, MenuItem};
 use iced_cube::overlay::toast::{self, Variant as ToastVariant};
 use iced_cube::primitives::toggle_group;
 
-use super::data::{self, JobId, Queue, Schedule, Status, StatusFilter};
+use super::data::{self, JobId, Queue, Schedule, Status};
 use super::feed::{self, Update};
 use super::inspector::{Doc, Field, Pane};
 use super::settings::{self, Control};
-use super::{Example, LOG_LIMIT, Message, Page, Pending, RowAction, ThemeMode};
+use super::{Example, LOG_LIMIT, Message, Page, Pending, RowAction, ThemeMode, jobs};
 use crate::app::ThemeChoice;
 use crate::bridge;
 
@@ -43,7 +44,20 @@ fn status(example: &Example, id: u32) -> Option<Status> {
 }
 
 fn visible(example: &Example) -> Vec<u32> {
-    example.visible_jobs().map(|job| job.id.0).collect()
+    example.shown().into_iter().map(|id| id.0).collect()
+}
+
+fn table(example: &mut Example, event: data_table::Event<JobId>) {
+    send(example, Message::Table(event));
+}
+
+fn tick(example: &mut Example, id: u32) {
+    table(example, data_table::Event::Select(JobId(id), true));
+}
+
+fn filter_status(example: &mut Example, status: Status) {
+    let value = Some(status.label().to_owned());
+    table(example, data_table::Event::Filter(jobs::STATUS, value));
 }
 
 fn titles(example: &Example) -> Vec<String> {
@@ -81,7 +95,7 @@ fn an_open_dialog_keeps_keys_from_the_page() {
     send(&mut example, Message::OpenNewJob);
     named(&mut example, Named::ArrowDown);
     ctrl_k(&mut example);
-    assert_eq!(example.cursor, None);
+    assert_eq!(example.cursor(), None);
     assert!(!example.palette_open);
 }
 
@@ -90,10 +104,28 @@ fn palette_commands_switch_pages_and_filter_jobs() {
     let mut example = Example::default();
     example.run(super::Cmd::FailedJobs);
     assert_eq!(example.page.selected(), Some(Page::Jobs));
+    let shown = visible(&example);
+    assert!(!shown.is_empty());
     assert!(
-        example
-            .visible_jobs()
-            .all(|job| job.status == Status::Failed)
+        shown
+            .iter()
+            .all(|id| status(&example, *id) == Some(Status::Failed))
+    );
+    assert_eq!(example.table.filter(jobs::STATUS), Some("Failed"));
+}
+
+#[test]
+fn my_jobs_filters_by_owner_and_drops_other_filters() {
+    let mut example = Example::default();
+    filter_status(&mut example, Status::Failed);
+    example.run(super::Cmd::MyJobs);
+    assert_eq!(example.table.filter(jobs::STATUS), None);
+    let shown = example.shown();
+    assert!(!shown.is_empty());
+    assert!(
+        shown
+            .iter()
+            .all(|id| example.job(*id).is_some_and(|job| job.owner == data::ME))
     );
 }
 
@@ -115,12 +147,16 @@ fn arrows_space_and_delete_drive_the_job_list() {
     let mut example = Example::default();
     example.go(Page::Jobs);
     named(&mut example, Named::ArrowDown);
-    assert_eq!(example.cursor, Some(JobId(1041)));
+    assert_eq!(example.cursor(), Some(JobId(1041)));
+    assert!(
+        example.table.is_focused(),
+        "the ring shows where the keys go"
+    );
     named(&mut example, Named::ArrowDown);
-    assert_eq!(example.cursor, Some(JobId(1042)));
+    assert_eq!(example.cursor(), Some(JobId(1042)));
 
     named(&mut example, Named::Space);
-    assert!(example.job(JobId(1042)).is_some_and(|job| job.checked));
+    assert_eq!(example.selected(), [JobId(1042)]);
 
     named(&mut example, Named::Delete);
     assert_eq!(example.pending, Some(Pending::Delete(JobId(1042))));
@@ -141,16 +177,11 @@ fn shift_f10_opens_the_menu_for_the_current_row() {
 #[test]
 fn bulk_actions_only_touch_the_rows_on_show() {
     let mut example = Example::default();
-    send(
-        &mut example,
-        Message::Filter(StatusFilter::Only(Status::Succeeded)),
-    );
-    send(&mut example, Message::CheckAll(true));
-    send(
-        &mut example,
-        Message::Filter(StatusFilter::Only(Status::Failed)),
-    );
-    send(&mut example, Message::Check(JobId(1047), true));
+    filter_status(&mut example, Status::Succeeded);
+    table(&mut example, data_table::Event::SelectPage(true));
+    assert!(!example.selected().is_empty());
+    filter_status(&mut example, Status::Failed);
+    tick(&mut example, 1047);
     assert_eq!(example.selected(), [JobId(1047)]);
 
     send(&mut example, Message::DeleteSelected);
@@ -165,10 +196,11 @@ fn bulk_actions_only_touch_the_rows_on_show() {
 #[test]
 fn a_hidden_row_loses_its_tick() {
     let mut example = Example::default();
-    send(&mut example, Message::Check(JobId(1049), true));
-    send(&mut example, Message::Search("ledger".into()));
-    send(&mut example, Message::Search(String::new()));
-    assert!(example.job(JobId(1049)).is_some_and(|job| !job.checked));
+    tick(&mut example, 1049);
+    assert!(example.table.is_selected(&JobId(1049)));
+    table(&mut example, data_table::Event::Search("ledger".into()));
+    table(&mut example, data_table::Event::Search(String::new()));
+    assert!(!example.table.is_selected(&JobId(1049)));
 }
 
 #[test]
@@ -209,8 +241,8 @@ fn undo_puts_several_jobs_back_in_their_places() {
     let mut example = Example::default();
     let order = |example: &Example| example.jobs.iter().map(|job| job.id).collect::<Vec<_>>();
     let before = order(&example);
-    send(&mut example, Message::Check(JobId(1042), true));
-    send(&mut example, Message::Check(JobId(1045), true));
+    tick(&mut example, 1042);
+    tick(&mut example, 1045);
     send(&mut example, Message::DeleteSelected);
     send(&mut example, Message::Confirm);
     assert_eq!(example.jobs.len(), before.len() - 2);
@@ -243,17 +275,18 @@ fn new_jobs_wait_behind_the_pill_while_a_row_menu_is_open() {
 }
 
 #[test]
-fn rows_stay_put_while_the_pointer_is_over_the_list() {
+fn new_jobs_wait_while_the_pointer_is_over_the_list() {
     let mut example = Example::default();
-    send(
-        &mut example,
-        Message::Filter(StatusFilter::Only(Status::Running)),
-    );
+    filter_status(&mut example, Status::Running);
     send(&mut example, Message::ListHover(true));
-    feed(&mut example, vec![Update::Succeeded(JobId(1043))]);
-    assert!(visible(&example).contains(&1043));
+    let before = example.table.len();
 
     send(&mut example, Message::Submit);
+    assert_eq!(
+        example.table.len(),
+        before,
+        "no row joins under the pointer"
+    );
     assert_eq!(example.fresh.len(), 1);
     assert_eq!(
         example.fresh_shown(),
@@ -262,9 +295,54 @@ fn rows_stay_put_while_the_pointer_is_over_the_list() {
     );
     send(&mut example, Message::ShowNew);
     assert!(example.fresh.is_empty());
+    assert_eq!(example.table.len(), before + 1);
+}
 
-    send(&mut example, Message::ListHover(false));
+#[test]
+fn the_table_follows_the_worker() {
+    let mut example = Example::default();
+    filter_status(&mut example, Status::Running);
+    assert!(visible(&example).contains(&1043));
+    feed(&mut example, vec![Update::Succeeded(JobId(1043))]);
     assert!(!visible(&example).contains(&1043));
+    assert_eq!(
+        example.table.row(&JobId(1043)).map(|job| job.status),
+        Some(Status::Succeeded)
+    );
+}
+
+#[test]
+fn dragging_a_column_edge_keeps_its_width_as_jobs_change() {
+    let mut example = Example::default();
+    table(
+        &mut example,
+        data_table::Event::Resize(vec![(jobs::JOB, 320.0)]),
+    );
+    feed(&mut example, vec![Update::Succeeded(JobId(1043))]);
+    send(&mut example, Message::Submit);
+    assert_eq!(example.table.width(jobs::JOB), Some(320.0));
+}
+
+#[test]
+fn on_a_phone_a_tap_opens_the_job() {
+    let mut example = Example::default();
+    send(
+        &mut example,
+        Message::Resized(iced::Size::new(390.0, 800.0)),
+    );
+    table(&mut example, data_table::Event::Press(JobId(1042)));
+    assert_eq!(example.active_job(), Some(JobId(1042)));
+
+    let mut example = Example::default();
+    table(&mut example, data_table::Event::Press(JobId(1042)));
+    assert_eq!(
+        example.active_job(),
+        None,
+        "a desktop press only highlights"
+    );
+    assert_eq!(example.cursor(), Some(JobId(1042)));
+    table(&mut example, data_table::Event::Activate(JobId(1042)));
+    assert_eq!(example.active_job(), Some(JobId(1042)));
 }
 
 #[test]
@@ -549,7 +627,7 @@ fn list_keys_leave_an_open_job_alone() {
     open(&mut example, 1042);
     named(&mut example, Named::ArrowDown);
     named(&mut example, Named::Delete);
-    assert_eq!(example.cursor, Some(JobId(1042)));
+    assert_eq!(example.cursor(), Some(JobId(1042)));
     assert_eq!(example.pending, None);
 }
 
@@ -897,9 +975,10 @@ fn notification_settings_filter_worker_toasts() {
 #[test]
 fn pausing_says_how_many_jobs_it_paused() {
     let mut example = Example::default();
-    send(&mut example, Message::Check(JobId(1041), true));
-    send(&mut example, Message::Check(JobId(1045), true));
+    tick(&mut example, 1041);
+    tick(&mut example, 1045);
     send(&mut example, Message::PauseSelected);
+    assert!(example.selected().is_empty(), "pausing clears the ticks");
     assert!(titles(&example).contains(&"Paused 1 job".to_owned()));
     assert_eq!(status(&example, 1045), Some(Status::Queued));
 }
@@ -935,7 +1014,7 @@ fn the_row_menu_changes_the_queue() {
         Message::RowMenu(context_menu::Event::Open(id, iced::Point::ORIGIN)),
     );
     assert!(example.row_menu.is_open_on(&id));
-    assert_eq!(example.cursor, Some(id));
+    assert_eq!(example.cursor(), Some(id));
     send(
         &mut example,
         Message::RowMenu(context_menu::Event::Menu(dropdown_menu::Event::Activate(
@@ -964,4 +1043,104 @@ fn on_a_narrow_window_the_sidebar_opens_as_a_dialog() {
     assert!(!example.drawer);
     example.run(super::Cmd::ToggleSidebar);
     assert!(!example.sidebar);
+}
+
+fn jobs_ui(example: &Example, size: iced::Size) -> iced_test::simulator::Simulator<'_, Message> {
+    iced_cube::theme::set_font(crate::FONT);
+    let settings = iced::Settings {
+        default_font: crate::FONT,
+        fonts: crate::FONT_FILES
+            .iter()
+            .map(|font| (*font).into())
+            .collect(),
+        ..iced::Settings::default()
+    };
+    iced_test::simulator::Simulator::with_size(settings, size, example.view())
+}
+
+fn jobs_at(size: iced::Size) -> Example {
+    let mut example = Example::default();
+    send(&mut example, Message::Resized(size));
+    example.go(Page::Jobs);
+    example
+}
+
+#[test]
+fn the_job_list_is_a_table_with_filters_and_a_columns_menu() {
+    let size = iced::Size::new(1280.0, 800.0);
+    let example = jobs_at(size);
+    let mut ui = jobs_ui(&example, size);
+    for label in [
+        "Job",
+        "Owner",
+        "Queue",
+        "Progress",
+        "Owner: All",
+        "Status: All",
+        "Columns",
+        "nightly-orders-etl",
+        "Showing 1-9 of 9, 0 selected",
+    ] {
+        assert!(ui.find(label).is_ok(), "{label}");
+    }
+}
+
+#[test]
+fn dragging_a_heading_edge_in_the_job_list_resizes_the_column() {
+    use iced::mouse;
+
+    let size = iced::Size::new(1280.0, 800.0);
+    let mut example = jobs_at(size);
+    let mut ui = jobs_ui(&example, size);
+    let owner = ui.find("Owner").expect("heading").bounds();
+    let status = ui.find("Queue").expect("heading").bounds();
+    // The Owner column ends where the Queue column's padding begins.
+    let from = iced::Point::new(status.x - 12.0, owner.center_y());
+    let to = iced::Point::new(from.x + 60.0, from.y);
+    ui.point_at(from);
+    let _ = ui.simulate([iced::Event::Mouse(mouse::Event::ButtonPressed(
+        mouse::Button::Left,
+    ))]);
+    ui.point_at(to);
+    let _ = ui.simulate([
+        iced::Event::Mouse(mouse::Event::CursorMoved { position: to }),
+        iced::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+    ]);
+    let messages: Vec<Message> = ui.into_messages().collect();
+    for message in messages {
+        send(&mut example, message);
+    }
+    assert!(example.table.width(jobs::OWNER).is_some(), "the edge moved");
+    assert!(
+        example.table.width(jobs::JOB).is_some(),
+        "the column before it holds still"
+    );
+    assert_eq!(example.table.sort(), None, "a drag does not sort");
+
+    let mut ui = jobs_ui(&example, size);
+    let moved = ui.find("Queue").expect("heading").bounds();
+    assert_eq!((moved.x - status.x).round(), 60.0);
+}
+
+#[test]
+fn on_a_phone_the_job_list_becomes_cards() {
+    let size = iced::Size::new(390.0, 800.0);
+    let example = jobs_at(size);
+    let mut ui = jobs_ui(&example, size);
+    assert!(ui.find("nightly-orders-etl").is_ok());
+    assert!(ui.find("Select all").is_ok(), "cards have no header row");
+    assert!(ui.find("Status: All").is_ok());
+    assert!(ui.find("Default order").is_ok(), "a select sorts the cards");
+}
+
+#[test]
+fn the_job_list_footer_stays_on_screen_at_every_width() {
+    for width in [390.0, 700.0, 1000.0, 1500.0] {
+        let size = iced::Size::new(width, 800.0);
+        let example = jobs_at(size);
+        let mut ui = jobs_ui(&example, size);
+        let pager = ui.find("Page 1 of 1").expect("pager").bounds();
+        assert!(pager.height > 0.0, "{width}: {pager:?}");
+        assert!(pager.y + pager.height <= size.height, "{width}: {pager:?}");
+    }
 }

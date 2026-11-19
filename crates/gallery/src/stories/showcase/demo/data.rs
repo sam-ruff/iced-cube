@@ -55,41 +55,6 @@ impl Status {
     }
 }
 
-/// The filter above the job list.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StatusFilter {
-    All,
-    Only(Status),
-}
-
-impl StatusFilter {
-    pub const ALL: [StatusFilter; 7] = [
-        StatusFilter::All,
-        StatusFilter::Only(Status::Running),
-        StatusFilter::Only(Status::Queued),
-        StatusFilter::Only(Status::Scheduled),
-        StatusFilter::Only(Status::Paused),
-        StatusFilter::Only(Status::Failed),
-        StatusFilter::Only(Status::Succeeded),
-    ];
-
-    pub fn allows(self, status: Status) -> bool {
-        match self {
-            StatusFilter::All => true,
-            StatusFilter::Only(only) => only == status,
-        }
-    }
-}
-
-impl fmt::Display for StatusFilter {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            StatusFilter::All => f.write_str("All statuses"),
-            StatusFilter::Only(status) => f.write_str(status.label()),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Queue {
     High,
@@ -177,7 +142,6 @@ pub struct Job {
     /// Share of the work done per tick of the simulated worker.
     pub speed: f32,
     pub started: String,
-    pub checked: bool,
     pub schedule: Schedule,
     pub notes: String,
     /// Automatic retries used since the job last started from the beginning.
@@ -204,7 +168,6 @@ impl Job {
             fails_at: (id.0 % 5 == 2).then_some(0.5 + (id.0 % 4) as f32 * 0.1),
             speed: 0.015 + (id.0 % 3) as f32 * 0.01,
             started: String::from("-"),
-            checked: false,
             schedule: Schedule::Once,
             notes: String::new(),
             attempts: 0,

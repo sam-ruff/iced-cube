@@ -457,3 +457,134 @@ fn a_thousand_rows_only_build_the_page() {
     let elapsed = started.elapsed();
     assert!(elapsed < Duration::from_secs(5), "took {elapsed:?}");
 }
+
+#[test]
+fn a_filling_table_keeps_its_footer_in_view() {
+    let state = state(60).with_page_sizes([50]);
+    let element: Element<'_, Message> = data_table(&state)
+        .height(Length::Fill)
+        .on_event(Message::Table)
+        .into();
+    let mut ui = desktop(element);
+    let pager = ui.find("Page 1 of 2").expect("pager").bounds();
+    assert!(pager.height > 0.0, "{pager:?}");
+    assert!(pager.y + pager.height <= 700.0, "{pager:?}");
+    assert!(
+        ui.find("user50@example.com").is_err(),
+        "rows below the view are not built"
+    );
+}
+
+/// A point on the right edge of a column's header cell. The columns share
+/// 800 pixels as 480, 160 and 160 until one is dragged.
+fn edge(header: iced::Rectangle, x: f32) -> Point {
+    Point::new(x, header.center_y())
+}
+
+/// What the table sent, apart from taking focus.
+fn changes(ui: Simulator<'_, Message>) -> Vec<Event<u32>> {
+    events(ui)
+        .into_iter()
+        .filter(|event| !matches!(event, Event::Focus(_)))
+        .collect()
+}
+
+fn drag(ui: &mut Simulator<'_, Message>, from: Point, to: Point) {
+    ui.point_at(from);
+    let _ = ui.simulate([iced::Event::Mouse(mouse::Event::ButtonPressed(
+        mouse::Button::Left,
+    ))]);
+    ui.point_at(to);
+    let _ = ui.simulate([
+        iced::Event::Mouse(mouse::Event::CursorMoved { position: to }),
+        iced::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+    ]);
+}
+
+#[test]
+fn dragging_a_header_edge_resizes_its_column() {
+    let mut state = state(3);
+    let mut ui = desktop(view(&state));
+    let before = ui.find("Status").expect("header").bounds();
+    let from = edge(ui.find("Email").expect("header").bounds(), 480.0);
+    drag(&mut ui, from, Point::new(400.0, from.y));
+    let emitted = changes(ui);
+    assert_eq!(
+        emitted,
+        [Event::Resize(vec![("email", 400.0)])],
+        "the drag resizes and does not sort"
+    );
+    let _ = apply(emitted, &mut state);
+
+    let mut ui = desktop(view(&state));
+    let after = ui.find("Status").expect("header").bounds();
+    assert_eq!(before.x - after.x, 80.0, "the next column follows the edge");
+    let amount = ui.find("$10.00").expect("cell").bounds();
+    assert!(
+        amount.x + amount.width <= 800.0,
+        "the other columns still fill the table"
+    );
+}
+
+#[test]
+fn a_drag_holds_the_columns_before_it_still() {
+    let state = state(3);
+    let mut ui = desktop(view(&state));
+    let from = edge(ui.find("Status").expect("header").bounds(), 640.0);
+    drag(&mut ui, from, Point::new(700.0, from.y));
+    assert_eq!(
+        changes(ui),
+        [Event::Resize(vec![("email", 480.0), ("status", 220.0)])]
+    );
+}
+
+#[test]
+fn a_column_cannot_be_dragged_past_what_the_others_can_give() {
+    let state = state(3);
+    let mut ui = desktop(view(&state));
+    let from = edge(ui.find("Email").expect("header").bounds(), 480.0);
+    drag(&mut ui, from, Point::new(790.0, from.y));
+    // The two columns after it keep 40 pixels each.
+    assert_eq!(changes(ui), [Event::Resize(vec![("email", 720.0)])]);
+
+    let mut ui = desktop(view(&state));
+    drag(&mut ui, from, Point::new(10.0, from.y));
+    assert_eq!(changes(ui), [Event::Resize(vec![("email", 40.0)])]);
+}
+
+#[test]
+fn a_double_click_on_a_header_edge_resets_the_width() {
+    let mut state = state(3).with_width("email", 300.0);
+    let mut ui = desktop(view(&state));
+    let at = edge(ui.find("Email").expect("header").bounds(), 300.0);
+    click_at(&mut ui, at);
+    click_at(&mut ui, at);
+    let emitted = changes(ui);
+    assert_eq!(emitted, [Event::ResetWidth("email")]);
+    let _ = apply(emitted, &mut state);
+    assert_eq!(state.width("email"), None);
+}
+
+#[test]
+fn a_column_that_is_not_resizable_has_no_edge_to_drag() {
+    let columns = columns().into_iter().map(|column| column.resizable(false));
+    let state = State::new(columns, payments(3), |p| p.id);
+    let mut ui = desktop(view(&state));
+    let from = edge(ui.find("Email").expect("header").bounds(), 480.0);
+    drag(&mut ui, from, Point::new(400.0, from.y));
+    assert!(
+        events(ui)
+            .iter()
+            .all(|event| !matches!(event, Event::Resize(_))),
+    );
+}
+
+#[test]
+fn a_disabled_table_does_not_resize() {
+    let state = state(3);
+    let element: Element<'_, Message> = data_table(&state).into();
+    let mut ui = desktop(element);
+    let from = edge(ui.find("Email").expect("header").bounds(), 480.0);
+    drag(&mut ui, from, Point::new(400.0, from.y));
+    assert_eq!(events(ui), []);
+}
