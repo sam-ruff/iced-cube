@@ -167,8 +167,11 @@ calendar = [
     "iced/advanced",
     "button",
     "icon-button",
+    "input",
+    "popover",
     "scroll-area",
     "select",
+    "switch",
     "tappable",
     "dep:jiff",
 ]

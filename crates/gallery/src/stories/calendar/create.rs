@@ -1,11 +1,10 @@
 use iced::Element;
 use iced::widget::container;
-use iced_cube::data::calendar::{
-    self, Draft, Entries, Entry, EntryId, Output, View, calendar, instant, when_label,
-};
+use iced_cube::button;
+use iced_cube::data::calendar::editor::{self, editor};
+use iced_cube::data::calendar::{self, Entries, Entry, EntryId, Output, View, calendar, instant};
 use iced_cube::overlay::dialog::dialog;
 use iced_cube::primitives::button::Variant;
-use iced_cube::{button, input};
 use jiff::Timestamp;
 use jiff::civil::{date, time};
 use jiff::tz::TimeZone;
@@ -13,24 +12,17 @@ use jiff::tz::TimeZone;
 #[derive(Debug, Clone)]
 pub enum Message {
     Calendar(calendar::Event),
-    Title(String),
+    Form(editor::Event),
     Save,
     Delete,
     Close,
 }
 
-/// What the dialog is editing.
-#[derive(Debug, Clone, Copy)]
-enum Editing {
-    New(Draft),
-    Existing(EntryId),
-}
-
 #[derive(Debug)]
 pub struct Example {
     calendar: calendar::State,
-    editing: Option<Editing>,
-    title: String,
+    /// The entry form, while the dialog is open.
+    form: Option<editor::State>,
 }
 
 /// A time in June 2026.
@@ -47,8 +39,7 @@ impl Default for Example {
 
         Self {
             calendar: calendar::State::at(at(18, 10, 20), entries).with_view(View::Week),
-            editing: None,
-            title: String::new(),
+            form: None,
         }
     }
 }
@@ -57,49 +48,40 @@ impl Example {
     pub fn update(&mut self, message: Message) {
         match message {
             Message::Calendar(event) => match self.calendar.update(event) {
-                // A drag on empty space, or a second press on a day or a time.
+                // A drag on empty space, or a second press on a day or a
+                // time: a form for a new entry over that span.
                 Some(Output::Requested(draft)) => {
-                    self.title.clear();
-                    self.editing = Some(Editing::New(draft));
+                    let time_zone = self.calendar.time_zone();
+                    self.form = Some(editor::State::new(&draft, time_zone));
                 }
-                // A second press on an entry.
+                // A second press on an entry: a form to change it.
                 Some(Output::Opened { entry, .. }) => {
-                    let Some(opened) = self.calendar.entries().get(entry) else {
-                        return;
-                    };
-                    self.title = opened.title().to_owned();
-                    self.editing = Some(Editing::Existing(entry));
+                    let entry = self.calendar.entries().get(entry);
+                    let time_zone = self.calendar.time_zone();
+                    self.form = entry.map(|entry| editor::State::edit(entry, time_zone));
                 }
                 _ => {}
             },
-            Message::Title(title) => self.title = title,
-            Message::Save => {
-                let title = match self.title.trim() {
-                    "" => "New entry",
-                    title => title,
-                };
-                let entry = match self.editing.take() {
-                    Some(Editing::New(draft)) => {
-                        let id = self.calendar.entries().next_id();
-                        Some(Entry::at(id, title, draft.when))
-                    }
-                    Some(Editing::Existing(id)) => {
-                        let existing = self.calendar.entries().get(id).cloned();
-                        existing.map(|entry| entry.titled(title))
-                    }
-                    None => None,
-                };
-                if let Some(entry) = entry {
-                    // Nothing is added until the app inserts it.
-                    let _ = self.calendar.update(calendar::Event::Insert(entry));
+            Message::Form(event) => {
+                if let Some(form) = &mut self.form {
+                    form.update(event);
                 }
             }
+            Message::Save => {
+                let Some(form) = self.form.take() else {
+                    return;
+                };
+                // A new entry takes a fresh id; a changed one keeps its
+                // own and replaces the entry it came from.
+                let entry = form.entry(self.calendar.entries().next_id());
+                let _ = self.calendar.update(calendar::Event::Insert(entry));
+            }
             Message::Delete => {
-                if let Some(Editing::Existing(id)) = self.editing.take() {
+                if let Some(id) = self.form.take().and_then(|form| form.id()) {
                     let _ = self.calendar.update(calendar::Event::Remove(id));
                 }
             }
-            Message::Close => self.editing = None,
+            Message::Close => self.form = None,
         }
     }
 
@@ -112,35 +94,31 @@ impl Example {
         )
         .padding(24);
 
-        let time_zone = self.calendar.time_zone();
-        let (heading, when) = match self.editing {
-            Some(Editing::New(draft)) => ("New entry", when_label(&draft.when, time_zone)),
-            Some(Editing::Existing(id)) => {
-                let entry = self.calendar.entries().get(id);
-                let when = entry.map(|entry| when_label(&entry.when(), time_zone));
-                ("Edit entry", when.unwrap_or_default())
-            }
-            None => ("", String::new()),
+        let Some(form) = &self.form else {
+            return dialog(base).into();
         };
-
-        let mut editor = dialog(base)
-            .open(self.editing.is_some())
+        let heading = if form.is_new() {
+            "New entry"
+        } else {
+            "Edit entry"
+        };
+        let mut editing = dialog(base)
+            .open(true)
             .title(heading)
-            .description(when)
             .body(
-                input("Title", &self.title)
-                    .on_input(Message::Title)
+                editor(form)
+                    .on_event(Message::Form)
                     .on_submit(Message::Save),
             )
             .on_dismiss(Message::Close);
-        if matches!(self.editing, Some(Editing::Existing(_))) {
-            editor = editor.action(
+        if !form.is_new() {
+            editing = editing.action(
                 button("Delete")
                     .variant(Variant::Destructive)
                     .on_press(Message::Delete),
             );
         }
-        editor
+        editing
             .action(
                 button("Cancel")
                     .variant(Variant::Outline)

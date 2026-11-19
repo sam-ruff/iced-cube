@@ -55,6 +55,12 @@ api:
     description: "Hides the Today button, the arrows, the title and the menu of views, or sets the size. The calendar fills the space it is given."
   - name: "calendar::scroll_to_hour(hour, hour_height) / calendar::scroll_id()"
     description: "A task that scrolls the week or day view so an hour is at the top, such as 8 when the calendar opens, and the id of the scrollable for anything else."
+  - name: "editor::State::new(&draft, &time_zone) / editor::State::edit(&entry, &time_zone)"
+    description: "The state of the entry form, started from the span the calendar asked for or from an existing entry."
+  - name: "editor(&form).on_event(f).on_submit(message)"
+    description: "Renders the form: title, all day, start and end date and time, repeat and colour. on_submit is sent on Enter in the title. .shortcuts(Shortcuts) sets the title field's editing shortcuts."
+  - name: "form.update(editor::Event) / form.entry(new_id) / form.when()"
+    description: "Applies a change, and gives the entry or span the form describes. A changed entry keeps its id; a blank title is saved as \"(No title)\"."
   - name: "Scheduler::new().with(trigger)"
     description: "Collects triggers. Chain .resume_from(watermark) to receive what was missed since a saved time, and .grace(duration) to change what counts as late."
   - name: "Trigger::new(key).at(anchor) / .before(anchor, lead) / .after(anchor, delay) / .on(change)"
@@ -98,7 +104,30 @@ The first press on a day, a time or an entry selects it. A press on what is alre
 
 In the week and day views a mouse can also drag: across empty space to ask for an entry of that length, on an entry to move it, and on its lower edge to change when it ends. Drags snap to 15 minutes. A finger scrolls the hours instead, so on a touch screen entries are created with two taps and edited in whatever the app opens.
 
-The calendar has no editor of its own. `Requested` and `Opened` are where the app shows its dialog or side panel, as the "Creating and editing" example does.
+`Requested` and `Opened` are where the app shows its dialog or side panel, as the "Creating and editing" example does.
+
+## The entry form
+
+`calendar::editor` is a ready-made form for that dialog: a title, an "All day" switch, a start and an end each with a date and a time, how the entry repeats and its colour. It has no buttons, so it fits a dialog, a popover or a side panel with whatever actions the app wants.
+
+```rust
+use iced_cube::data::calendar::editor::{self, editor};
+
+// The calendar asked for a new entry, or the user opened one.
+let form = editor::State::new(&draft, calendar.time_zone());
+let form = editor::State::edit(entry, calendar.time_zone());
+
+// In the dialog's body.
+editor(&form).on_event(Message::Form).on_submit(Message::Save)
+
+// On Save. A new entry takes the id given; a changed one keeps its own.
+let entry = form.entry(calendar.entries().next_id());
+calendar.update(calendar::Event::Insert(entry));
+```
+
+A date opens a small month to pick from. The time menus step in quarter hours: the start's opens an hour before the time chosen, and the end's begins just after the start. Moving the start carries the end along, so the entry keeps its length, and an end earlier than the start on the same day is taken to mean the next day. Turning "All day" on hides the times and keeps the dates. A repeat rule the form does not offer, such as every two weeks, shows as "Custom" and is saved unchanged.
+
+The form is optional. An app that wants different fields builds its own and sends `Event::Insert`.
 
 ## Read-only calendars and your own controls
 

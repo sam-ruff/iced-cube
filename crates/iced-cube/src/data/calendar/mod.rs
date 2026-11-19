@@ -75,6 +75,10 @@
 //! empty space asks for an entry of that length, a drag on an entry moves
 //! it and a drag on its lower edge changes when it ends.
 //!
+//! The calendar only asks; the app decides what to show. [`editor`] is a
+//! ready-made form for that: title, all day, start and end date and time,
+//! repeat and colour.
+//!
 //! # Triggers
 //!
 //! See [`schedule`] for telling the app when entries are created, due or
@@ -86,6 +90,7 @@
 //! [`Action`]s; see [`default_keymap`] and [`crate::keys`].
 
 mod agenda;
+pub mod editor;
 pub mod entry;
 pub mod layout;
 mod month;

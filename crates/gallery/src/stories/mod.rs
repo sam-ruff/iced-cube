@@ -910,7 +910,7 @@ crate::stories! {
     }
     CalendarCreate => calendar::create {
         id: "calendar/create", component: "calendar", title: "Creating and editing",
-        description: "Drag across empty space, or press a time twice, and the calendar asks for an entry there; the app shows a dialog and inserts it. Press an entry twice to rename or delete it.",
+        description: "Drag across empty space, or press a time twice, and the calendar asks for an entry there. The app opens the entry form in a dialog: title, all day, start and end date and time, repeat and colour. Press an entry twice to change or delete it.",
         file: "calendar/create.rs", height: 480, edge: true,
     }
     CalendarReadOnly => calendar::read_only {
