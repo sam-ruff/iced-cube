@@ -1,3 +1,9 @@
+## [0.0.15](https://github.com/sam-ruff/iced-cube/compare/v0.0.14...v0.0.15) (2026-11-22)
+
+### Features
+
+* **calendar:** calendar with six views and triggers for entries ([#10](https://github.com/sam-ruff/iced-cube/issues/10)) ([c0d3938](https://github.com/sam-ruff/iced-cube/commit/c0d39381a8bcd6e00264c2960e1627cdfcf949db))
+
 ## [0.0.14](https://github.com/sam-ruff/iced-cube/compare/v0.0.13...v0.0.14) (2026-11-19)
 
 ### Features
