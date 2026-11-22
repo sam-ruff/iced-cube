@@ -431,3 +431,97 @@ fn collapsible_panels_keep_their_minimums_on_a_phone() {
         "button fits its pane, ends at {right}"
     );
 }
+
+/// A calendar fills its frame, so it is checked in a frame as tall as a
+/// phone gives it.
+fn render_tall(gallery: &Gallery) -> Simulator<'_, gallery::Message> {
+    let settings = iced::Settings {
+        default_font: FONT,
+        fonts: FONT_FILES.iter().map(|font| (*font).into()).collect(),
+        ..iced::Settings::default()
+    };
+    Simulator::with_size(settings, Size::new(PHONE.width, 560.0), gallery.view())
+}
+
+/// Whether `label` is drawn on one line inside the frame, clear of the
+/// gallery's padding.
+fn inside(ui: &mut Simulator<'_, gallery::Message>, label: &str) -> bool {
+    let Ok(target) = ui.find(label) else {
+        return false;
+    };
+    let bounds = target.bounds();
+    bounds.x >= 24.0 && bounds.x + bounds.width <= PHONE.width - 24.0 && bounds.height < 24.0
+}
+
+#[test]
+fn the_calendar_header_fits_a_phone_in_every_view() {
+    for (story, title, view) in [
+        ("calendar/month", "June 2026", "Month"),
+        ("calendar/week", "15 - 21 Jun 2026", "Week"),
+        ("calendar/agenda", "June 2026", "Schedule"),
+        ("calendar/year", "2026", "Year"),
+    ] {
+        let gallery = open(story);
+        let mut ui = render_tall(&gallery);
+        for label in ["Today", title, view] {
+            assert!(inside(&mut ui, label), "{story}: {label}");
+        }
+        // The title and the menu of views share a line above the buttons.
+        let title = ui.find(title).expect("title").bounds();
+        let menu = ui.find(view).expect("menu").bounds();
+        let today = ui.find("Today").expect("today").bounds();
+        assert!(title.x + title.width <= menu.x, "{story}: side by side");
+        assert!(today.y > menu.y + menu.height, "{story}: buttons below");
+    }
+}
+
+#[test]
+fn a_year_on_a_phone_is_one_month_wide() {
+    let gallery = open("calendar/year");
+    let mut ui = render_tall(&gallery);
+    let january = ui.find("January").expect("first month").bounds();
+    let february = ui.find("February").expect("second month").bounds();
+    assert_eq!(january.x, february.x, "months stack");
+    assert!(february.y > january.y);
+    assert!(january.x >= 24.0 && january.x + 7.0 * 32.0 <= PHONE.width - 24.0);
+}
+
+#[test]
+fn a_month_on_a_phone_lists_the_day_under_dots() {
+    let gallery = open("calendar/month");
+    let mut ui = render_tall(&gallery);
+    assert!(ui.find("Conference").is_err(), "no bars across the days");
+    for label in [
+        "Thursday 18 June (today)",
+        "Design review",
+        "Lunch with Ada",
+    ] {
+        assert!(inside(&mut ui, label), "{label}");
+    }
+    // All seven days of a week share the width.
+    let first = ui.find("8").expect("Monday").bounds();
+    let last = ui.find("14").expect("Sunday").bounds();
+    assert_eq!(first.y, last.y);
+    assert!(last.x + last.width <= PHONE.width - 24.0);
+}
+
+#[test]
+fn a_week_on_a_phone_shows_one_day_at_full_width() {
+    let gallery = open("calendar/week");
+    let mut ui = render_tall(&gallery);
+    assert!(ui.find("Planning").is_err(), "Tuesday is not on show");
+    for label in ["Lunch with Ada", "Design review", "Interview", "15", "21"] {
+        assert!(inside(&mut ui, label), "{label}");
+    }
+    assert!(ui.find("12:30-13:30").is_ok(), "room for the whole time");
+}
+
+#[test]
+fn reminder_cards_wrap_their_buttons_on_a_phone() {
+    let gallery = open("calendar/missed");
+    let mut ui = render_tall(&gallery);
+    for label in ["Retro", "Wait 5 minutes", "Snooze 10 minutes", "Dismiss"] {
+        assert!(inside(&mut ui, label), "{label}");
+    }
+    assert!(inside(&mut ui, "Missed, 17 h 30 min late"));
+}
