@@ -1,5 +1,9 @@
 //! A form for creating or changing an entry: its title, whether it lasts
-//! all day, when it starts and ends, how it repeats and its colour.
+//! all day, when it starts and ends, how it repeats and when the repeats
+//! stop, its colour, where it is and any notes.
+//!
+//! The form is as tall as its fields, and grows when a repeat is chosen.
+//! Where room is short, put it in a scroll area.
 //!
 //! The form has no buttons of its own. Put it in a dialog, a popover or a
 //! side panel with whatever actions the app wants, start it from the
@@ -8,7 +12,7 @@
 //!
 //! ```
 //! use iced_cube::data::calendar::editor;
-//! use iced_cube::data::calendar::{Draft, EntryId, When, instant};
+//! use iced_cube::data::calendar::{Draft, EntryId, Repeat, When, instant};
 //! use jiff::civil::{date, time};
 //! use jiff::tz::TimeZone;
 //!
@@ -21,12 +25,22 @@
 //! // Starting an hour later keeps the entry an hour long.
 //! form.update(editor::Event::Time(editor::Field::Start, 12 * 60));
 //!
+//! // Every two weeks, six times in all.
+//! form.update(editor::Event::Repeats(editor::Repeats::Weekly));
+//! form.update(editor::Event::Interval(String::from("2")));
+//! form.update(editor::Event::Stops(editor::Stops::After));
+//! form.update(editor::Event::Count(String::from("6")));
+//! form.update(editor::Event::Location(String::from("Room 4")));
+//!
 //! let entry = form.entry(EntryId(7));
 //! assert_eq!(entry.title(), "Retrospective");
 //! assert_eq!(entry.when(), When::timed(at(12), at(13)));
+//! assert_eq!(entry.repeat_of(), Some(Repeat::weekly().interval(2).count(6)));
+//! assert_eq!(entry.location_of(), Some("Room 4"));
 //! ```
 
 use iced::widget::button::Status;
+use iced::widget::text_editor::{Action, Content};
 use iced::widget::{self, Column, Row, Space, column, container, row, text};
 use iced::{Alignment, Element, Length, Theme};
 use jiff::civil::{Date, Weekday};
@@ -36,9 +50,10 @@ use jiff::{Timestamp, ToSpan};
 use super::entry::{Draft, Entry, EntryId, Tone, When, add_days, date_of};
 use super::layout::{DAY_MINUTES, instant_at, minute_on, month_weeks};
 use super::parts::weekday_label;
-use super::repeat::{Frequency, Repeat};
+use super::repeat::{Ends, Frequency, Repeat};
 use super::style;
 use crate::forms::select::select;
+use crate::forms::textarea::textarea;
 use crate::lucide;
 use crate::overlay::anchored::Align;
 use crate::overlay::popover::popover;
@@ -55,10 +70,26 @@ pub const UNTITLED: &str = "(No title)";
 /// How long a new timed entry is when the draft was for whole days.
 pub const DEFAULT_MINUTES: u16 = 60;
 
+/// How many occurrences a new "after" ending starts at.
+pub const DEFAULT_COUNT: u32 = 10;
+/// The most digits the interval and the count take.
+pub const NUMBER_DIGITS: usize = 3;
+
 /// The side of a day in the date picker.
 const CELL: f32 = 32.0;
 /// The width of a time's menu.
 const TIME_WIDTH: f32 = 96.0;
+/// The width of the names beside the fields.
+const NAME_WIDTH: f32 = 48.0;
+/// The width of a field for a small number.
+const NUMBER_WIDTH: f32 = 64.0;
+/// The height the notes start at, about two lines.
+const NOTES_HEIGHT: f32 = 64.0;
+
+/// The id of the notes field, for focusing it.
+pub fn notes_id() -> widget::Id {
+    widget::Id::new("iced-cube-calendar-notes")
+}
 
 /// The start or the end of the entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -98,7 +129,7 @@ impl std::fmt::Display for TimeOfDay {
     }
 }
 
-/// How the entry repeats, as the form offers it.
+/// Whether the entry repeats and in what unit, as the menu offers it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Repeats {
     #[default]
@@ -107,9 +138,6 @@ pub enum Repeats {
     Weekly,
     Monthly,
     Yearly,
-    /// A rule the form does not offer, such as every two weeks, kept as it
-    /// was when the entry is saved.
-    Custom(Repeat),
 }
 
 impl Repeats {
@@ -122,31 +150,42 @@ impl Repeats {
         Repeats::Yearly,
     ];
 
-    /// The choice that stands for `repeat`.
-    pub fn of(repeat: Option<Repeat>) -> Self {
-        let Some(repeat) = repeat else {
-            return Repeats::Never;
-        };
-        if repeat != Repeat::new(repeat.frequency()) {
-            return Repeats::Custom(repeat);
-        }
-        match repeat.frequency() {
-            Frequency::Daily => Repeats::Daily,
-            Frequency::Weekly => Repeats::Weekly,
-            Frequency::Monthly => Repeats::Monthly,
-            Frequency::Yearly => Repeats::Yearly,
+    /// The choice that stands for `frequency`.
+    pub fn of(frequency: Option<Frequency>) -> Self {
+        match frequency {
+            None => Repeats::Never,
+            Some(Frequency::Daily) => Repeats::Daily,
+            Some(Frequency::Weekly) => Repeats::Weekly,
+            Some(Frequency::Monthly) => Repeats::Monthly,
+            Some(Frequency::Yearly) => Repeats::Yearly,
         }
     }
 
-    /// The rule to save.
-    pub fn rule(self) -> Option<Repeat> {
+    /// The unit the entry repeats in, or `None` when it does not.
+    pub fn frequency(self) -> Option<Frequency> {
         match self {
             Repeats::Never => None,
-            Repeats::Daily => Some(Repeat::daily()),
-            Repeats::Weekly => Some(Repeat::weekly()),
-            Repeats::Monthly => Some(Repeat::monthly()),
-            Repeats::Yearly => Some(Repeat::yearly()),
-            Repeats::Custom(repeat) => Some(repeat),
+            Repeats::Daily => Some(Frequency::Daily),
+            Repeats::Weekly => Some(Frequency::Weekly),
+            Repeats::Monthly => Some(Frequency::Monthly),
+            Repeats::Yearly => Some(Frequency::Yearly),
+        }
+    }
+
+    /// The name of the unit after a number: "week" after 1, "weeks" after
+    /// any other.
+    pub fn unit(self, interval: u32) -> &'static str {
+        let one = interval == 1;
+        match self {
+            Repeats::Never => "",
+            Repeats::Daily if one => "day",
+            Repeats::Daily => "days",
+            Repeats::Weekly if one => "week",
+            Repeats::Weekly => "weeks",
+            Repeats::Monthly if one => "month",
+            Repeats::Monthly => "months",
+            Repeats::Yearly if one => "year",
+            Repeats::Yearly => "years",
         }
     }
 }
@@ -159,7 +198,32 @@ impl std::fmt::Display for Repeats {
             Repeats::Weekly => "Weekly",
             Repeats::Monthly => "Monthly",
             Repeats::Yearly => "Yearly",
-            Repeats::Custom(_) => "Custom",
+        })
+    }
+}
+
+/// How a repeating entry stops, as the menu offers it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum Stops {
+    #[default]
+    Never,
+    /// On a date picked beside the menu.
+    On,
+    /// After a number of occurrences typed beside the menu.
+    After,
+}
+
+impl Stops {
+    /// The choices in the menu.
+    pub const ALL: [Stops; 3] = [Stops::Never, Stops::On, Stops::After];
+}
+
+impl std::fmt::Display for Stops {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Stops::Never => "Never",
+            Stops::On => "On a date",
+            Stops::After => "After",
         })
     }
 }
@@ -181,7 +245,7 @@ impl std::fmt::Display for Colour {
 }
 
 /// Changes to the form.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Event {
     Title(String),
     AllDay(bool),
@@ -190,23 +254,44 @@ pub enum Event {
     /// Sets the start or end time, in minutes from midnight.
     Time(Field, u16),
     Repeats(Repeats),
+    /// The text of the "every" field. Only its digits are kept.
+    Interval(String),
+    Stops(Stops),
+    /// Sets the last date of the repeat, and closes the date picker.
+    Until(Date),
+    /// The text of the "after" field. Only its digits are kept.
+    Count(String),
     Tone(Tone),
-    /// Opens the date picker for a field, or closes it with `None`.
+    Location(String),
+    /// An edit to the notes.
+    Notes(Action),
+    /// Opens the date picker for a field, or closes whichever is open
+    /// with `None`.
     Picker(Option<Field>),
+    /// Opens or closes the date picker for the last date of the repeat.
+    UntilPicker(bool),
     /// Moves the date picker by this many months.
     PickerMonth(i32),
+}
+
+/// A date the form picks from a month.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Target {
+    Field(Field),
+    Until,
 }
 
 /// A date picker that is open: whose it is, and the month it shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Picker {
-    field: Field,
+    target: Target,
     month: Date,
 }
 
 /// What the form holds. The end is kept at or after the start: moving the
-/// start moves the end with it, so the entry keeps its length.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// start moves the end with it, so the entry keeps its length. The last
+/// date of a repeat is kept on or after the start.
+#[derive(Debug, Clone)]
 pub struct State {
     id: Option<EntryId>,
     title: String,
@@ -214,11 +299,30 @@ pub struct State {
     start: (Date, u16),
     end: (Date, u16),
     repeats: Repeats,
+    interval: String,
+    stops: Stops,
+    until: Date,
+    count: String,
     tone: Tone,
     tag: Option<String>,
+    location: String,
+    notes: Content,
     time_zone: TimeZone,
     week_start: Weekday,
     picker: Option<Picker>,
+}
+
+/// The digits of `text`, up to [`NUMBER_DIGITS`] of them.
+fn digits(text: &str) -> String {
+    text.chars()
+        .filter(char::is_ascii_digit)
+        .take(NUMBER_DIGITS)
+        .collect()
+}
+
+/// The number a field holds, at least 1. An empty field counts as 1.
+fn number(text: &str) -> u32 {
+    text.parse::<u32>().unwrap_or(1).max(1)
 }
 
 impl State {
@@ -229,14 +333,32 @@ impl State {
 
     /// A form for changing `entry`.
     pub fn edit(entry: &Entry, time_zone: &TimeZone) -> Self {
-        Self {
+        let mut form = Self {
             id: Some(entry.id()),
             title: entry.title().to_owned(),
-            repeats: Repeats::of(entry.repeat_of()),
             tone: entry.tone_of(),
             tag: entry.tag_of().map(str::to_owned),
+            location: entry.location_of().unwrap_or_default().to_owned(),
+            notes: Content::with_text(entry.notes_of().unwrap_or_default()),
             ..Self::over(entry.when(), time_zone)
+        };
+        let Some(repeat) = entry.repeat_of() else {
+            return form;
+        };
+        form.repeats = Repeats::of(Some(repeat.frequency()));
+        form.interval = repeat.every().to_string();
+        match repeat.ends() {
+            Ends::Never => {}
+            Ends::On(date) => {
+                form.stops = Stops::On;
+                form.until = date;
+            }
+            Ends::After(count) => {
+                form.stops = Stops::After;
+                form.count = count.to_string();
+            }
         }
+        form
     }
 
     fn over(when: When, time_zone: &TimeZone) -> Self {
@@ -256,8 +378,14 @@ impl State {
             start,
             end,
             repeats: Repeats::Never,
+            interval: String::from("1"),
+            stops: Stops::Never,
+            until: start.0.checked_add(1.month()).unwrap_or(start.0),
+            count: DEFAULT_COUNT.to_string(),
             tone: Tone::default(),
             tag: None,
+            location: String::new(),
+            notes: Content::new(),
             time_zone: time_zone.clone(),
             week_start: Weekday::Monday,
             picker: None,
@@ -291,8 +419,54 @@ impl State {
         self.repeats
     }
 
+    /// How many units pass between repeats, at least 1.
+    pub fn interval(&self) -> u32 {
+        number(&self.interval)
+    }
+
+    pub fn stops(&self) -> Stops {
+        self.stops
+    }
+
+    /// The last date of the repeat, used when it stops on a date.
+    pub fn until(&self) -> Date {
+        self.until
+    }
+
+    /// How many occurrences there are, used when the repeat stops after
+    /// a number of them. At least 1.
+    pub fn count(&self) -> u32 {
+        number(&self.count)
+    }
+
+    /// The repeat rule the form describes, or `None` when the entry does
+    /// not repeat.
+    pub fn repeat(&self) -> Option<Repeat> {
+        let rule = Repeat::new(self.repeats.frequency()?).interval(self.interval());
+        Some(match self.stops {
+            Stops::Never => rule,
+            Stops::On => rule.until(self.until),
+            Stops::After => rule.count(self.count()),
+        })
+    }
+
     pub fn tone(&self) -> Tone {
         self.tone
+    }
+
+    pub fn location(&self) -> &str {
+        &self.location
+    }
+
+    /// The notes as text, without the space around them.
+    pub fn notes(&self) -> String {
+        self.notes.text().trim().to_owned()
+    }
+
+    /// Whether the date picker for the last date of the repeat is open.
+    pub fn is_picking_until(&self) -> bool {
+        self.picker
+            .is_some_and(|picker| picker.target == Target::Until)
     }
 
     /// The date of a field.
@@ -316,9 +490,12 @@ impl State {
         TimeOfDay::from(first % DAY_MINUTES)
     }
 
-    /// The field whose date picker is open.
+    /// The start or end whose date picker is open.
     pub fn picker(&self) -> Option<Field> {
-        self.picker.map(|picker| picker.field)
+        match self.picker?.target {
+            Target::Field(field) => Some(field),
+            Target::Until => None,
+        }
     }
 
     /// The span the form describes.
@@ -339,11 +516,14 @@ impl State {
             "" => UNTITLED,
             title => title,
         };
-        let mut entry = Entry::at(self.id.unwrap_or(new_id), title, self.when()).tone(self.tone);
+        let mut entry = Entry::at(self.id.unwrap_or(new_id), title, self.when())
+            .tone(self.tone)
+            .location(self.location.clone())
+            .notes(self.notes());
         if let Some(tag) = &self.tag {
             entry = entry.tag(tag.clone());
         }
-        if let Some(rule) = self.repeats.rule() {
+        if let Some(rule) = self.repeat() {
             entry = entry.repeat(rule);
         }
         entry
@@ -363,12 +543,37 @@ impl State {
             Event::Time(field, minute) => {
                 self.set(field, (self.date(field), minute.min(DAY_MINUTES - 1)));
             }
-            Event::Repeats(repeats) => self.repeats = repeats,
+            Event::Repeats(repeats) => {
+                self.repeats = repeats;
+                if repeats == Repeats::Never && self.is_picking_until() {
+                    self.picker = None;
+                }
+            }
+            Event::Interval(text) => self.interval = digits(&text),
+            Event::Stops(stops) => {
+                self.stops = stops;
+                if stops != Stops::On && self.is_picking_until() {
+                    self.picker = None;
+                }
+            }
+            Event::Until(date) => {
+                self.picker = None;
+                self.until = date.max(self.start.0);
+            }
+            Event::Count(text) => self.count = digits(&text),
             Event::Tone(tone) => self.tone = tone,
+            Event::Location(location) => self.location = location,
+            Event::Notes(action) => self.notes.perform(action),
             Event::Picker(field) => {
                 self.picker = field.map(|field| Picker {
-                    field,
+                    target: Target::Field(field),
                     month: self.date(field).first_of_month(),
+                });
+            }
+            Event::UntilPicker(open) => {
+                self.picker = open.then(|| Picker {
+                    target: Target::Until,
+                    month: self.until.first_of_month(),
                 });
             }
             Event::PickerMonth(months) => {
@@ -405,7 +610,16 @@ impl State {
             }
             Field::End => self.end = to,
         }
+        self.until = self.until.max(self.start.0);
         self.settle(field);
+    }
+
+    /// The date a picker is for.
+    fn target_date(&self, target: Target) -> Date {
+        match target {
+            Target::Field(field) => self.date(field),
+            Target::Until => self.until,
+        }
     }
 
     /// Puts the end back at or after the start. Whole days may start and
@@ -481,14 +695,15 @@ impl<'a, Message> Editor<'a, Message> {
         self
     }
 
-    /// Sent when Enter is pressed in the title, usually the same message
-    /// as the Save button.
+    /// Sent when Enter is pressed in the title or the location, usually
+    /// the same message as the Save button.
     pub fn on_submit(mut self, message: Message) -> Self {
         self.on_submit = Some(message);
         self
     }
 
-    /// The editing shortcuts of the title field. Defaults to all of them.
+    /// The editing shortcuts of the form's text fields. Defaults to all
+    /// of them.
     pub fn shortcuts(mut self, shortcuts: Shortcuts) -> Self {
         self.shortcuts = shortcuts;
         self
@@ -518,7 +733,7 @@ impl<'a, Message: Clone + 'a> From<Editor<'a, Message>> for Element<'a, Message>
                     .clone()
                     .map(|handler| move |title| handler(Event::Title(title))),
             )
-            .on_submit_maybe(on_submit);
+            .on_submit_maybe(on_submit.clone());
         let all_day = switch(state.is_all_day()).label("All day").on_toggle_maybe(
             on_event
                 .clone()
@@ -541,7 +756,27 @@ impl<'a, Message: Clone + 'a> From<Editor<'a, Message>> for Element<'a, Message>
                     .map(|handler| move |colour: Colour| handler(Event::Tone(colour.0))),
             );
 
-        column![
+        let location = input("Add a location", state.location())
+            .icon(lucide!(MapPin))
+            .shortcuts(shortcuts)
+            .on_input_maybe(
+                on_event
+                    .clone()
+                    .map(|handler| move |location| handler(Event::Location(location))),
+            )
+            .on_submit_maybe(on_submit);
+        let notes = textarea(&state.notes)
+            .id(notes_id())
+            .placeholder("Add notes")
+            .min_height(NOTES_HEIGHT)
+            .shortcuts(shortcuts)
+            .on_action_maybe(
+                on_event
+                    .clone()
+                    .map(|handler| move |action| handler(Event::Notes(action))),
+            );
+
+        let mut form = column![
             title,
             all_day,
             moment(state, Field::Start, "Starts", &on_event),
@@ -549,9 +784,97 @@ impl<'a, Message: Clone + 'a> From<Editor<'a, Message>> for Element<'a, Message>
             row![repeats, colour].spacing(space::SM),
         ]
         .spacing(space::MD)
-        .width(Length::Fill)
-        .into()
+        .width(Length::Fill);
+        if state.repeats() != Repeats::Never {
+            form = form
+                .push(every(state, shortcuts, &on_event))
+                .push(stops(state, shortcuts, &on_event));
+        }
+        form.push(location).push(notes).into()
     }
+}
+
+/// The name beside a field.
+fn name<'a, Message: 'a>(name: &'a str) -> Element<'a, Message> {
+    let label = text(name)
+        .size(text_size::SM)
+        .wrapping(text::Wrapping::None)
+        .style(|theme: &Theme| text::Style {
+            color: Some(Tokens::of(theme).muted_foreground),
+        });
+    container(label).width(Length::Fixed(NAME_WIDTH)).into()
+}
+
+/// A field for a small whole number.
+fn number_field<'a, Message: Clone + 'a>(
+    value: &str,
+    shortcuts: Shortcuts,
+    on_event: &Handler<'a, Message>,
+    event: fn(String) -> Event,
+) -> Element<'a, Message> {
+    input("1", value)
+        .width(NUMBER_WIDTH)
+        .shortcuts(shortcuts)
+        .on_input_maybe(
+            on_event
+                .clone()
+                .map(|handler| move |text| handler(event(text))),
+        )
+        .into()
+}
+
+/// How many units pass between repeats: "Every 2 weeks".
+fn every<'a, Message: Clone + 'a>(
+    state: &'a State,
+    shortcuts: Shortcuts,
+    on_event: &Handler<'a, Message>,
+) -> Element<'a, Message> {
+    let unit = text(state.repeats().unit(state.interval()))
+        .size(text_size::SM)
+        .wrapping(text::Wrapping::None);
+    row![
+        name("Every"),
+        number_field(&state.interval, shortcuts, on_event, Event::Interval),
+        unit,
+    ]
+    .spacing(space::SM)
+    .align_y(Alignment::Center)
+    .into()
+}
+
+/// How the repeat stops: never, on a date or after a number of times.
+fn stops<'a, Message: Clone + 'a>(
+    state: &'a State,
+    shortcuts: Shortcuts,
+    on_event: &Handler<'a, Message>,
+) -> Element<'a, Message> {
+    let handler = on_event.clone();
+    let choice = select(&Stops::ALL[..], Some(state.stops()))
+        .width(Length::Fill)
+        .on_select_maybe(handler.map(|handler| move |stops| handler(Event::Stops(stops))));
+    let mut controls = Row::new()
+        .spacing(space::SM)
+        .align_y(Alignment::Center)
+        .push(name("Stops"))
+        .push(choice);
+    match state.stops() {
+        Stops::Never => {}
+        Stops::On => controls = controls.push(date_field(state, Target::Until, on_event)),
+        Stops::After => {
+            let times = text(if state.count() == 1 { "time" } else { "times" })
+                .size(text_size::SM)
+                .wrapping(text::Wrapping::None);
+            controls = controls
+                .push(number_field(
+                    &state.count,
+                    shortcuts,
+                    on_event,
+                    Event::Count,
+                ))
+                .push(times);
+        }
+    }
+    controls.into()
 }
 
 /// One end of the entry: its name, its date and, unless it lasts all day,
@@ -559,20 +882,14 @@ impl<'a, Message: Clone + 'a> From<Editor<'a, Message>> for Element<'a, Message>
 fn moment<'a, Message: Clone + 'a>(
     state: &'a State,
     field: Field,
-    name: &'a str,
+    label: &'a str,
     on_event: &Handler<'a, Message>,
 ) -> Element<'a, Message> {
-    let label = text(name)
-        .size(text_size::SM)
-        .wrapping(text::Wrapping::None)
-        .style(|theme: &Theme| text::Style {
-            color: Some(Tokens::of(theme).muted_foreground),
-        });
     let mut controls = Row::new()
         .spacing(space::SM)
         .align_y(Alignment::Center)
-        .push(container(label).width(Length::Fixed(48.0)))
-        .push(date_field(state, field, on_event));
+        .push(name(label))
+        .push(date_field(state, Target::Field(field), on_event));
     if !state.is_all_day() {
         let handler = on_event.clone();
         controls = controls.push(
@@ -590,15 +907,19 @@ fn moment<'a, Message: Clone + 'a>(
 /// A date as a button that opens a month to pick another from.
 fn date_field<'a, Message: Clone + 'a>(
     state: &'a State,
-    field: Field,
+    target: Target,
     on_event: &Handler<'a, Message>,
 ) -> Element<'a, Message> {
-    let open = state.picker.filter(|picker| picker.field == field);
-    let toggle = if open.is_some() { None } else { Some(field) };
-    let trigger = button(state.date(field).strftime("%a %-d %b %Y").to_string())
+    let open = state.picker.filter(|picker| picker.target == target);
+    let toggle = match target {
+        Target::Field(field) => Event::Picker(open.is_none().then_some(field)),
+        Target::Until => Event::UntilPicker(open.is_none()),
+    };
+    let date = state.target_date(target);
+    let trigger = button(date.strftime("%a %-d %b %Y").to_string())
         .variant(button::Variant::Outline)
         .width(Length::Fill)
-        .on_press_maybe(send(on_event, Event::Picker(toggle)));
+        .on_press_maybe(send(on_event, toggle));
 
     let content: Element<'a, Message> = match open {
         Some(picker) => month_picker(state, picker, on_event),
@@ -652,7 +973,11 @@ fn month_picker<'a, Message: Clone + 'a>(
             .into()
         })));
     }
-    let chosen = state.date(picker.field);
+    let chosen = state.target_date(picker.target);
+    let pick = move |date: Date| match picker.target {
+        Target::Field(field) => Event::Date(field, date),
+        Target::Until => Event::Until(date),
+    };
     for week in &weeks {
         grid = grid.push(Row::with_children(week.iter().map(|date| {
             if date.month() != picker.month.month() {
@@ -673,7 +998,7 @@ fn month_picker<'a, Message: Clone + 'a>(
                 .width(Length::Fixed(CELL))
                 .height(Length::Fixed(CELL))
                 .padding(0)
-                .on_press_maybe(send(on_event, Event::Date(picker.field, *date)))
+                .on_press_maybe(send(on_event, pick(*date)))
                 .style(move |theme, status: Status| {
                     style::year_day(&Tokens::of(theme), day, status)
                 })
@@ -741,13 +1066,19 @@ mod tests {
         let entry = Entry::new(EntryId(4), "Review", at(15, 0), at(16, 0))
             .tone(Tone::Success)
             .tag("work")
-            .repeat(rule);
+            .repeat(rule)
+            .location("Room 4")
+            .notes("Bring the plan\nand the figures");
         let mut form = State::edit(&entry, &UTC);
         assert_eq!(form.id(), Some(EntryId(4)));
         assert!(!form.is_new());
         assert_eq!(form.title(), "Review");
         assert_eq!(form.tone(), Tone::Success);
-        assert_eq!(form.repeats(), Repeats::Custom(rule));
+        assert_eq!(form.repeats(), Repeats::Weekly);
+        assert_eq!(form.interval(), 2);
+        assert_eq!(form.stops(), Stops::Never);
+        assert_eq!(form.location(), "Room 4");
+        assert_eq!(form.notes(), "Bring the plan\nand the figures");
         assert_eq!(form.entry(EntryId(99)), entry, "unchanged, with its own id");
 
         form.update(Event::Title(String::from("Retro")));
@@ -756,6 +1087,7 @@ mod tests {
         assert_eq!(saved.title(), "Retro");
         assert_eq!(saved.tag_of(), Some("work"));
         assert_eq!(saved.repeat_of(), Some(rule));
+        assert_eq!(saved.location_of(), Some("Room 4"));
     }
 
     #[test]
@@ -868,13 +1200,169 @@ mod tests {
     fn every_repeat_choice_has_a_name_and_round_trips() {
         for choice in Repeats::ALL {
             assert!(!choice.to_string().is_empty());
-            assert_eq!(Repeats::of(choice.rule()), choice);
+            assert_eq!(Repeats::of(choice.frequency()), choice);
         }
         assert_eq!(Repeats::default(), Repeats::Never);
-        let custom = Repeat::daily().count(3);
-        assert_eq!(Repeats::of(Some(custom)), Repeats::Custom(custom));
-        assert_eq!(Repeats::Custom(custom).rule(), Some(custom));
-        assert_eq!(Repeats::Custom(custom).to_string(), "Custom");
+        assert_eq!(Repeats::Never.frequency(), None);
+        let units: Vec<_> = Repeats::ALL
+            .iter()
+            .map(|choice| (choice.unit(1), choice.unit(2)))
+            .collect();
+        assert_eq!(
+            units,
+            vec![
+                ("", ""),
+                ("day", "days"),
+                ("week", "weeks"),
+                ("month", "months"),
+                ("year", "years")
+            ]
+        );
+        let names: Vec<_> = Stops::ALL.iter().map(Stops::to_string).collect();
+        assert_eq!(names, vec!["Never", "On a date", "After"]);
+        assert_eq!(Stops::default(), Stops::Never);
+    }
+
+    #[test]
+    fn a_repeat_takes_its_interval_and_its_end_from_the_form() {
+        let mut form = timed();
+        assert_eq!(form.repeat(), None);
+        assert_eq!((form.interval(), form.count()), (1, DEFAULT_COUNT));
+        assert_eq!(form.until(), date(2026, 7, 19), "a month after the start");
+
+        form.update(Event::Repeats(Repeats::Weekly));
+        assert_eq!(form.repeat(), Some(Repeat::weekly()));
+        form.update(Event::Interval(String::from("2")));
+        assert_eq!(form.repeat(), Some(Repeat::weekly().interval(2)));
+
+        form.update(Event::Stops(Stops::After));
+        form.update(Event::Count(String::from("6")));
+        assert_eq!(form.repeat(), Some(Repeat::weekly().interval(2).count(6)));
+
+        form.update(Event::Stops(Stops::On));
+        form.update(Event::Until(date(2026, 9, 1)));
+        let rule = Repeat::weekly().interval(2).until(date(2026, 9, 1));
+        assert_eq!(form.repeat(), Some(rule));
+        assert_eq!(form.entry(EntryId(1)).repeat_of(), Some(rule));
+
+        // The interval and the end wait while the entry does not repeat.
+        form.update(Event::Repeats(Repeats::Never));
+        assert_eq!(form.repeat(), None);
+        form.update(Event::Repeats(Repeats::Monthly));
+        assert_eq!(
+            form.repeat(),
+            Some(Repeat::monthly().interval(2).until(date(2026, 9, 1)))
+        );
+    }
+
+    #[test]
+    fn number_fields_keep_digits_and_count_blank_as_one() {
+        let mut form = timed();
+        form.update(Event::Repeats(Repeats::Daily));
+        form.update(Event::Interval(String::from("a1b2c3d4")));
+        assert_eq!(form.interval(), 123, "three digits at most");
+        form.update(Event::Interval(String::new()));
+        assert_eq!(form.interval(), 1, "blank while typing");
+        form.update(Event::Interval(String::from("0")));
+        assert_eq!(form.interval(), 1);
+        assert_eq!(form.repeat(), Some(Repeat::daily()));
+
+        form.update(Event::Stops(Stops::After));
+        form.update(Event::Count(String::from("-5 times")));
+        assert_eq!(form.count(), 5);
+        form.update(Event::Count(String::from("0")));
+        assert_eq!(form.count(), 1);
+    }
+
+    #[test]
+    fn an_entry_ending_on_a_date_or_after_a_count_fills_the_form() {
+        let base = Entry::new(EntryId(4), "Review", at(15, 0), at(16, 0));
+        let on = base
+            .clone()
+            .repeat(Repeat::monthly().until(date(2026, 12, 19)));
+        let form = State::edit(&on, &UTC);
+        assert_eq!(form.repeats(), Repeats::Monthly);
+        assert_eq!(form.stops(), Stops::On);
+        assert_eq!(form.until(), date(2026, 12, 19));
+        assert_eq!(form.entry(EntryId(9)), on);
+
+        let after = base.repeat(Repeat::yearly().interval(4).count(3));
+        let form = State::edit(&after, &UTC);
+        assert_eq!(form.repeats(), Repeats::Yearly);
+        assert_eq!(form.stops(), Stops::After);
+        assert_eq!((form.interval(), form.count()), (4, 3));
+        assert_eq!(form.entry(EntryId(9)), after);
+    }
+
+    #[test]
+    fn the_last_date_of_a_repeat_stays_on_or_after_the_start() {
+        let mut form = timed();
+        form.update(Event::Repeats(Repeats::Daily));
+        form.update(Event::Stops(Stops::On));
+        form.update(Event::Until(date(2026, 6, 1)));
+        assert_eq!(form.until(), date(2026, 6, 19), "not before the start");
+
+        form.update(Event::Until(date(2026, 6, 25)));
+        form.update(Event::Date(Field::Start, date(2026, 8, 3)));
+        assert_eq!(form.until(), date(2026, 8, 3), "carried by the start");
+    }
+
+    #[test]
+    fn the_picker_for_the_last_date_opens_turns_and_closes() {
+        let mut form = timed();
+        form.update(Event::Repeats(Repeats::Daily));
+        form.update(Event::Stops(Stops::On));
+        form.update(Event::UntilPicker(true));
+        assert!(form.is_picking_until());
+        assert_eq!(form.picker(), None, "not the start's or the end's");
+        assert_eq!(form.picker.map(|p| p.month), Some(date(2026, 7, 1)));
+        form.update(Event::PickerMonth(2));
+        assert_eq!(form.picker.map(|p| p.month), Some(date(2026, 9, 1)));
+        form.update(Event::Until(date(2026, 9, 14)));
+        assert!(!form.is_picking_until());
+        assert_eq!(form.until(), date(2026, 9, 14));
+
+        // One picker at a time, and it closes with the field it is for.
+        form.update(Event::UntilPicker(true));
+        form.update(Event::Picker(Some(Field::Start)));
+        assert!(!form.is_picking_until());
+        assert_eq!(form.picker(), Some(Field::Start));
+        form.update(Event::UntilPicker(true));
+        form.update(Event::UntilPicker(false));
+        assert!(!form.is_picking_until());
+        form.update(Event::UntilPicker(true));
+        form.update(Event::Stops(Stops::Never));
+        assert!(!form.is_picking_until());
+        form.update(Event::Stops(Stops::On));
+        form.update(Event::UntilPicker(true));
+        form.update(Event::Repeats(Repeats::Never));
+        assert!(!form.is_picking_until());
+        form.update(Event::UntilPicker(true));
+        form.update(Event::Picker(None));
+        assert!(!form.is_picking_until());
+    }
+
+    #[test]
+    fn location_and_notes_reach_the_entry() {
+        let mut form = timed();
+        assert_eq!(form.location(), "");
+        assert_eq!(form.notes(), "");
+        let blank = form.entry(EntryId(1));
+        assert_eq!((blank.location_of(), blank.notes_of()), (None, None));
+
+        form.update(Event::Location(String::from(" Room 4 ")));
+        for letter in "Agenda".chars() {
+            form.update(Event::Notes(Action::Edit(
+                iced::widget::text_editor::Edit::Insert(letter),
+            )));
+        }
+        form.update(Event::Notes(Action::Edit(
+            iced::widget::text_editor::Edit::Enter,
+        )));
+        assert_eq!(form.notes(), "Agenda", "space at the ends is dropped");
+        let entry = form.entry(EntryId(1));
+        assert_eq!(entry.location_of(), Some("Room 4"));
+        assert_eq!(entry.notes_of(), Some("Agenda"));
     }
 
     #[test]

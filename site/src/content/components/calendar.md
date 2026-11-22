@@ -9,7 +9,7 @@ imports: |
   use iced_cube::data::calendar::{Entries, Entry, EntryId, Output, Repeat, State, Tone, View};
   use iced_cube::data::calendar::schedule::{Anchor, Scheduler, Trigger};
 keywords: [events, schedule, scheduler, reminders, alarm, agenda, month, week, date, appointment]
-related: [toast, data-table, dialog]
+related: [toast, data-table, dialog, scroll-area]
 hero: calendar/month
 stories: [calendar/month, calendar/week, calendar/agenda, calendar/year, calendar/create, calendar/read-only, calendar/repeating, calendar/themed, calendar/keyboard, calendar/reminders, calendar/missed, calendar/triggers]
 api:
@@ -22,7 +22,7 @@ api:
   - name: "Entries::utc() / Entries::system() / Entries::new(time_zone)"
     description: "An empty collection shown in UTC, the system's time zone or one you name. Add to it with .with([...]) or .insert(entry)."
   - name: "Entry::new(id, title, start, end) / Entry::all_day(id, title, first, last)"
-    description: "A timed entry between two instants, or one covering whole days. Chain .tone(Tone), .tag(\"work\") and .repeat(Repeat)."
+    description: "A timed entry between two instants, or one covering whole days. Chain .tone(Tone), .tag(\"work\"), .repeat(Repeat), .location(\"Room 4\") and .notes(text), and read them back with location_of() and notes_of()."
   - name: "instant(date, time, &time_zone)"
     description: "The instant it is a time on a date in a time zone, for building entries without handling errors."
   - name: "Repeat::daily() / weekly() / monthly() / yearly()"
@@ -58,9 +58,11 @@ api:
   - name: "editor::State::new(&draft, &time_zone) / editor::State::edit(&entry, &time_zone)"
     description: "The state of the entry form, started from the span the calendar asked for or from an existing entry."
   - name: "editor(&form).on_event(f).on_submit(message)"
-    description: "Renders the form: title, all day, start and end date and time, repeat and colour. on_submit is sent on Enter in the title. .shortcuts(Shortcuts) sets the title field's editing shortcuts."
-  - name: "form.update(editor::Event) / form.entry(new_id) / form.when()"
-    description: "Applies a change, and gives the entry or span the form describes. A changed entry keeps its id; a blank title is saved as \"(No title)\"."
+    description: "Renders the form: title, all day, start and end date and time, how often it repeats and when that stops, colour, location and notes. on_submit is sent on Enter in the title or the location. .shortcuts(Shortcuts) sets the editing shortcuts of its text fields."
+  - name: "form.update(editor::Event) / form.entry(new_id) / form.when() / form.repeat()"
+    description: "Applies a change, and gives the entry, span or repeat rule the form describes. A changed entry keeps its id; a blank title is saved as \"(No title)\"."
+  - name: "editor::notes_id()"
+    description: "The id of the notes field, for focusing it."
   - name: "Scheduler::new().with(trigger)"
     description: "Collects triggers. Chain .resume_from(watermark) to receive what was missed since a saved time, and .grace(duration) to change what counts as late."
   - name: "Trigger::new(key).at(anchor) / .before(anchor, lead) / .after(anchor, delay) / .on(change)"
@@ -108,7 +110,7 @@ In the week and day views a mouse can also drag: across empty space to ask for a
 
 ## The entry form
 
-`calendar::editor` is a ready-made form for that dialog: a title, an "All day" switch, a start and an end each with a date and a time, how the entry repeats and its colour. It has no buttons, so it fits a dialog, a popover or a side panel with whatever actions the app wants.
+`calendar::editor` is a ready-made form for that dialog: a title, an "All day" switch, a start and an end each with a date and a time, how the entry repeats, its colour, where it is and notes. It has no buttons, so it fits a dialog, a popover or a side panel with whatever actions the app wants.
 
 ```rust
 use iced_cube::data::calendar::editor::{self, editor};
@@ -125,7 +127,13 @@ let entry = form.entry(calendar.entries().next_id());
 calendar.update(calendar::Event::Insert(entry));
 ```
 
-A date opens a small month to pick from. The time menus step in quarter hours: the start's opens an hour before the time chosen, and the end's begins just after the start. Moving the start carries the end along, so the entry keeps its length, and an end earlier than the start on the same day is taken to mean the next day. Turning "All day" on hides the times and keeps the dates. A repeat rule the form does not offer, such as every two weeks, shows as "Custom" and is saved unchanged.
+A date opens a small month to pick from. The time menus step in quarter hours: the start's opens an hour before the time chosen, and the end's begins just after the start. Moving the start carries the end along, so the entry keeps its length, and an end earlier than the start on the same day is taken to mean the next day. Turning "All day" on hides the times and keeps the dates.
+
+Choosing a repeat adds two rows. "Every" takes a number, so "Weekly" with 2 is every two weeks. "Stops" is never, on a date picked from a month, or after a number of times, counting the first. The number fields keep only digits, and a blank one counts as 1. The last date stays on or after the start.
+
+The location is a line of text, and the notes run over as many lines as are typed. Both are kept on the entry and read back with `location_of()` and `notes_of()`; the calendar itself does not draw them, so show them wherever suits the app. Enter in the title or the location sends `on_submit`, and in the notes it starts a new line.
+
+The form is as tall as its fields and grows when a repeat is chosen, so in a small window put it in a [scroll area](../scroll-area/), as the example does. A dialog puts focus in the title, which takes the first Escape to give it up; the second closes the dialog.
 
 The form is optional. An app that wants different fields builds its own and sends `Event::Insert`.
 

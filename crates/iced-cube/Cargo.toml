@@ -173,6 +173,7 @@ calendar = [
     "select",
     "switch",
     "tappable",
+    "textarea",
     "dep:jiff",
 ]
 

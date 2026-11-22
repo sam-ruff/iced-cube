@@ -144,6 +144,17 @@ pub struct Entry {
     tone: Tone,
     tag: Option<String>,
     repeat: Option<Repeat>,
+    location: Option<String>,
+    notes: Option<String>,
+}
+
+/// `text` without the space around it, or `None` when nothing is left.
+fn filled(text: String) -> Option<String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(trimmed.to_owned())
 }
 
 impl Entry {
@@ -166,7 +177,22 @@ impl Entry {
             tone: Tone::default(),
             tag: None,
             repeat: None,
+            location: None,
+            notes: None,
         }
+    }
+
+    /// Where the entry takes place. Blank text clears it.
+    pub fn location(mut self, location: impl Into<String>) -> Self {
+        self.location = filled(location.into());
+        self
+    }
+
+    /// Free text kept with the entry, which may run over several lines.
+    /// Blank text clears it.
+    pub fn notes(mut self, notes: impl Into<String>) -> Self {
+        self.notes = filled(notes.into());
+        self
     }
 
     pub fn tone(mut self, tone: Tone) -> Self {
@@ -224,6 +250,14 @@ impl Entry {
 
     pub fn repeat_of(&self) -> Option<Repeat> {
         self.repeat
+    }
+
+    pub fn location_of(&self) -> Option<&str> {
+        self.location.as_deref()
+    }
+
+    pub fn notes_of(&self) -> Option<&str> {
+        self.notes.as_deref()
     }
 
     pub fn is_all_day(&self) -> bool {
@@ -515,6 +549,23 @@ mod tests {
         assert_eq!(entry.repeat_of(), Some(Repeat::daily()));
         assert_eq!(entry.title(), "Review");
         assert!(entry.is_all_day());
+    }
+
+    #[test]
+    fn location_and_notes_are_trimmed_and_blank_clears_them() {
+        let entry = meeting(1, 3, 9);
+        assert_eq!(entry.location_of(), None);
+        assert_eq!(entry.notes_of(), None);
+
+        let entry = entry
+            .location("  Room 4 ")
+            .notes("Bring the plan\nand the figures\n");
+        assert_eq!(entry.location_of(), Some("Room 4"));
+        assert_eq!(entry.notes_of(), Some("Bring the plan\nand the figures"));
+
+        let entry = entry.location("   ").notes("");
+        assert_eq!(entry.location_of(), None);
+        assert_eq!(entry.notes_of(), None);
     }
 
     #[test]

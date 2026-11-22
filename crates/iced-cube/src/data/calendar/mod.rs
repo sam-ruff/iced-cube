@@ -77,7 +77,7 @@
 //!
 //! The calendar only asks; the app decides what to show. [`editor`] is a
 //! ready-made form for that: title, all day, start and end date and time,
-//! repeat and colour.
+//! how often it repeats and when that stops, colour, location and notes.
 //!
 //! # Triggers
 //!
