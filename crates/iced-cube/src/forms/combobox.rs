@@ -94,6 +94,116 @@ pub enum Event {
 /// The options, the query and what is highlighted and selected.
 #[derive(Debug, Clone, PartialEq)]
 pub struct State<T> {
+    list: Suggestions<T>,
+    selected: Option<usize>,
+}
+
+impl<T: Display> State<T> {
+    /// Creates a closed combobox with nothing selected. Options are
+    /// labelled with their `Display` text.
+    pub fn new(options: impl IntoIterator<Item = T>) -> Self {
+        Self {
+            list: Suggestions::new(options),
+            selected: None,
+        }
+    }
+}
+
+impl<T: PartialEq> State<T> {
+    /// Starts with `value` selected, when it is one of the options.
+    pub fn with_selected(mut self, value: &T) -> Self {
+        self.selected = self.list.position(value);
+        self
+    }
+}
+
+impl<T> State<T> {
+    /// Sets how many suggestions show at once. At least one does.
+    pub fn with_visible_rows(mut self, rows: usize) -> Self {
+        self.list.set_rows(rows);
+        self
+    }
+
+    pub fn options(&self) -> &[T] {
+        self.list.options()
+    }
+
+    pub fn selected(&self) -> Option<&T> {
+        self.selected.and_then(|index| self.list.option(index))
+    }
+
+    pub fn query(&self) -> &str {
+        self.list.query()
+    }
+
+    pub fn is_open(&self) -> bool {
+        self.list.is_open()
+    }
+
+    /// The options that match the query, in their original order.
+    pub fn matches(&self) -> impl Iterator<Item = &T> {
+        self.list.matches()
+    }
+
+    /// The highlighted option, if any option matches.
+    pub fn highlighted(&self) -> Option<&T> {
+        self.list.highlighted()
+    }
+
+    /// The matches in view, with their index in [`State::options`].
+    pub fn visible(&self) -> impl Iterator<Item = (usize, &T)> {
+        self.list.visible()
+    }
+
+    /// Applies an event and returns the chosen value, if one was chosen.
+    pub fn update(&mut self, event: Event) -> Option<T>
+    where
+        T: Clone,
+    {
+        match event {
+            Event::Input(query) => self.list.input(query),
+            Event::Open => self.list.open(self.selected),
+            Event::Close => self.list.close(),
+            Event::Next | Event::Previous if !self.list.is_open() => self.list.open(self.selected),
+            Event::Next => self.list.step(1),
+            Event::Previous => self.list.step(-1),
+            Event::ActivateHighlighted => {
+                if !self.list.is_open() {
+                    return None;
+                }
+                let index = self.list.highlighted_index()?;
+                return self.choose(index);
+            }
+            Event::Activate(index) => return self.choose(index),
+            Event::Highlight(index) => self.list.highlight_option(index),
+            Event::Scroll(rows) => self.list.scroll(rows),
+        }
+        None
+    }
+
+    fn choose(&mut self, index: usize) -> Option<T>
+    where
+        T: Clone,
+    {
+        let value = self.list.option(index)?.clone();
+        self.selected = Some(index);
+        self.list.close();
+        Some(value)
+    }
+}
+
+/// What a row of the shared suggestion list sends.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ListEvent {
+    Highlight(usize),
+    Activate(usize),
+    Scroll(i32),
+}
+
+/// The options, query, matches, highlight and window shared by the single
+/// and multiple choice comboboxes.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Suggestions<T> {
     options: Vec<T>,
     labels: Vec<String>,
     query: String,
@@ -103,15 +213,12 @@ pub struct State<T> {
     highlighted: usize,
     /// Position in `matches` of the first visible row.
     offset: usize,
-    selected: Option<usize>,
     open: bool,
     rows: usize,
 }
 
-impl<T: Display> State<T> {
-    /// Creates a closed combobox with nothing selected. Options are
-    /// labelled with their `Display` text.
-    pub fn new(options: impl IntoIterator<Item = T>) -> Self {
+impl<T: Display> Suggestions<T> {
+    pub(crate) fn new(options: impl IntoIterator<Item = T>) -> Self {
         let options: Vec<T> = options.into_iter().collect();
         let labels = options
             .iter()
@@ -125,61 +232,58 @@ impl<T: Display> State<T> {
             matches,
             highlighted: 0,
             offset: 0,
-            selected: None,
             open: false,
             rows: VISIBLE_ROWS,
         }
     }
 }
 
-impl<T: PartialEq> State<T> {
-    /// Starts with `value` selected, when it is one of the options.
-    pub fn with_selected(mut self, value: &T) -> Self {
-        self.selected = self.options.iter().position(|option| option == value);
-        self
+impl<T: PartialEq> Suggestions<T> {
+    /// The index of `value` in the options.
+    pub(crate) fn position(&self, value: &T) -> Option<usize> {
+        self.options.iter().position(|option| option == value)
     }
 }
 
-impl<T> State<T> {
-    /// Sets how many suggestions show at once. At least one does.
-    pub fn with_visible_rows(mut self, rows: usize) -> Self {
+impl<T> Suggestions<T> {
+    pub(crate) fn set_rows(&mut self, rows: usize) {
         self.rows = rows.max(1);
         self.reveal();
-        self
     }
 
-    pub fn options(&self) -> &[T] {
+    pub(crate) fn options(&self) -> &[T] {
         &self.options
     }
 
-    pub fn selected(&self) -> Option<&T> {
-        self.selected.and_then(|index| self.options.get(index))
+    pub(crate) fn option(&self, index: usize) -> Option<&T> {
+        self.options.get(index)
     }
 
-    pub fn query(&self) -> &str {
+    pub(crate) fn query(&self) -> &str {
         &self.query
     }
 
-    pub fn is_open(&self) -> bool {
+    pub(crate) fn is_open(&self) -> bool {
         self.open
     }
 
-    /// The options that match the query, in their original order.
-    pub fn matches(&self) -> impl Iterator<Item = &T> {
+    pub(crate) fn matches(&self) -> impl Iterator<Item = &T> {
         self.matches
             .iter()
             .filter_map(|&index| self.options.get(index))
     }
 
-    /// The highlighted option, if any option matches.
-    pub fn highlighted(&self) -> Option<&T> {
-        self.matches
-            .get(self.highlighted)
-            .and_then(|&index| self.options.get(index))
+    pub(crate) fn highlighted(&self) -> Option<&T> {
+        self.highlighted_index()
+            .and_then(|index| self.options.get(index))
     }
 
-    /// The matches in view, with their index in [`State::options`].
-    pub fn visible(&self) -> impl Iterator<Item = (usize, &T)> {
+    /// The highlighted option's index in the options.
+    pub(crate) fn highlighted_index(&self) -> Option<usize> {
+        self.matches.get(self.highlighted).copied()
+    }
+
+    pub(crate) fn visible(&self) -> impl Iterator<Item = (usize, &T)> {
         self.matches
             .iter()
             .skip(self.offset)
@@ -187,47 +291,42 @@ impl<T> State<T> {
             .filter_map(|&index| self.options.get(index).map(|option| (index, option)))
     }
 
-    fn is_highlighted(&self, index: usize) -> bool {
+    pub(crate) fn is_highlighted(&self, index: usize) -> bool {
         self.matches.get(self.highlighted) == Some(&index)
     }
 
-    /// Applies an event and returns the chosen value, if one was chosen.
-    pub fn update(&mut self, event: Event) -> Option<T>
-    where
-        T: Clone,
-    {
-        match event {
-            Event::Input(query) => {
-                self.query = query;
-                self.open = true;
-                self.filter();
-                self.highlight(0);
-            }
-            Event::Open => self.open(),
-            Event::Close => self.close(),
-            Event::Next | Event::Previous if !self.open => self.open(),
-            Event::Next => self.step(1),
-            Event::Previous => self.step(-1),
-            Event::ActivateHighlighted => {
-                if !self.open {
-                    return None;
-                }
-                let index = *self.matches.get(self.highlighted)?;
-                return self.choose(index);
-            }
-            Event::Activate(index) => return self.choose(index),
-            Event::Highlight(index) => {
-                if let Some(position) = self.matches.iter().position(|&i| i == index) {
-                    self.highlight(position);
-                }
-            }
-            Event::Scroll(rows) => {
-                let last = self.matches.len().saturating_sub(self.rows);
-                let offset = (self.offset as i64).saturating_add(rows.into());
-                self.offset = offset.clamp(0, last as i64) as usize;
-            }
+    /// Sets the query, opens the list and highlights the first match.
+    pub(crate) fn input(&mut self, query: String) {
+        self.query = query;
+        self.open = true;
+        self.filter();
+        self.highlight(0);
+    }
+
+    /// Highlights an option by its index, if it matches the query.
+    pub(crate) fn highlight_option(&mut self, index: usize) {
+        if let Some(position) = self.matches.iter().position(|&i| i == index) {
+            self.highlight(position);
         }
-        None
+    }
+
+    pub(crate) fn scroll(&mut self, rows: i32) {
+        let last = self.matches.len().saturating_sub(self.rows);
+        let offset = (self.offset as i64).saturating_add(rows.into());
+        self.offset = offset.clamp(0, last as i64) as usize;
+    }
+
+    /// Clears the query and shows every option again, keeping the
+    /// highlighted option highlighted.
+    #[cfg(feature = "multi-combobox")]
+    pub(crate) fn clear_query(&mut self) {
+        let highlighted = self.highlighted_index();
+        self.query.clear();
+        self.filter();
+        let position = highlighted
+            .and_then(|index| self.matches.iter().position(|&i| i == index))
+            .unwrap_or(0);
+        self.highlight(position);
     }
 
     fn filter(&mut self) {
@@ -241,35 +340,25 @@ impl<T> State<T> {
             .collect();
     }
 
-    fn open(&mut self) {
+    /// Opens the list with every option showing, highlighting `preferred`
+    /// (an option index) or else the first option.
+    pub(crate) fn open(&mut self, preferred: Option<usize>) {
         self.open = true;
         self.query.clear();
         self.filter();
-        let selected = self
-            .selected
-            .and_then(|index| self.matches.iter().position(|&i| i == index));
+        let position = preferred.and_then(|index| self.matches.iter().position(|&i| i == index));
         self.offset = 0;
-        self.highlight(selected.unwrap_or(0));
+        self.highlight(position.unwrap_or(0));
     }
 
-    fn close(&mut self) {
+    pub(crate) fn close(&mut self) {
         self.open = false;
         self.query.clear();
         self.filter();
         self.offset = 0;
     }
 
-    fn choose(&mut self, index: usize) -> Option<T>
-    where
-        T: Clone,
-    {
-        let value = self.options.get(index)?.clone();
-        self.selected = Some(index);
-        self.close();
-        Some(value)
-    }
-
-    fn step(&mut self, delta: isize) {
+    pub(crate) fn step(&mut self, delta: isize) {
         let len = self.matches.len() as isize;
         if len == 0 {
             return;
@@ -312,8 +401,8 @@ impl Action {
         match self {
             Action::Next => Some(Event::Next),
             Action::Previous => Some(Event::Previous),
-            Action::Activate => state.open.then_some(Event::ActivateHighlighted),
-            Action::Close => state.open.then_some(Event::Close),
+            Action::Activate => state.is_open().then_some(Event::ActivateHighlighted),
+            Action::Close => state.is_open().then_some(Event::Close),
         }
     }
 }
@@ -511,14 +600,22 @@ where
         };
         let on_event: Rc<dyn Fn(Event) -> Message + 'a> = Rc::from(on_event);
 
-        let open = state.open;
+        let open = state.is_open();
         let (value, hint) = if open {
-            (state.query.clone(), selected.unwrap_or(placeholder))
+            (state.query().to_owned(), selected.unwrap_or(placeholder))
         } else {
             (selected.unwrap_or_default(), placeholder)
         };
 
-        let list = open.then(|| suggestions(state, &empty, &*on_event));
+        let list = open.then(|| {
+            let chosen = state.selected;
+            suggestions(
+                &state.list,
+                &empty,
+                &move |index| chosen == Some(index),
+                &|event| on_event(list_event(event)),
+            )
+        });
         let on_anchor_press = (!open).then(|| on_event(Event::Open));
         let on_dismiss = open.then(|| on_event(Event::Close));
         let editing = Editing {
@@ -554,12 +651,13 @@ where
 }
 
 /// What an enabled field does with edits.
-struct Editing<'a, Message> {
-    on_input: Box<dyn Fn(String) -> Message + 'a>,
-    shortcuts: Shortcuts,
+pub(crate) struct Editing<'a, Message> {
+    pub(crate) on_input: Box<dyn Fn(String) -> Message + 'a>,
+    pub(crate) shortcuts: Shortcuts,
 }
 
-fn field<'a, Message: Clone + 'a>(
+/// The text field with its chevron, built with the shared input shortcuts.
+pub(crate) fn field<'a, Message: Clone + 'a>(
     placeholder: &str,
     value: &str,
     size: Size,
@@ -611,21 +709,32 @@ fn field<'a, Message: Clone + 'a>(
     .into()
 }
 
-fn suggestions<'a, T: Display, Message: Clone + 'a>(
-    state: &'a State<T>,
+fn list_event(event: ListEvent) -> Event {
+    match event {
+        ListEvent::Highlight(index) => Event::Highlight(index),
+        ListEvent::Activate(index) => Event::Activate(index),
+        ListEvent::Scroll(rows) => Event::Scroll(rows),
+    }
+}
+
+/// The floating list of `list`'s visible matches, with a tick on the
+/// options for which `ticked` holds.
+pub(crate) fn suggestions<'a, T: Display, Message: Clone + 'a>(
+    list: &'a Suggestions<T>,
     empty: &str,
-    on_event: &dyn Fn(Event) -> Message,
+    ticked: &dyn Fn(usize) -> bool,
+    on_event: &dyn Fn(ListEvent) -> Message,
 ) -> Element<'a, Message> {
-    let rows: Vec<Element<'a, Message>> = state
+    let rows: Vec<Element<'a, Message>> = list
         .visible()
         .map(|(index, option)| {
-            let status = if state.is_highlighted(index) {
+            let status = if list.is_highlighted(index) {
                 RowStatus::Highlighted
             } else {
                 RowStatus::Idle
             };
             let label = option.to_string();
-            let trailing = if state.selected == Some(index) {
+            let trailing = if ticked(index) {
                 Trailing::Check
             } else {
                 Trailing::None
@@ -635,8 +744,8 @@ fn suggestions<'a, T: Display, Message: Clone + 'a>(
                 ..Parts::label(&label)
             };
             let messages = (
-                on_event(Event::Highlight(index)),
-                on_event(Event::Activate(index)),
+                on_event(ListEvent::Highlight(index)),
+                on_event(ListEvent::Activate(index)),
             );
             menu::item(parts, status, false, Some(messages))
         })
@@ -648,8 +757,8 @@ fn suggestions<'a, T: Display, Message: Clone + 'a>(
         Column::from_vec(rows).width(Length::Fill).into()
     };
 
-    let down = on_event(Event::Scroll(1));
-    let up = on_event(Event::Scroll(-1));
+    let down = on_event(ListEvent::Scroll(1));
+    let up = on_event(ListEvent::Scroll(-1));
     mouse_area(menu::surface(body).width(Length::Fill))
         .on_scroll(move |delta| match delta {
             ScrollDelta::Lines { y, .. } | ScrollDelta::Pixels { y, .. } if y < 0.0 => down.clone(),
@@ -1000,7 +1109,7 @@ mod tests {
         assert_eq!(state.visible().map(|(i, _)| i).collect::<Vec<_>>(), [3, 4]);
         let _ = state.update(Event::Scroll(-10));
         assert_eq!(state.visible().map(|(i, _)| i).collect::<Vec<_>>(), [0, 1]);
-        assert_eq!(State::<&str>::new([]).with_visible_rows(0).rows, 1);
+        assert_eq!(State::<&str>::new([]).with_visible_rows(0).list.rows, 1);
     }
 
     #[test]

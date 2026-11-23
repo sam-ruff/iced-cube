@@ -5,6 +5,12 @@
 //! [anchored layer](crate::overlay::anchored) in the
 //! [menu look](crate::overlay::menu), with a check mark on the selected
 //! option. Escape or a click outside closes it.
+//!
+//! An enabled select takes keyboard focus from iced's focus operations,
+//! such as a dialog's Tab order, and rings while focused. Space, Enter or
+//! ArrowDown then opens the list with the selected option highlighted.
+//! In the open list the arrow keys, Home and End move the highlight, and
+//! Space or Enter chooses it and closes the list.
 
 use std::borrow::Cow;
 
@@ -20,6 +26,7 @@ use iced::{
 };
 
 use crate::data::ellipsis::ellipsis;
+use crate::focus;
 use crate::icon::{opacity, themed};
 use crate::keys::{self, Chord, Keymap};
 use crate::overlay::anchored::{self, Align, Behaviour, Placement, Side};
@@ -41,7 +48,10 @@ pub struct Select<'a, T: Clone, Message> {
     placeholder: Option<String>,
     width: Length,
     on_select: Option<Box<dyn Fn(T) -> Message + 'a>>,
+    leading: Option<Leading<'a, T, Message>>,
 }
+
+type Leading<'a, T, Message> = Box<dyn Fn(&T) -> Option<Element<'a, Message>> + 'a>;
 
 impl<T: Clone + std::fmt::Debug, Message> std::fmt::Debug for Select<'_, T, Message> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -50,6 +60,7 @@ impl<T: Clone + std::fmt::Debug, Message> std::fmt::Debug for Select<'_, T, Mess
             .field("selected", &self.selected)
             .field("placeholder", &self.placeholder)
             .field("enabled", &self.on_select.is_some())
+            .field("leading", &self.leading.is_some())
             .finish()
     }
 }
@@ -69,6 +80,7 @@ where
         placeholder: None,
         width: Length::Fixed(200.0),
         on_select: None,
+        leading: None,
     }
 }
 
@@ -97,6 +109,15 @@ impl<'a, T: Clone, Message> Select<'a, T, Message> {
         self
     }
 
+    /// Draws an element before an option's label, such as a colour
+    /// [swatch](crate::theme::swatch) or an icon, both in the open list and
+    /// in the field while that option is selected. Options it returns
+    /// `None` for show their label alone.
+    pub fn leading(mut self, leading: impl Fn(&T) -> Option<Element<'a, Message>> + 'a) -> Self {
+        self.leading = Some(Box::new(leading));
+        self
+    }
+
     pub fn is_enabled(&self) -> bool {
         self.on_select.is_some()
     }
@@ -114,8 +135,10 @@ where
             placeholder,
             width,
             on_select,
+            leading,
         } = select;
         let enabled = on_select.is_some();
+        let leading_of = |option: &T| leading.as_ref().and_then(|leading| leading(option));
         let label = selected.as_ref().map(ToString::to_string);
         let has_value = label.is_some();
 
@@ -133,24 +156,43 @@ where
             opacity(enabled),
             move |theme| style(&Tokens::of(theme), Status::Active, enabled).handle_color,
         );
+        let selected_leading = selected.as_ref().and_then(leading_of);
         // A long label ends in an ellipsis rather than running under the chevron.
-        let field = row![
-            ellipsis(label.or(placeholder).unwrap_or_default()).colour(text_colour),
-            chevron,
-        ]
-        .spacing(space::SM)
-        .align_y(Alignment::Center)
-        .padding([(HEIGHT - LINE_HEIGHT) / 2.0, space::MD])
-        .width(width)
-        .height(HEIGHT);
+        let field = row![]
+            .push(selected_leading)
+            .push(ellipsis(label.or(placeholder).unwrap_or_default()).colour(text_colour))
+            .push(chevron)
+            .spacing(space::SM)
+            .align_y(Alignment::Center)
+            .padding([(HEIGHT - LINE_HEIGHT) / 2.0, space::MD])
+            .width(width)
+            .height(HEIGHT);
 
         let rows = options.iter().map(|option| {
             let is_selected = selected.as_ref() == Some(option);
-            option_row(option, is_selected, on_select.as_deref())
+            option_row(
+                option,
+                leading_of(option),
+                is_selected,
+                on_select.as_deref(),
+            )
         });
-        let list = menu::surface(Column::with_children(rows).width(Length::Fill))
-            .width(Length::Fill)
-            .into();
+        let choices = options
+            .iter()
+            .map(|option| {
+                on_select
+                    .as_deref()
+                    .map(|on_select| on_select(option.clone()))
+            })
+            .collect();
+        let rows = Rows {
+            column: Column::with_children(rows).width(Length::Fill).into(),
+            choices,
+            selected: selected
+                .as_ref()
+                .and_then(|value| options.iter().position(|option| option == value)),
+        };
+        let list = menu::surface(Element::new(rows)).width(Length::Fill).into();
 
         Element::new(Picker {
             field: field.into(),
@@ -169,6 +211,7 @@ where
 /// One option in the open list, highlighted under the pointer.
 fn option_row<'a, T: ToString + Clone, Message: Clone + 'a>(
     option: &T,
+    leading: Option<Element<'a, Message>>,
     selected: bool,
     on_select: Option<&(dyn Fn(T) -> Message + 'a)>,
 ) -> Element<'a, Message> {
@@ -182,7 +225,14 @@ fn option_row<'a, T: ToString + Clone, Message: Clone + 'a>(
         trailing,
         ..Parts::label(&label)
     };
-    let row = widget::button(menu::content(parts, RowStatus::Idle, false))
+    let content = menu::content(parts, RowStatus::Idle, false);
+    let content = match leading {
+        Some(leading) => row![leading, content]
+            .spacing(space::SM)
+            .align_y(Alignment::Center),
+        None => content,
+    };
+    let row = widget::button(content)
         .padding(ROW_PADDING)
         .width(Length::Fill)
         .on_press_maybe(on_select.map(|on_select| on_select(option.clone())))
@@ -222,6 +272,27 @@ struct Picker<'a, Message> {
 struct PickerState {
     panel: anchored::State,
     hovered: bool,
+    focus: focus::State,
+}
+
+/// Whether a key press opens the list of a focused, closed select.
+fn opens_list(key: Named) -> bool {
+    matches!(key, Named::Space | Named::Enter | Named::ArrowDown)
+}
+
+/// Whether a key press chooses the highlighted option of an open list.
+fn chooses(key: Named) -> bool {
+    matches!(key, Named::Space | Named::Enter)
+}
+
+impl<Message> Picker<'_, Message> {
+    /// Opens the list with a fresh highlight on the selected option.
+    fn open(&self, tree: &mut Tree) {
+        if let Some(list) = tree.children.get_mut(1) {
+            *list = Tree::new(&self.list);
+        }
+        tree.state.downcast_mut::<PickerState>().panel.open = true;
+    }
 }
 
 impl<Message: Clone> Widget<Message, Theme, Renderer> for Picker<'_, Message> {
@@ -289,6 +360,9 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for Picker<'_, Message> {
             cursor,
             viewport,
         );
+        if self.enabled && state.focus.is_focused() {
+            focus::draw_ring(renderer, theme, bounds, radius::MD);
+        }
     }
 
     fn operate(
@@ -298,6 +372,10 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for Picker<'_, Message> {
         renderer: &Renderer,
         operation: &mut dyn Operation,
     ) {
+        if self.enabled {
+            let state = tree.state.downcast_mut::<PickerState>();
+            focus::report(operation, None, layout.bounds(), &mut state.focus);
+        }
         self.field
             .as_widget_mut()
             .operate(&mut tree.children[0], layout, renderer, operation);
@@ -318,11 +396,26 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for Picker<'_, Message> {
             return;
         }
         let state = tree.state.downcast_mut::<PickerState>();
+        if state.focus.update(event) {
+            shell.request_redraw();
+        }
         // An open list keeps every key press its panel leaves, so keymaps
-        // behind it do not act while it is open.
+        // behind it do not act while it is open. The list sends the
+        // highlighted option on Space or Enter and leaves the key here,
+        // where it closes the list.
         if state.panel.open && matches!(event, Event::Keyboard(keyboard::Event::KeyPressed { .. }))
         {
+            if focus::named_press(event).is_some_and(chooses) {
+                state.panel.open = false;
+                shell.request_redraw();
+            }
             shell.capture_event();
+            return;
+        }
+        if state.focus.is_focused() && focus::named_press(event).is_some_and(opens_list) {
+            self.open(tree);
+            shell.capture_event();
+            shell.request_redraw();
             return;
         }
         let over = cursor.is_over(layout.bounds());
@@ -335,11 +428,16 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for Picker<'_, Message> {
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
                 | Event::Touch(touch::Event::FingerPressed { .. })
         );
-        if pressed && over {
-            state.panel.open = !state.panel.open;
-            shell.capture_event();
-            shell.request_redraw();
+        if !pressed || !over {
+            return;
         }
+        if state.panel.open {
+            state.panel.open = false;
+        } else {
+            self.open(tree);
+        }
+        shell.capture_event();
+        shell.request_redraw();
     }
 
     fn mouse_interaction(
@@ -380,6 +478,216 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for Picker<'_, Message> {
             &self.behaviour,
             layout.bounds() + translation,
         ))
+    }
+}
+
+/// The option highlighted after `key` in a list of `count` options, from
+/// `current`. Arrows stop at the ends; Home and End jump to them.
+fn step(current: Option<usize>, count: usize, key: Named) -> Option<usize> {
+    let last = count.checked_sub(1)?;
+    match (key, current) {
+        (Named::ArrowDown, None) | (Named::Home, _) => Some(0),
+        (Named::ArrowUp, None) | (Named::End, _) => Some(last),
+        (Named::ArrowDown, Some(index)) => Some((index + 1).min(last)),
+        (Named::ArrowUp, Some(index)) => Some(index.saturating_sub(1).min(last)),
+        _ => current,
+    }
+}
+
+/// The open list's rows, with a highlight the arrow keys and the pointer
+/// move. Space or Enter sends the highlighted option's message; the
+/// [`Picker`] then closes the list.
+struct Rows<'a, Message> {
+    column: Element<'a, Message>,
+    choices: Vec<Option<Message>>,
+    selected: Option<usize>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RowsState {
+    highlight: Option<usize>,
+}
+
+/// The bounds of each option button, inside the row's inset.
+fn row_bounds(layout: Layout<'_>) -> impl Iterator<Item = Rectangle> + '_ {
+    layout
+        .children()
+        .next()
+        .into_iter()
+        .flat_map(|column| column.children())
+        .map(|row| row.children().next().map_or(row.bounds(), |b| b.bounds()))
+}
+
+impl<Message: Clone> Widget<Message, Theme, Renderer> for Rows<'_, Message> {
+    fn tag(&self) -> tree::Tag {
+        tree::Tag::of::<RowsState>()
+    }
+
+    fn state(&self) -> tree::State {
+        tree::State::new(RowsState {
+            highlight: self.selected,
+        })
+    }
+
+    fn children(&self) -> Vec<Tree> {
+        vec![Tree::new(&self.column)]
+    }
+
+    fn diff(&self, tree: &mut Tree) {
+        tree.diff_children(std::slice::from_ref(&self.column));
+    }
+
+    fn size(&self) -> Size<Length> {
+        self.column.as_widget().size()
+    }
+
+    fn layout(
+        &mut self,
+        tree: &mut Tree,
+        renderer: &Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
+        let node = self
+            .column
+            .as_widget_mut()
+            .layout(&mut tree.children[0], renderer, limits);
+        layout::Node::with_children(node.size(), vec![node])
+    }
+
+    fn draw(
+        &self,
+        tree: &Tree,
+        renderer: &mut Renderer,
+        theme: &Theme,
+        style: &renderer::Style,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+    ) {
+        let state = tree.state.downcast_ref::<RowsState>();
+        let highlighted = state
+            .highlight
+            .and_then(|index| row_bounds(layout).nth(index));
+        let background =
+            menu::row_style(&Tokens::of(theme), RowStatus::Highlighted, false).background;
+        if let (Some(bounds), Some(colour)) = (highlighted, background) {
+            <Renderer as renderer::Renderer>::fill_quad(
+                renderer,
+                renderer::Quad {
+                    bounds,
+                    border: Border {
+                        radius: radius::SM.into(),
+                        ..Border::default()
+                    },
+                    ..renderer::Quad::default()
+                },
+                Background::Color(colour),
+            );
+        }
+        let Some(column) = layout.children().next() else {
+            return;
+        };
+        self.column.as_widget().draw(
+            &tree.children[0],
+            renderer,
+            theme,
+            style,
+            column,
+            cursor,
+            viewport,
+        );
+    }
+
+    fn operate(
+        &mut self,
+        tree: &mut Tree,
+        layout: Layout<'_>,
+        renderer: &Renderer,
+        operation: &mut dyn Operation,
+    ) {
+        let Some(column) = layout.children().next() else {
+            return;
+        };
+        self.column
+            .as_widget_mut()
+            .operate(&mut tree.children[0], column, renderer, operation);
+    }
+
+    fn update(
+        &mut self,
+        tree: &mut Tree,
+        event: &Event,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        renderer: &Renderer,
+        clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, Message>,
+        viewport: &Rectangle,
+    ) {
+        let state = tree.state.downcast_mut::<RowsState>();
+        if let Event::Mouse(mouse::Event::CursorMoved { .. }) = event
+            && let Some(index) = row_bounds(layout).position(|bounds| cursor.is_over(bounds))
+            && state.highlight != Some(index)
+        {
+            state.highlight = Some(index);
+            shell.request_redraw();
+        }
+        if let Some(key) = focus::named_press(event) {
+            if chooses(key) {
+                let chosen = state
+                    .highlight
+                    .and_then(|index| self.choices.get(index).cloned().flatten());
+                if let Some(message) = chosen {
+                    shell.publish(message);
+                }
+                return;
+            }
+            let next = step(state.highlight, self.choices.len(), key);
+            if next != state.highlight {
+                state.highlight = next;
+                shell.request_redraw();
+            }
+            if matches!(
+                key,
+                Named::ArrowDown | Named::ArrowUp | Named::Home | Named::End
+            ) {
+                shell.capture_event();
+                return;
+            }
+        }
+        let Some(column) = layout.children().next() else {
+            return;
+        };
+        self.column.as_widget_mut().update(
+            &mut tree.children[0],
+            event,
+            column,
+            cursor,
+            renderer,
+            clipboard,
+            shell,
+            viewport,
+        );
+    }
+
+    fn mouse_interaction(
+        &self,
+        tree: &Tree,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+        renderer: &Renderer,
+    ) -> mouse::Interaction {
+        let Some(column) = layout.children().next() else {
+            return mouse::Interaction::default();
+        };
+        self.column.as_widget().mouse_interaction(
+            &tree.children[0],
+            column,
+            cursor,
+            viewport,
+            renderer,
+        )
     }
 }
 
@@ -483,7 +791,8 @@ impl keys::Action for Action {
 ///
 /// These change the value without opening the menu. Shortcuts are
 /// app-wide, so an app with several selects routes them to the one it
-/// considers current.
+/// considers current. A select with keyboard focus keeps ArrowDown, which
+/// opens its list instead.
 pub fn default_keymap() -> Keymap<Action> {
     Keymap::new()
         .bind(Chord::named(Named::ArrowDown), Action::Next)
@@ -547,6 +856,20 @@ mod tests {
         assert!(s.placeholder.is_none());
         assert_eq!(s.width, Length::Fixed(200.0));
         assert!(!s.is_enabled());
+        assert!(s.leading.is_none());
+    }
+
+    #[test]
+    fn leading_is_asked_per_option() {
+        let s: Select<'_, &str, ()> = select(vec!["red", "plain"], None).leading(|option| {
+            (*option == "red")
+                .then(|| crate::theme::swatch_color(Color::from_rgb(1.0, 0.0, 0.0)).into())
+        });
+        let Some(leading) = s.leading.as_ref() else {
+            panic!("leading is set");
+        };
+        assert!(leading(&"red").is_some());
+        assert!(leading(&"plain").is_none());
     }
 
     #[test]
@@ -636,6 +959,30 @@ mod tests {
             let disabled = option_style(&tokens, Button::Disabled);
             assert_eq!(disabled.text_color, tokens.muted_foreground);
         }
+    }
+
+    #[test]
+    fn keys_that_open_and_choose() {
+        for key in [Named::Space, Named::Enter, Named::ArrowDown] {
+            assert!(opens_list(key), "{key:?}");
+        }
+        assert!(!opens_list(Named::ArrowUp));
+        assert!(!opens_list(Named::Escape));
+        assert!(chooses(Named::Space) && chooses(Named::Enter));
+        assert!(!chooses(Named::ArrowDown));
+    }
+
+    #[test]
+    fn the_highlight_steps_and_stops_at_the_ends() {
+        assert_eq!(step(None, 3, Named::ArrowDown), Some(0));
+        assert_eq!(step(None, 3, Named::ArrowUp), Some(2));
+        assert_eq!(step(Some(0), 3, Named::ArrowDown), Some(1));
+        assert_eq!(step(Some(2), 3, Named::ArrowDown), Some(2));
+        assert_eq!(step(Some(0), 3, Named::ArrowUp), Some(0));
+        assert_eq!(step(Some(1), 3, Named::Home), Some(0));
+        assert_eq!(step(Some(1), 3, Named::End), Some(2));
+        assert_eq!(step(Some(1), 3, Named::Tab), Some(1));
+        assert_eq!(step(None, 0, Named::ArrowDown), None);
     }
 
     #[test]

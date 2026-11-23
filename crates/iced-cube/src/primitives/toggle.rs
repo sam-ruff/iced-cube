@@ -5,12 +5,16 @@
 //! owns the bool and flips it in `on_toggle`, as with a switch. For a set of
 //! toggles where one or several can be on, use
 //! [`toggle_group`](mod@crate::primitives::toggle_group).
+//!
+//! An enabled toggle takes keyboard focus from iced's focus operations,
+//! rings while focused and flips with Space or Enter.
 
 use iced::keyboard::key::Named;
 use iced::widget::{self, button::Status, row, text};
 use iced::{Alignment, Background, Border, Color, Element, Length, Padding, Shadow};
 
 use crate::after_touch::after_touch;
+use crate::focus::{Ring, focusable};
 use crate::icon::{Glyph, opacity, themed};
 use crate::keys::{self, Chord, Keymap};
 use crate::natural::natural;
@@ -168,7 +172,10 @@ impl<'a, Message: Clone + 'a> From<Toggle<'a, Message>> for Element<'a, Message>
             on_toggle,
         } = toggle;
         let message = on_toggle.map(|on_toggle| on_toggle(!pressed));
-        natural(button(
+        let on_activate = message
+            .clone()
+            .map(|message| Box::new(move || message.clone()) as Box<dyn Fn() -> Message + 'a>);
+        let control = natural(button(
             label,
             icon,
             pressed,
@@ -176,7 +183,8 @@ impl<'a, Message: Clone + 'a> From<Toggle<'a, Message>> for Element<'a, Message>
             Length::Shrink,
             message,
             move |tokens, status| style(tokens, variant, pressed, status),
-        ))
+        ));
+        focusable(control, on_activate, Ring::around(radius::MD)).into()
     }
 }
 

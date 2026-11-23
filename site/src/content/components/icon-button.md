@@ -31,6 +31,11 @@ api:
     description: "Sets a widget id, for clicking the button in tests."
   - name: "colours(tokens, variant, pressed, status) / style(...)"
     description: "The resolved colours and iced style, for reuse in custom widgets."
+keyboard:
+  - keys: "Tab, Shift + Tab"
+    action: "Moves keyboard focus to or from the button inside a dialog, or wherever the app runs iced's focus_next and focus_previous. Focus shows the label's tooltip."
+  - keys: "Enter, Space"
+    action: "Presses the focused button."
 ---
 
 Give every icon button a label. The icon alone rarely says enough, and the label shows as a tooltip so people can check what a button does before they press it. iced 0.14 has no screen reader support, so the label cannot reach assistive technology yet.

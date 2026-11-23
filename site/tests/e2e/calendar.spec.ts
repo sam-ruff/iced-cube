@@ -87,7 +87,7 @@ test("the creating example shows the code of the entry form", async ({ page }) =
   const code = root.locator('[data-panel="code"] pre');
   await expect(code).toContainText("editor::State::new(&draft, time_zone)");
   await expect(code).toContainText("calendar::Event::Insert(entry)");
-  await expect(code).toContainText("scroll_area(");
+  await expect(code).toContainText(".on_submit(Message::Save)");
   await noHorizontalScroll(page);
 });
 

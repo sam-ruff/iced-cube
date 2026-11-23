@@ -107,6 +107,38 @@ fn menu_in_dialog_one_outside_click_closes_only_the_menu() {
 }
 
 #[test]
+fn a_menu_at_the_end_of_a_scrolled_dialog_body_still_works() -> Result<(), iced_test::Error> {
+    let state = open_menu();
+    let filler = (0..30).map(|line| text(format!("Line {line}")).into());
+    let body = iced::widget::column(filler).push(
+        dropdown_menu(&state, button(text("Actions")).on_press(Message::Toggle))
+            .on_event(Message::Menu),
+    );
+    let mut ui = iced_test::Simulator::with_size(
+        iced::Settings::default(),
+        iced::Size::new(480.0, 360.0),
+        in_dialog(body),
+    );
+    let surface = ui.find("Line 0")?.bounds();
+    let at = Point::new(surface.x + 20.0, surface.y + 10.0);
+    ui.point_at(at);
+    let _ = ui.simulate([Event::Mouse(mouse::Event::WheelScrolled {
+        delta: mouse::ScrollDelta::Pixels { x: 0.0, y: -2000.0 },
+    })]);
+    assert!(
+        ui.find("Actions")?.visible_bounds().is_some(),
+        "the trigger scrolled into view"
+    );
+    ui.click("Copy")?;
+    let emitted = messages(ui);
+    assert!(
+        emitted.contains(&Message::Menu(dropdown_menu::Event::Activate(2))),
+        "{emitted:?}"
+    );
+    Ok(())
+}
+
+#[test]
 fn a_closed_menu_in_a_dialog_leaves_the_scrim_click_to_the_dialog() {
     let state = dropdown_menu::State::new([dropdown_menu::item(1u8, "Edit")]);
     let menu = dropdown_menu(&state, button(text("Actions")).on_press(Message::Toggle))

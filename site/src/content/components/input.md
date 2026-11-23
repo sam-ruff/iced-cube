@@ -10,7 +10,7 @@ imports: |
 keywords: [text field, text input]
 related: [field, textarea]
 hero: input/with-icon
-stories: [input/default, input/with-icon, input/password, input/states]
+stories: [input/default, input/with-icon, input/password, input/states, input/clearable]
 api:
   - name: "input(placeholder, value)"
     description: "Creates a text input showing value, with the placeholder while it is empty. It renders disabled until it has on_input."
@@ -24,6 +24,12 @@ api:
     description: "Masks the value, for passwords and other secrets."
   - name: ".invalid(bool)"
     description: "Draws a destructive border. Pair it with an error message from field."
+  - name: ".clearable(message)"
+    description: "Draws an x button at the end of the field while it holds text and is enabled. Pressing it emits the message, and the app empties the value."
+  - name: ".max_length(n)"
+    description: "Stops edits from growing the value past n characters (not bytes). Typing at the limit does nothing and pasted text is cut to what fits."
+  - name: "input::clear_id()"
+    description: "The widget id of the clear button, to find or press it in tests."
   - name: ".size(Size)"
     description: "Sm, Md or Lg (32, 36 and 40 pixels tall). Defaults to Md."
   - name: ".id(id) / .width(length)"
@@ -50,6 +56,8 @@ Inputs are controlled: the app stores the value, passes it to `input` and update
 Undo comes built in. The input remembers its own edits and sends the earlier value through `on_input`, so there is nothing to store. Typing undoes a word at a time, and a paste, cut or deleted word is a step of its own. If your app changes the value itself, for example by loading another record, the history starts again.
 
 Each shortcut is a `Shortcut`, and a `Shortcuts` set says which ones a field handles. Turn off the ones your app handles itself, for example `.shortcuts(Shortcuts::all().without(Shortcut::Undo).without(Shortcut::Redo))` when the app has its own undo, or `.shortcuts(Shortcuts::none())` for iced's plain behaviour. The textarea, and every component with a search or filter field (combobox, command, command palette, data table, log viewer, JSON viewer and property grid), takes the same set. A key typed with Ctrl or Cmd held never types its character, whatever the set.
+
+A limit set with `.max_length(n)` holds for typing, pasting and undo. A longer value set by the app is shown as it is: it can be shortened but not grown.
 
 To name an input, wrap it in [`field`](../field/), which adds a label, a description and an error message. Set `.invalid(true)` on the input when the field has an error so the border matches.
 

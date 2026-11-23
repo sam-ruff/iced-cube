@@ -1,0 +1,21 @@
+[package]
+name = "iced-cube-rules"
+version = "0.0.15"
+description = "The date rules behind the iced-cube calendar: spans of time and repeating entries, with no GUI dependency"
+readme = "README.md"
+keywords = ["calendar", "recurrence", "repeat", "dates"]
+categories = ["date-and-time"]
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage = "https://sam-ruff.github.io/iced-cube/"
+documentation = "https://docs.rs/iced-cube-rules"
+
+[lints]
+workspace = true
+
+[dependencies]
+jiff = "1.0.2"
+
+[dev-dependencies]
+jiff = { version = "1.0.2", features = ["tzdb-bundle-always"] }

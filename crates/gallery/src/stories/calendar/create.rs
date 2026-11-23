@@ -1,11 +1,10 @@
+use iced::Element;
 use iced::widget::container;
-use iced::{Element, Padding};
 use iced_cube::button;
 use iced_cube::data::calendar::editor::{self, editor};
 use iced_cube::data::calendar::{self, Entries, Entry, EntryId, Output, View, calendar, instant};
 use iced_cube::overlay::dialog::dialog;
 use iced_cube::primitives::button::Variant;
-use iced_cube::scroll_area;
 use jiff::Timestamp;
 use jiff::civil::{date, time};
 use jiff::tz::TimeZone;
@@ -18,9 +17,6 @@ pub enum Message {
     Delete,
     Close,
 }
-
-/// How much of the form the dialog shows at once.
-const FORM_HEIGHT: f32 = 280.0;
 
 #[derive(Debug)]
 pub struct Example {
@@ -109,18 +105,12 @@ impl Example {
         let mut editing = dialog(base)
             .open(true)
             .title(heading)
-            // The form grows with its fields, so it scrolls inside the
-            // dialog. The padding keeps the fields clear of the scrollbar.
+            // The form grows with its fields; the dialog scrolls it when
+            // the window is short and keeps the buttons in view.
             .body(
-                scroll_area(
-                    container(
-                        editor(form)
-                            .on_event(Message::Form)
-                            .on_submit(Message::Save),
-                    )
-                    .padding(Padding::ZERO.right(12)),
-                )
-                .height(FORM_HEIGHT),
+                editor(form)
+                    .on_event(Message::Form)
+                    .on_submit(Message::Save),
             )
             .on_dismiss(Message::Close);
         if !form.is_new() {

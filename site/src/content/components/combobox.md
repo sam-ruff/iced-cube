@@ -7,7 +7,7 @@ module: forms::combobox
 imports: |
   use iced_cube::forms::combobox::{self, State, combobox};
 keywords: [autocomplete, typeahead, search select, suggestions]
-related: [select, command, field]
+related: [select, multi-combobox, command, field]
 hero: combobox/default
 stories: [combobox/default, combobox/empty, combobox/field, combobox/keyboard]
 api:

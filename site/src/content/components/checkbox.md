@@ -23,8 +23,15 @@ api:
     description: "The default shortcuts as a Keymap<Action>, for apps that track a current checkbox."
   - name: "Action::Toggle.apply(state)"
     description: "The checked value a click would send. Pass it to your on_toggle message."
+keyboard:
+  - keys: "Tab, Shift + Tab"
+    action: "Moves keyboard focus to or from the checkbox inside a dialog, or wherever the app runs iced's focus_next and focus_previous."
+  - keys: "Space, Enter"
+    action: "Toggles the focused checkbox."
 ---
 
 Use a checkbox for independent options that take effect when a form is submitted. For a setting that applies straight away, a switch reads better.
+
+An enabled checkbox can take keyboard focus. Its box then rings, and Space or Enter toggles it. A click never leaves the ring showing.
 
 The indeterminate state is for a parent box whose children are partly selected. The app works out the parent's state from its children, as the select-all example shows, and a click on an indeterminate box always checks it.

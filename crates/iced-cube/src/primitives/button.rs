@@ -4,6 +4,7 @@ use iced::widget::{self, button::Status, row, text};
 use iced::{Alignment, Background, Border, Element, Length, Padding, Shadow};
 
 use crate::after_touch::after_touch;
+use crate::focus::{Ring, focusable};
 use crate::icon::{Glyph, opacity, themed};
 use crate::natural::natural;
 use crate::theme::{Tokens, fade, mix, radius, text_size};
@@ -99,6 +100,10 @@ pub struct Metrics {
 /// A button builder. Convert it into an [`Element`] to render.
 ///
 /// A button without a message is rendered disabled.
+///
+/// An enabled button takes part in iced's focus operations, such as a
+/// dialog's Tab order. While it has keyboard focus it draws a ring and
+/// Enter or Space presses it. A pointer press never focuses it.
 #[derive(Debug)]
 pub struct Button<'a, Message> {
     label: Option<text::Fragment<'a>>,
@@ -107,6 +112,7 @@ pub struct Button<'a, Message> {
     variant: Variant,
     size: Size,
     width: Length,
+    align_x: Alignment,
     on_press: Option<Message>,
 }
 
@@ -119,6 +125,7 @@ pub fn button<'a, Message>(label: impl text::IntoFragment<'a>) -> Button<'a, Mes
         variant: Variant::default(),
         size: Size::default(),
         width: Length::Shrink,
+        align_x: Alignment::Center,
         on_press: None,
     }
 }
@@ -151,6 +158,13 @@ impl<'a, Message> Button<'a, Message> {
 
     pub fn width(mut self, width: impl Into<Length>) -> Self {
         self.width = width.into();
+        self
+    }
+
+    /// Where the icon and label sit when the button is wider than they
+    /// are, such as a full-width button in a list. Centred by default.
+    pub fn align_x(mut self, alignment: impl Into<Alignment>) -> Self {
+        self.align_x = alignment.into();
         self
     }
 
@@ -213,12 +227,16 @@ impl<'a, Message: Clone + 'a> From<Button<'a, Message>> for Element<'a, Message>
             ),
         };
 
-        natural(after_touch(
+        let on_activate = button
+            .on_press
+            .clone()
+            .map(|message| Box::new(move || message.clone()) as Box<dyn Fn() -> Message + 'a>);
+        let control = natural(after_touch(
             widget::button(
                 widget::container(content)
                     .height(Length::Fill)
                     .align_y(Alignment::Center)
-                    .align_x(Alignment::Center)
+                    .align_x(button.align_x)
                     .width(Length::Fill),
             )
             .width(width)
@@ -226,7 +244,8 @@ impl<'a, Message: Clone + 'a> From<Button<'a, Message>> for Element<'a, Message>
             .padding(padding)
             .on_press_maybe(button.on_press)
             .style(move |theme, status| style(&Tokens::of(theme), variant, status)),
-        ))
+        ));
+        focusable(control, on_activate, Ring::around(radius::MD)).into()
     }
 }
 
@@ -350,7 +369,16 @@ mod tests {
         let b: Button<'_, ()> = button("Save");
         assert_eq!(b.variant, Variant::Primary);
         assert_eq!(b.size, Size::Md);
+        assert_eq!(b.align_x, Alignment::Center);
         assert!(!b.is_enabled());
+    }
+
+    #[test]
+    fn align_x_is_kept() {
+        let b: Button<'_, ()> = button("General").align_x(Alignment::Start);
+        assert_eq!(b.align_x, Alignment::Start);
+        let b: Button<'_, ()> = button("General").align_x(iced::alignment::Horizontal::Right);
+        assert_eq!(b.align_x, Alignment::End);
     }
 
     #[test]

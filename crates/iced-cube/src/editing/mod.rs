@@ -7,6 +7,7 @@
 //! anything.
 
 mod history;
+mod limit;
 
 use std::cell::Cell;
 use std::fmt;
@@ -22,6 +23,7 @@ use iced::{Element, Event, Length, Rectangle, Renderer, Size, Theme, Vector, mou
 use crate::keys::{self, Chord, Keymap};
 
 pub(crate) use history::{Edit, History, Restore};
+pub(crate) use limit::Limit;
 
 /// A shortcut that inputs, textareas and the search fields inside other
 /// components add to iced's own editing keys. Each can be switched off in a
@@ -308,6 +310,12 @@ pub(crate) trait Field<Message> {
     ) -> bool;
 
     fn unfocus(&self, tree: &mut Tree);
+
+    /// Runs before the wrapped widget sees an event.
+    fn before_event(&self, _tree: &Tree) {}
+
+    /// Runs after the wrapped widget has handled an event.
+    fn after_event(&self, _tree: &mut Tree) {}
 }
 
 /// Wraps a field to add the enabled [`Shortcut`]s of `keymap` and an undo
@@ -551,6 +559,7 @@ impl<Message, F: Field<Message>> Widget<Message, Theme, Renderer> for Editing<'_
         let replacing = focused && self.field.has_selection(&tree.children[0]);
         let captured = shell.is_event_captured();
         self.edited.set(false);
+        self.field.before_event(&tree.children[0]);
         self.content.as_widget_mut().update(
             &mut tree.children[0],
             event,
@@ -561,6 +570,7 @@ impl<Message, F: Field<Message>> Widget<Message, Theme, Renderer> for Editing<'_
             shell,
             viewport,
         );
+        self.field.after_event(&mut tree.children[0]);
 
         if !self.shortcuts.has_history() {
             return;
@@ -660,6 +670,7 @@ pub(crate) struct Input<'a, Message> {
     value: String,
     secure: bool,
     on_input: Rc<dyn Fn(String) -> Message + 'a>,
+    limit: Option<Rc<Limit>>,
 }
 
 impl<'a, Message> Input<'a, Message> {
@@ -668,7 +679,15 @@ impl<'a, Message> Input<'a, Message> {
             value: value.to_owned(),
             secure,
             on_input,
+            limit: None,
         }
+    }
+
+    /// Keeps the field within a [`Limit`], which its message closure must
+    /// also apply.
+    pub fn limit(mut self, limit: Option<Rc<Limit>>) -> Self {
+        self.limit = limit;
+        self
     }
 }
 
@@ -701,11 +720,14 @@ impl<Message> Field<Message> for Input<'_, Message> {
     }
 
     fn restore(&self, tree: &mut Tree, restore: Restore, shell: &mut Shell<'_, Message>) {
-        let caret = restore
-            .text
-            .get(..restore.caret)
+        let text = match &self.limit {
+            Some(limit) => limit.truncate(restore.text),
+            None => restore.text,
+        };
+        let caret = text
+            .get(..restore.caret.min(text.len()))
             .map_or(0, |head| Value::new(head).len());
-        shell.publish((self.on_input)(restore.text));
+        shell.publish((self.on_input)(text));
         if let Some(state) = input_state_mut(tree) {
             state.move_cursor_to(caret);
         }
@@ -741,6 +763,30 @@ impl<Message> Field<Message> for Input<'_, Message> {
     fn unfocus(&self, tree: &mut Tree) {
         if let Some(state) = input_state_mut(tree) {
             state.unfocus();
+        }
+    }
+
+    fn before_event(&self, tree: &Tree) {
+        let Some(limit) = &self.limit else {
+            return;
+        };
+        let Some(state) = input_state(tree).filter(|state| state.is_focused()) else {
+            return;
+        };
+        let value = Value::new(&self.value);
+        let (start, end) = state.cursor().selection(&value).unwrap_or_else(|| {
+            let caret = caret(state, &value);
+            (caret, caret)
+        });
+        limit.replacing(start, end);
+    }
+
+    fn after_event(&self, tree: &mut Tree) {
+        let Some(caret) = self.limit.as_ref().and_then(|limit| limit.take_caret()) else {
+            return;
+        };
+        if let Some(state) = input_state_mut(tree) {
+            state.move_cursor_to(caret);
         }
     }
 }

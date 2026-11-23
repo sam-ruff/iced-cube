@@ -65,12 +65,9 @@ fn shows(ui: &mut Simulator<'_, Message>, label: &str) -> bool {
 /// in the row above "Starts". A switch's label is not text a selector can
 /// find.
 fn toggle_all_day(ui: &mut Simulator<'_, Message>) {
-    let starts = match ui.find("Starts") {
-        Ok(target) => target.bounds(),
-        Err(error) => panic!("{error:?}"),
-    };
-    ui.point_at(Point::new(16.0, starts.center_y() - 41.0));
-    let _ = ui.simulate(click());
+    if let Err(error) = ui.click("All day") {
+        panic!("{error:?}");
+    }
 }
 
 #[test]

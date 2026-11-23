@@ -7,7 +7,7 @@ use iced_cube::data::{
     calendar, data_table, json_viewer, log_viewer, property_grid, selectable_text, tree,
     virtual_list,
 };
-use iced_cube::forms::{combobox, rich_text_editor, select};
+use iced_cube::forms::{combobox, multi_combobox, rich_text_editor, select};
 use iced_cube::keys::{Action, Keymap};
 use iced_cube::layout::{accordion, resizable_panel};
 use iced_cube::navigation::{
@@ -65,6 +65,7 @@ pub fn all() -> BTreeMap<&'static str, Vec<Binding>> {
         ("json-viewer", bindings::<json_viewer::Action>()),
         ("log-viewer", bindings::<log_viewer::Action>()),
         ("menubar", bindings::<menubar::Action>()),
+        ("multi-combobox", bindings::<multi_combobox::Action>()),
         ("pagination", bindings::<pagination::Action>()),
         ("popover", bindings::<popover::Action>()),
         ("property-grid", bindings::<property_grid::Action>()),

@@ -17,16 +17,22 @@ use jiff::civil::Date;
 use jiff::tz::TimeZone;
 
 use super::entry::{Draft, Occurrence, Tone, When, add_days};
+use super::gesture::{Click, click};
+use super::gesture::{DayDrag, DayGrid};
 use super::layout::{self as geometry, Block, DAY_MINUTES, Grid, instant_at, minute_on, snap};
+use super::month;
 use super::parts::{
-    Handler, LANE_GAP, day_heading, day_number, lanes, selection_of, send, time_label,
-    weekday_label,
+    CHIP_HEIGHT, Handler, LANE_GAP, day_heading, day_id, day_number, entry_icon, entry_id,
+    hatch_handle, lanes, look_of, pressable, selection_of, send, time_label, weekday_label,
 };
 use super::state::{Allow, Event, SLOT_MINUTES, Selection, State};
 use super::style;
 use crate::data::ellipsis::ellipsis;
+use crate::icon::opaque;
 use crate::primitives::scroll_area;
 use crate::theme::{self, Tokens, mix, radius, space, text_size};
+use iced::advanced::svg::Renderer as _;
+use iced::time::{Duration, Instant};
 
 /// The step drags snap to, in minutes.
 pub const SNAP_MINUTES: u16 = 15;
@@ -87,6 +93,8 @@ pub fn scroll_to_hour<Message>(hour: u8, hour_height: f32) -> Task<Message> {
 pub(super) struct Options {
     pub hours: (u8, u8),
     pub hour_height: f32,
+    /// The hour scrolled to when a timed view comes on show.
+    pub start_hour: Option<u8>,
 }
 
 impl Options {
@@ -158,19 +166,175 @@ pub(super) fn view<'a, Message: Clone + 'a>(
                 let options = options.stretched_to(area.height);
                 // The scrollbar floats over the edge of the last day, so
                 // the columns stay under their headers.
-                scrollable::Scrollable::with_direction(
+                let scroller = scrollable::Scrollable::with_direction(
                     hours(state, &days, options, &on_event),
                     scrollable::Direction::Vertical(scroll_area::floating_scrollbar()),
                 )
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .id(scroll_id())
-                .style(|theme, status| scroll_area::style(&Tokens::of(theme), status))
-                .into()
+                .style(|theme, status| scroll_area::style(&Tokens::of(theme), status));
+                let Some(hour) = options.start_hour else {
+                    return scroller.into();
+                };
+                Element::new(StartAt {
+                    content: scroller.into(),
+                    offset: hour_offset(hour, options.hours.0, options.hour_height),
+                    scrolls: state.scrolls(),
+                })
             }))
             .into()
     })
     .into()
+}
+
+/// Scrolls the hours inside it to the start hour the first time it sees
+/// an event, and again whenever [`State`] asks for it after Today or a
+/// switch to a timed view.
+struct StartAt<'a, Message> {
+    content: Element<'a, Message>,
+    offset: f32,
+    scrolls: u32,
+}
+
+impl<Message> Widget<Message, Theme, Renderer> for StartAt<'_, Message> {
+    fn tag(&self) -> tree::Tag {
+        tree::Tag::of::<Option<u32>>()
+    }
+
+    fn state(&self) -> tree::State {
+        tree::State::new(None::<u32>)
+    }
+
+    fn children(&self) -> Vec<Tree> {
+        vec![Tree::new(&self.content)]
+    }
+
+    fn diff(&self, tree: &mut Tree) {
+        tree.diff_children(std::slice::from_ref(&self.content));
+    }
+
+    fn size(&self) -> Size<Length> {
+        self.content.as_widget().size()
+    }
+
+    fn layout(
+        &mut self,
+        tree: &mut Tree,
+        renderer: &Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
+        self.content
+            .as_widget_mut()
+            .layout(&mut tree.children[0], renderer, limits)
+    }
+
+    fn operate(
+        &mut self,
+        tree: &mut Tree,
+        layout: Layout<'_>,
+        renderer: &Renderer,
+        operation: &mut dyn Operation,
+    ) {
+        self.content
+            .as_widget_mut()
+            .operate(&mut tree.children[0], layout, renderer, operation);
+    }
+
+    fn update(
+        &mut self,
+        tree: &mut Tree,
+        event: &Input,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        renderer: &Renderer,
+        clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, Message>,
+        viewport: &Rectangle,
+    ) {
+        if *tree.state.downcast_ref::<Option<u32>>() != Some(self.scrolls) {
+            *tree.state.downcast_mut::<Option<u32>>() = Some(self.scrolls);
+            let mut scroll = iced::advanced::widget::operation::scrollable::scroll_to::<()>(
+                scroll_id(),
+                scrollable::AbsoluteOffset {
+                    x: None,
+                    y: Some(self.offset),
+                },
+            );
+            self.content.as_widget_mut().operate(
+                &mut tree.children[0],
+                layout,
+                renderer,
+                &mut scroll,
+            );
+            shell.request_redraw();
+        }
+        self.content.as_widget_mut().update(
+            &mut tree.children[0],
+            event,
+            layout,
+            cursor,
+            renderer,
+            clipboard,
+            shell,
+            viewport,
+        );
+    }
+
+    fn mouse_interaction(
+        &self,
+        tree: &Tree,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+        renderer: &Renderer,
+    ) -> mouse::Interaction {
+        self.content.as_widget().mouse_interaction(
+            &tree.children[0],
+            layout,
+            cursor,
+            viewport,
+            renderer,
+        )
+    }
+
+    fn draw(
+        &self,
+        tree: &Tree,
+        renderer: &mut Renderer,
+        theme: &Theme,
+        style: &renderer::Style,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+    ) {
+        self.content.as_widget().draw(
+            &tree.children[0],
+            renderer,
+            theme,
+            style,
+            layout,
+            cursor,
+            viewport,
+        );
+    }
+
+    fn overlay<'b>(
+        &'b mut self,
+        tree: &'b mut Tree,
+        layout: Layout<'b>,
+        renderer: &Renderer,
+        viewport: &Rectangle,
+        translation: iced::Vector,
+    ) -> Option<iced::advanced::overlay::Element<'b, Message, Theme, Renderer>> {
+        self.content.as_widget_mut().overlay(
+            &mut tree.children[0],
+            layout,
+            renderer,
+            viewport,
+            translation,
+        )
+    }
 }
 
 fn rule<'a, Message: 'a>() -> Element<'a, Message> {
@@ -220,17 +384,53 @@ fn day_button<'a, Message: Clone + 'a>(
     } else {
         day_number(date, day)
     };
-    widget::button(
+    let button = widget::button(
         column![name, number]
             .spacing(2.0)
             .align_x(Alignment::Center)
             .width(Length::Fill),
     )
-    .width(Length::FillPortion(1))
+    .width(Length::Fill)
     .padding(Padding::from([space::XS, 0.0]))
     .on_press_maybe(send(on_event, Event::Press(Selection::Day(date))))
-    .style(move |theme, status| style::cell(&Tokens::of(theme), day, status))
-    .into()
+    .style(move |theme, status| style::cell(&Tokens::of(theme), day, status));
+    container(pressable(state, button, Selection::Day(date), on_event))
+        .id(day_id(date))
+        .width(Length::FillPortion(1))
+        .into()
+}
+
+/// The id of the hours of the week and day views, whose bounds
+/// [`point_at`] measures from.
+pub fn hours_id() -> widget::Id {
+    widget::Id::new("iced-cube-calendar-hours-grid")
+}
+
+/// The point on screen of `minute` past midnight on the `day`th column
+/// of hours, when the hours found by [`hours_id`] have `bounds` and show
+/// `days` columns from `first_hour`, each hour `hour_height` tall. For
+/// driving a drag in a test without working out the layout by hand.
+/// The point is in the middle of the column.
+pub fn point_at(
+    bounds: Rectangle,
+    days: usize,
+    day: usize,
+    minute: u16,
+    first_hour: u8,
+    hour_height: f32,
+) -> Point {
+    let grid = Grid {
+        width: bounds.width,
+        gutter: GUTTER,
+        days: days.max(1),
+        hour_height,
+        first_hour,
+        last_hour: 24,
+    };
+    Point::new(
+        bounds.x + grid.day_x(day) + grid.day_width() / 2.0,
+        bounds.y + grid.y_of(minute),
+    )
 }
 
 /// The days above their columns.
@@ -272,7 +472,7 @@ fn all_day<'a, Message: Clone + 'a>(
 ) -> Option<Element<'a, Message>> {
     let (first, last) = (*days.first()?, *days.last()?);
     let occurrences: Vec<Occurrence> = state
-        .entries()
+        .shown()
         .between(first, last)
         .into_iter()
         .filter(|occurrence| occurrence.all_day)
@@ -295,16 +495,32 @@ fn all_day<'a, Message: Clone + 'a>(
         .style(|theme: &Theme| text::Style {
             color: Some(Tokens::of(theme).muted_foreground),
         });
+    let strip = row![
+        container(label)
+            .width(Length::Fixed(GUTTER))
+            .padding(Padding::from([0.0, space::XS]))
+            .align_x(Alignment::End),
+        lanes(state, days, &fitted, room, on_event).width(Length::Fill),
+    ]
+    .padding(Padding::from([LANE_GAP, 0.0]))
+    .align_y(Alignment::Center);
+    let grid = DayGrid {
+        columns: days.len(),
+        rows: 1,
+        left: GUTTER,
+        top: LANE_GAP,
+        bar_height: CHIP_HEIGHT,
+        lane_gap: LANE_GAP,
+    };
     Some(
-        row![
-            container(label)
-                .width(Length::Fixed(GUTTER))
-                .padding(Padding::from([0.0, space::XS]))
-                .align_x(Alignment::End),
-            lanes(state, days, &fitted, room, on_event).width(Length::Fill),
-        ]
-        .padding(Padding::from([LANE_GAP, 0.0]))
-        .align_y(Alignment::Center)
+        DayDrag::new(
+            strip,
+            grid,
+            days.to_vec(),
+            month::targets(state, 0, &fitted),
+            state.time_zone().clone(),
+            on_event,
+        )
         .into(),
     )
 }
@@ -329,7 +545,9 @@ struct Placed {
     day: usize,
     block: Block,
     tone: Tone,
-    selected: bool,
+    look: style::Look,
+    /// Held and pressed, but never moved or resized.
+    locked: bool,
 }
 
 /// The hours of `days` with their timed entries.
@@ -363,33 +581,50 @@ fn hours<'a, Message: Clone + 'a>(
 
     let mut placed = Vec::new();
     for (day, date) in days.iter().enumerate() {
-        let occurrences = state.entries().on(*date);
+        let occurrences = state.shown().on(*date);
         for block in geometry::blocks(*date, &occurrences, time_zone) {
-            let Some(entry) = state.entries().get(block.occurrence.entry) else {
+            let Some(entry) = state.shown().get(block.occurrence.entry) else {
                 continue;
             };
             let tone = entry.tone_of();
-            let selected = state.is_selected(selection_of(&block.occurrence));
+            let look = look_of(
+                state,
+                entry,
+                state.is_selected(selection_of(&block.occurrence)),
+            );
             let colour = move |theme: &Theme| {
-                style::chip(&Tokens::of(theme), tone, selected, Status::Active).foreground
+                style::marked(&Tokens::of(theme), tone, look, Status::Active)
+                    .chip
+                    .foreground
             };
-            let mut lines = column![
-                ellipsis(entry.title().to_owned())
-                    .size(text_size::XS, LINE)
-                    .font(theme::semibold())
-                    .colour(colour)
-            ];
+            let title = ellipsis(entry.title().to_owned())
+                .size(text_size::XS, LINE)
+                .font(theme::semibold())
+                .colour(colour);
+            let title: Element<'a, Message> = match entry_icon(entry, look, tone, text_size::XS) {
+                Some(icon) => row![icon, title]
+                    .spacing(3.0)
+                    .align_y(Alignment::Center)
+                    .into(),
+                None => title.into(),
+            };
+            let mut lines = column![title];
             let height = grid.y_of(block.drawn_bottom()) - grid.y_of(block.drawn_top());
             if height >= 2.0 * LINE + BLOCK_PADDING {
                 let time = block_label(&block, days.len() > 1, time_zone);
                 lines = lines.push(ellipsis(time).size(11.0, LINE).colour(colour));
             }
-            children.push(lines.into());
+            children.push(
+                container(lines)
+                    .id(entry_id(block.occurrence.entry, block.occurrence.start))
+                    .into(),
+            );
             placed.push(Placed {
                 day,
                 block,
                 tone,
-                selected,
+                look,
+                locked: entry.is_locked() || look.preview,
             });
         }
     }
@@ -402,7 +637,7 @@ fn hours<'a, Message: Clone + 'a>(
         _ => None,
     };
     let now = state.now().and_then(|now| {
-        let date = state.entries().date_of(now);
+        let date = state.shown().date_of(now);
         let day = days.iter().position(|day| *day == date)?;
         Some((day, minute_on(date, now, time_zone)))
     });
@@ -418,6 +653,7 @@ fn hours<'a, Message: Clone + 'a>(
         now,
         slot,
         allow: state.allow(),
+        double_click: state.double_click(),
         on_event: on_event.clone(),
     })
 }
@@ -504,6 +740,7 @@ fn grab(placed: &[Placed], hit: Hit, first_minute: u16) -> Option<Grab> {
             day,
             anchor: minutes,
         }),
+        Hit::Block { index, .. } if placed.get(index)?.locked => Some(Grab::Hold { index }),
         Hit::Block { index, edge: true } => Some(Grab::Resize { index }),
         Hit::Block { index, edge: false } => {
             let block = placed.get(index)?.block;
@@ -607,21 +844,24 @@ fn dropped(
 }
 
 /// The event a press without a drag sends: an entry or a time slot is
-/// selected, or activated when it already was.
-fn pressed(days: &[Date], placed: &[Placed], hit: Hit) -> Option<Event> {
-    match hit {
-        Hit::Nothing => None,
-        Hit::Block { index, .. } => Some(Event::Press(selection_of(
-            &placed.get(index)?.block.occurrence,
-        ))),
+/// pressed, or double pressed when the press completes a double click.
+fn pressed(days: &[Date], placed: &[Placed], hit: Hit, double: bool) -> Option<Event> {
+    let selection = match hit {
+        Hit::Nothing => return None,
+        Hit::Block { index, .. } => selection_of(&placed.get(index)?.block.occurrence),
         Hit::Slot { day, minutes } => {
             let minute = (minutes as u16 / SLOT_STEP) * SLOT_STEP;
-            Some(Event::Press(Selection::Slot {
+            Selection::Slot {
                 date: *days.get(day)?,
                 minute: minute.min(DAY_MINUTES - SLOT_STEP),
-            }))
+            }
         }
-    }
+    };
+    Some(if double {
+        Event::DoublePress(selection)
+    } else {
+        Event::Press(selection)
+    })
 }
 
 /// A press in progress.
@@ -633,6 +873,8 @@ struct Press {
     origin: Point,
     pointer: Point,
     dragged: bool,
+    /// Whether the press completed a double click.
+    double: bool,
 }
 
 /// What the grid remembers between events.
@@ -642,6 +884,18 @@ struct Memory {
     /// A finger that is down, and where it landed.
     finger: Option<(touch::Finger, Point)>,
     hover: Option<Hit>,
+    /// The last press or tap, for telling a double one.
+    click: Option<Click>,
+}
+
+impl Memory {
+    /// Counts a press at `point`, and whether it completes a double one.
+    fn count(&mut self, point: Point, interval: Duration) -> bool {
+        let click = click(self.click, point, Instant::now(), interval);
+        // A double press starts the count again.
+        self.click = (click.count == 1).then_some(click);
+        click.count == 2
+    }
 }
 
 struct Hours<'a, Message> {
@@ -656,6 +910,7 @@ struct Hours<'a, Message> {
     now: Option<(usize, u16)>,
     slot: Option<(usize, u16)>,
     allow: Allow,
+    double_click: Duration,
     on_event: Handler<'a, Message>,
 }
 
@@ -769,7 +1024,7 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for Hours<'_, Message> {
         renderer: &Renderer,
         operation: &mut dyn Operation,
     ) {
-        operation.container(None, layout.bounds());
+        operation.container(Some(&hours_id()), layout.bounds());
         operation.traverse(&mut |operation| {
             for ((child, tree), layout) in self
                 .children
@@ -790,11 +1045,25 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for Hours<'_, Message> {
         event: &Input,
         layout: Layout<'_>,
         cursor: mouse::Cursor,
-        _renderer: &Renderer,
-        _clipboard: &mut dyn Clipboard,
+        renderer: &Renderer,
+        clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
-        _viewport: &Rectangle,
+        viewport: &Rectangle,
     ) {
+        // The text of the blocks only watches the pointer, for the
+        // tooltips on their icons.
+        if matches!(event, Input::Mouse(mouse::Event::CursorMoved { .. })) {
+            for ((child, tree), layout) in self
+                .children
+                .iter_mut()
+                .zip(&mut tree.children)
+                .zip(layout.children())
+            {
+                child.as_widget_mut().update(
+                    tree, event, layout, cursor, renderer, clipboard, shell, viewport,
+                );
+            }
+        }
         if self.on_event.is_none() {
             return;
         }
@@ -820,11 +1089,13 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for Hours<'_, Message> {
                 {
                     *offset = grid.minutes_at(point.y) - f32::from(placed.block.top);
                 }
+                let double = memory.count(point, self.double_click);
                 memory.press = Some(Press {
                     grab,
                     origin: point,
                     pointer: point,
                     dragged: false,
+                    double,
                 });
                 shell.capture_event();
             }
@@ -859,8 +1130,12 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for Hours<'_, Message> {
                         &self.days,
                         &self.placed,
                         hit(&grid, &self.placed, press.origin),
+                        press.double,
                     )
                 };
+                if press.dragged {
+                    memory.click = None;
+                }
                 if let Some(message) = event.and_then(|event| send(&self.on_event, event)) {
                     shell.publish(message);
                 }
@@ -886,6 +1161,8 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for Hours<'_, Message> {
             Input::Touch(touch::Event::FingerPressed { id, .. }) => {
                 memory.finger = over.map(|point| (*id, point));
             }
+            // Only a tap that lifts where it landed counts towards a
+            // double tap, so scrolling with a finger never makes one.
             Input::Touch(touch::Event::FingerMoved { id, .. }) => {
                 let Some((finger, origin)) = memory.finger else {
                     return;
@@ -902,7 +1179,13 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for Hours<'_, Message> {
                 let Some((_, origin)) = memory.finger.take_if(|(finger, _)| finger == id) else {
                     return;
                 };
-                let event = pressed(&self.days, &self.placed, hit(&grid, &self.placed, origin));
+                let double = memory.count(origin, self.double_click);
+                let event = pressed(
+                    &self.days,
+                    &self.placed,
+                    hit(&grid, &self.placed, origin),
+                    double,
+                );
                 if let Some(message) = event.and_then(|event| send(&self.on_event, event)) {
                     shell.publish(message);
                 }
@@ -912,6 +1195,24 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for Hours<'_, Message> {
             }
             _ => {}
         }
+    }
+
+    fn overlay<'b>(
+        &'b mut self,
+        tree: &'b mut Tree,
+        layout: Layout<'b>,
+        renderer: &Renderer,
+        viewport: &Rectangle,
+        translation: iced::Vector,
+    ) -> Option<iced::advanced::overlay::Element<'b, Message, Theme, Renderer>> {
+        iced::advanced::overlay::from_children(
+            &mut self.children,
+            tree,
+            layout,
+            renderer,
+            viewport,
+            translation,
+        )
     }
 
     fn mouse_interaction(
@@ -1047,18 +1348,39 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for Hours<'_, Message> {
             } else {
                 Status::Active
             };
-            let chip = style::chip(&tokens, placed.tone, placed.selected, status);
+            let marked = style::marked(&tokens, placed.tone, placed.look, status);
+            let chip = marked.chip;
             renderer.fill_quad(
                 renderer::Quad {
                     bounds: rect,
                     border: Border {
+                        color: marked.border,
+                        width: if marked.border.a > 0.0 { 1.0 } else { 0.0 },
                         radius: radius::SM.into(),
-                        ..Border::default()
                     },
                     ..renderer::Quad::default()
                 },
                 chip.background,
             );
+            if let Some(colour) = marked.hatch
+                && let Some(clip) = rect.intersection(viewport)
+            {
+                let svg = iced::advanced::svg::Svg::new(hatch_handle(rect.size()))
+                    .color(opaque(colour))
+                    .opacity(colour.a);
+                renderer.draw_svg(svg, rect, clip);
+            }
+            if let Some(colour) = marked.strike {
+                let area = Self::text_area(rect);
+                fill(
+                    renderer,
+                    Rectangle::new(
+                        Point::new(area.x, (area.y + LINE / 2.0).round()),
+                        Size::new(area.width, 1.0),
+                    ),
+                    colour,
+                );
+            }
             renderer.fill_quad(
                 renderer::Quad {
                     bounds: Rectangle::new(rect.position(), Size::new(STRIPE, rect.height)),
@@ -1144,6 +1466,7 @@ mod tests {
     const OPTIONS: Options = Options {
         hours: (0, 24),
         hour_height: 60.0,
+        start_hour: None,
     };
 
     /// Monday 2 to Sunday 8 November 2026.
@@ -1183,7 +1506,8 @@ mod tests {
                     day,
                     block,
                     tone: Tone::Primary,
-                    selected: false,
+                    look: style::Look::default(),
+                    locked: false,
                 });
             }
         }
@@ -1216,6 +1540,7 @@ mod tests {
         let working_day = Options {
             hours: (8, 18),
             hour_height: 40.0,
+            start_hour: None,
         };
         assert_eq!(working_day.stretched_to(555.0).hour_height, 55.0);
         assert_eq!(working_day.stretched_to(300.0).hour_height, 40.0);
@@ -1630,7 +1955,8 @@ mod tests {
                 Hit::Block {
                     index: stand_up,
                     edge: true
-                }
+                },
+                false
             ),
             Some(Event::Press(Selection::Entry {
                 entry: EntryId(1),
@@ -1644,7 +1970,8 @@ mod tests {
                 Hit::Slot {
                     day: 4,
                     minutes: 644.0
-                }
+                },
+                false
             ),
             Some(Event::Press(Selection::Slot {
                 date: date(2026, 11, 6),
@@ -1658,14 +1985,65 @@ mod tests {
                 Hit::Slot {
                     day: 0,
                     minutes: 1440.0
-                }
+                },
+                false
             ),
             Some(Event::Press(Selection::Slot {
                 date: date(2026, 11, 2),
                 minute: 1410
             }))
         );
-        assert_eq!(pressed(&week(), &placed, Hit::Nothing), None);
+        assert_eq!(pressed(&week(), &placed, Hit::Nothing, false), None);
+    }
+
+    #[test]
+    fn a_double_press_on_a_block_or_a_slot_says_so() {
+        let entries = entries();
+        let placed = placed(&entries);
+        let stand_up = index_of(&placed, 1, 1);
+        let block = Hit::Block {
+            index: stand_up,
+            edge: false,
+        };
+        assert_eq!(
+            pressed(&week(), &placed, block, true),
+            Some(Event::DoublePress(Selection::Entry {
+                entry: EntryId(1),
+                start: at(3, 9, 0)
+            }))
+        );
+        let slot = Hit::Slot {
+            day: 4,
+            minutes: 644.0,
+        };
+        assert_eq!(
+            pressed(&week(), &placed, slot, true),
+            Some(Event::DoublePress(Selection::Slot {
+                date: date(2026, 11, 6),
+                minute: 630
+            }))
+        );
+    }
+
+    #[test]
+    fn a_locked_block_is_only_held() {
+        let entries = entries();
+        let mut placed = placed(&entries);
+        let stand_up = index_of(&placed, 1, 1);
+        placed[stand_up].locked = true;
+        for edge in [false, true] {
+            assert_eq!(
+                grab(
+                    &placed,
+                    Hit::Block {
+                        index: stand_up,
+                        edge
+                    },
+                    0
+                ),
+                Some(Grab::Hold { index: stand_up })
+            );
+        }
     }
 
     #[test]

@@ -4,7 +4,7 @@ use iced::widget::button::Status;
 use iced::widget::{button, container};
 use iced::{Background, Border, Color, Shadow};
 
-use super::entry::Tone;
+use super::entry::{Emphasis, Tone};
 use crate::theme::{Tokens, fade, mix, on, radius};
 
 /// The colour a [`Tone`] stands for.
@@ -50,6 +50,126 @@ pub fn chip(tokens: &Tokens, entry_tone: Tone, selected: bool, status: Status) -
         background: mix(tokens.background, colour, wash),
         foreground: tokens.foreground,
         stripe: colour,
+    }
+}
+
+/// How an entry is to be drawn, besides its tone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Look {
+    pub selected: bool,
+    pub emphasis: Emphasis,
+    /// Drawn as the preview of a change waiting to be confirmed.
+    pub preview: bool,
+}
+
+impl Look {
+    /// Whether stripes are drawn over the fill. A selected entry or a
+    /// preview has none, so its text stays readable.
+    pub fn hatched(self) -> bool {
+        self.emphasis == Emphasis::Hatched && !self.selected && !self.preview
+    }
+
+    /// Whether a line is drawn through the title.
+    pub fn struck(self) -> bool {
+        self.emphasis == Emphasis::Struck
+    }
+}
+
+/// How strong the stripes of a hatched entry are.
+pub const HATCH_ALPHA: f32 = 0.35;
+
+/// The colours of an entry with its [`Emphasis`], as a bar or a block.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Marked {
+    pub chip: Chip,
+    /// A border round the whole entry, transparent when it has none.
+    pub border: Color,
+    /// The colour of diagonal stripes over the fill.
+    pub hatch: Option<Color>,
+    /// The colour of a line through the title.
+    pub strike: Option<Color>,
+}
+
+/// An entry's colours for its look. Solid is [`chip`]. Outlined has a
+/// border in its tone over the page, Struck and Faded take muted text,
+/// Hatched lays stripes of its tone over the wash, and a preview is a
+/// faint outline of the primary colour. The selected entry is filled
+/// with its tone whatever its emphasis, keeping any strike.
+pub fn marked(tokens: &Tokens, entry_tone: Tone, look: Look, status: Status) -> Marked {
+    let colour = tone(tokens, entry_tone);
+    let solid = chip(tokens, entry_tone, look.selected, status);
+    let mut marked = Marked {
+        chip: solid,
+        border: Color::TRANSPARENT,
+        hatch: None,
+        strike: None,
+    };
+    if look.preview {
+        let colours = preview(tokens);
+        marked.chip = Chip {
+            background: colours.background,
+            foreground: tokens.muted_foreground,
+            stripe: colours.border,
+        };
+        marked.border = colours.border;
+        if look.struck() {
+            marked.strike = Some(tokens.muted_foreground);
+        }
+        return marked;
+    }
+    if look.selected {
+        if look.struck() {
+            marked.strike = Some(solid.foreground);
+        }
+        return marked;
+    }
+    match look.emphasis {
+        Emphasis::Solid => {}
+        Emphasis::Outlined => {
+            let hovered = matches!(status, Status::Hovered | Status::Pressed);
+            marked.chip.background = if hovered {
+                mix(tokens.background, colour, 0.12)
+            } else {
+                tokens.background
+            };
+            marked.border = colour;
+        }
+        Emphasis::Struck => {
+            marked.chip.foreground = tokens.muted_foreground;
+            marked.strike = Some(tokens.muted_foreground);
+        }
+        Emphasis::Faded => {
+            marked.chip.background = mix(tokens.background, solid.background, 0.5);
+            marked.chip.foreground = tokens.muted_foreground;
+            marked.chip.stripe = mix(tokens.background, colour, 0.5);
+        }
+        Emphasis::Hatched => marked.hatch = Some(fade(colour, HATCH_ALPHA)),
+    }
+    marked
+}
+
+/// The button style of an entry drawn with [`marked`] colours.
+pub fn marked_button(
+    tokens: &Tokens,
+    entry_tone: Tone,
+    look: Look,
+    status: Status,
+) -> button::Style {
+    let marked = marked(tokens, entry_tone, look, status);
+    button::Style {
+        background: Some(Background::Color(marked.chip.background)),
+        text_color: marked.chip.foreground,
+        border: Border {
+            color: marked.border,
+            width: if marked.border == Color::TRANSPARENT {
+                0.0
+            } else {
+                1.0
+            },
+            radius: radius::SM.into(),
+        },
+        shadow: Shadow::default(),
+        snap: true,
     }
 }
 
@@ -222,6 +342,29 @@ pub fn entry_line(
         shadow: Shadow::default(),
         snap: true,
     }
+}
+
+/// A timed entry in the month with its look: [`entry_line`] at rest,
+/// with the text muted when struck, faded or a preview, a faint wash
+/// behind a hatched one, and the [`marked`] fill when selected.
+pub fn marked_line(tokens: &Tokens, entry_tone: Tone, look: Look, status: Status) -> button::Style {
+    if look.selected {
+        return marked_button(tokens, entry_tone, look, status);
+    }
+    let mut style = entry_line(tokens, entry_tone, false, status);
+    if look.preview {
+        let colours = preview(tokens);
+        style.background = Some(Background::Color(colours.background));
+        style.border = Border {
+            color: colours.border,
+            width: 1.0,
+            radius: radius::SM.into(),
+        };
+    }
+    if look.preview || matches!(look.emphasis, Emphasis::Struck | Emphasis::Faded) {
+        style.text_color = tokens.muted_foreground;
+    }
+    style
 }
 
 /// A line between days, weeks or hours.
@@ -548,5 +691,142 @@ mod tests {
             assert_eq!(preview.border, tokens.primary);
             assert!(preview.background.a < 0.5);
         }
+    }
+
+    fn look(emphasis: Emphasis) -> Look {
+        Look {
+            emphasis,
+            ..Look::default()
+        }
+    }
+
+    #[test]
+    fn a_solid_entry_looks_as_a_plain_chip() {
+        for theme in [light(), dark()] {
+            let tokens = Tokens::of(&theme);
+            for status in [
+                Status::Active,
+                Status::Hovered,
+                Status::Pressed,
+                Status::Disabled,
+            ] {
+                for selected in [false, true] {
+                    let marked = marked(
+                        &tokens,
+                        Tone::Success,
+                        Look {
+                            selected,
+                            ..Look::default()
+                        },
+                        status,
+                    );
+                    assert_eq!(marked.chip, chip(&tokens, Tone::Success, selected, status));
+                    assert_eq!(marked.border, Color::TRANSPARENT);
+                    assert_eq!((marked.hatch, marked.strike), (None, None));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn each_emphasis_marks_the_entry_its_own_way() {
+        for theme in [light(), dark()] {
+            let tokens = Tokens::of(&theme);
+            let colour = tone(&tokens, Tone::Warning);
+            let at = |emphasis| marked(&tokens, Tone::Warning, look(emphasis), Status::Active);
+
+            let outlined = at(Emphasis::Outlined);
+            assert_eq!(outlined.border, colour);
+            assert_eq!(outlined.chip.background, tokens.background);
+
+            let struck = at(Emphasis::Struck);
+            assert_eq!(struck.strike, Some(tokens.muted_foreground));
+            assert_eq!(struck.chip.foreground, tokens.muted_foreground);
+
+            let faded = at(Emphasis::Faded);
+            let solid = at(Emphasis::Solid);
+            assert_eq!(faded.chip.foreground, tokens.muted_foreground);
+            assert_ne!(faded.chip.background, solid.chip.background);
+
+            let hatched = at(Emphasis::Hatched);
+            assert_eq!(
+                hatched.hatch.map(|hatch| hatch.a),
+                Some(colour.a * HATCH_ALPHA)
+            );
+            assert_eq!(hatched.chip, solid.chip);
+        }
+    }
+
+    #[test]
+    fn a_selected_entry_is_filled_and_keeps_its_strike() {
+        let tokens = Tokens::of(&light());
+        for emphasis in Emphasis::ALL {
+            let selected = Look {
+                selected: true,
+                ..look(emphasis)
+            };
+            let marked = marked(&tokens, Tone::Primary, selected, Status::Active);
+            assert_eq!(
+                marked.chip,
+                chip(&tokens, Tone::Primary, true, Status::Active)
+            );
+            assert_eq!(marked.hatch, None, "{emphasis:?}");
+            assert_eq!(marked.strike.is_some(), emphasis == Emphasis::Struck);
+        }
+    }
+
+    #[test]
+    fn a_preview_is_a_faint_outline_whatever_its_emphasis() {
+        for theme in [light(), dark()] {
+            let tokens = Tokens::of(&theme);
+            let colours = preview(&tokens);
+            for emphasis in Emphasis::ALL {
+                let pending = Look {
+                    preview: true,
+                    ..look(emphasis)
+                };
+                let marked = marked(&tokens, Tone::Success, pending, Status::Hovered);
+                assert_eq!(marked.border, colours.border);
+                assert_eq!(marked.chip.background, colours.background);
+                assert_eq!(marked.chip.foreground, tokens.muted_foreground);
+                assert!(!pending.hatched());
+            }
+        }
+    }
+
+    #[test]
+    fn button_and_line_styles_carry_the_look() {
+        let tokens = Tokens::of(&dark());
+        let outlined = marked_button(
+            &tokens,
+            Tone::Primary,
+            look(Emphasis::Outlined),
+            Status::Active,
+        );
+        assert_eq!(outlined.border.width, 1.0);
+        let solid = marked_button(
+            &tokens,
+            Tone::Primary,
+            look(Emphasis::Solid),
+            Status::Active,
+        );
+        assert_eq!(solid.border.width, 0.0);
+        let struck = marked_line(
+            &tokens,
+            Tone::Primary,
+            look(Emphasis::Struck),
+            Status::Active,
+        );
+        assert_eq!(struck.text_color, tokens.muted_foreground);
+        let plain = marked_line(
+            &tokens,
+            Tone::Primary,
+            look(Emphasis::Solid),
+            Status::Active,
+        );
+        assert_eq!(
+            plain,
+            entry_line(&tokens, Tone::Primary, false, Status::Active)
+        );
     }
 }

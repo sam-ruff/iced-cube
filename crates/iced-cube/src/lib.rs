@@ -35,6 +35,15 @@ mod editing;
 pub mod feedback;
 #[cfg(feature = "breadcrumb")]
 mod fit;
+#[cfg(any(
+    feature = "button",
+    feature = "checkbox",
+    feature = "radio",
+    feature = "select",
+    feature = "switch",
+    feature = "toggle"
+))]
+mod focus;
 pub mod forms;
 #[cfg(feature = "toast")]
 mod hit_slop;
@@ -98,6 +107,8 @@ pub use data::{selectable_text, selection_area};
 pub use feedback::alert;
 #[cfg(feature = "badge")]
 pub use feedback::badge;
+#[cfg(feature = "chip")]
+pub use feedback::chip;
 #[cfg(feature = "progress")]
 pub use feedback::progress;
 #[cfg(feature = "spinner")]
@@ -107,6 +118,8 @@ pub use feedback::{avatar, avatar_group};
 
 #[cfg(feature = "combobox")]
 pub use forms::combobox;
+#[cfg(feature = "multi-combobox")]
+pub use forms::multi_combobox;
 #[cfg(feature = "rich-text-editor")]
 pub use forms::rich_text_editor;
 #[cfg(feature = "select")]

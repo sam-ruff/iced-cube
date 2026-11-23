@@ -5,10 +5,11 @@ use iced::{Alignment, Element, Length, Padding, Size, Theme};
 use jiff::civil::Date;
 
 use super::agenda;
+use super::gesture::{DayDrag, DayGrid, Target};
 use super::layout::{self, month_weeks};
 use super::parts::{
-    CHIP_HEIGHT, Handler, LANE_GAP, NUMBER_SIZE, day_number, dots, lanes, rules, send,
-    weekday_label,
+    CHIP_HEIGHT, Handler, LANE_GAP, NUMBER_SIZE, day_id, day_number, dots, lanes, pressable, rules,
+    send, weekday_label,
 };
 use super::state::{Event, Selection, State};
 use super::style;
@@ -95,13 +96,38 @@ fn cell<'a, Message: Clone + 'a>(
     if let Some(below) = below {
         content = content.push(below);
     }
-    widget::button(content)
-        .width(Length::FillPortion(1))
+    let button = widget::button(content)
+        .width(Length::Fill)
         .height(Length::Fill)
         .padding(CELL_PADDING)
         .on_press_maybe(send(on_event, Event::Press(Selection::Day(date))))
-        .style(move |theme, status| style::cell(&Tokens::of(theme), day, status))
+        .style(move |theme, status| style::cell(&Tokens::of(theme), day, status));
+    container(pressable(state, button, Selection::Day(date), on_event))
+        .id(day_id(date))
+        .width(Length::FillPortion(1))
+        .height(Length::Fill)
         .into()
+}
+
+/// The bars of a week that a drag can pick up, as row `row` of the grid.
+pub(super) fn targets(state: &State, row: usize, fitted: &layout::Fitted) -> Vec<Target> {
+    fitted
+        .bars
+        .iter()
+        .filter_map(|bar| {
+            let entry = state.shown().get(bar.occurrence.entry)?;
+            Some(Target {
+                row,
+                first: bar.first,
+                days: bar.days(),
+                lane: bar.lane,
+                occurrence: bar.occurrence,
+                movable: state.allow().reschedule
+                    && !entry.is_locked()
+                    && !state.is_preview(entry.id()),
+            })
+        })
+        .collect()
 }
 
 /// Weeks as rows of cells with their bars laid over them.
@@ -115,10 +141,12 @@ fn wide<'a, Message: Clone + 'a>(
     let room = lanes_that_fit(week_height);
 
     let mut rows = Column::new();
-    for week in &weeks {
-        let occurrences = state.entries().between(week[0], week[6]);
+    let mut picked = Vec::new();
+    for (index, week) in weeks.iter().enumerate() {
+        let occurrences = state.shown().between(week[0], week[6]);
         let bars = layout::bars(week, &occurrences, state.time_zone());
         let fitted = layout::fit(bars, week.len(), room);
+        picked.extend(targets(state, index, &fitted));
 
         let cells = Row::with_children(week.iter().map(|date| {
             let below = (room == 0).then(|| {
@@ -145,9 +173,27 @@ fn wide<'a, Message: Clone + 'a>(
         );
     }
 
+    let grid = DayGrid {
+        columns: 7,
+        rows: weeks.len(),
+        left: 0.0,
+        top: NUMBER_SIZE + 2.0 * CELL_PADDING,
+        bar_height: CHIP_HEIGHT,
+        lane_gap: LANE_GAP,
+    };
+    let dates = weeks.iter().flatten().copied().collect();
+    let draggable = DayDrag::new(
+        rows,
+        grid,
+        dates,
+        picked,
+        state.time_zone().clone(),
+        on_event,
+    );
+
     column![
         weekday_names(state, false),
-        stack![rows, rules(7, weeks.len())]
+        stack![draggable, rules(7, weeks.len())]
             .width(Length::Fill)
             .height(Length::Fill),
     ]
@@ -163,7 +209,7 @@ fn compact<'a, Message: Clone + 'a>(
     let mut rows = Column::new();
     for week in &weeks {
         let cells = Row::with_children(week.iter().map(|date| {
-            let day = state.entries().on(*date);
+            let day = state.shown().on(*date);
             cell(state, *date, Some(dots(state, &day).into()), on_event)
         }))
         .height(Length::Fixed(COMPACT_WEEK_HEIGHT));

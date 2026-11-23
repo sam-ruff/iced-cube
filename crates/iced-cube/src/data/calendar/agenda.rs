@@ -4,11 +4,13 @@ use iced::widget::{Column, Space, column, container, responsive, row, text};
 use iced::{Alignment, Element, Length, Padding, Theme};
 use jiff::civil::Date;
 
-use super::entry::{Occurrence, add_days};
-use super::parts::{Handler, day_heading, dot, selection_of, send, span_label, weekday_label};
+use super::entry::{Emphasis, Occurrence, add_days};
+use super::parts::{
+    Handler, day_heading, dot, entry_icon, entry_id, labelled, look_of, marked, pressable, ring,
+    selection_of, send, span_label, weekday_label,
+};
 use super::state::{Event, State};
 use super::style;
-use crate::data::ellipsis::ellipsis;
 use crate::primitives::scroll_area::scroll_area;
 use crate::primitives::tappable::{self, tappable};
 use crate::theme::{self, Tokens, space, text_size};
@@ -141,7 +143,7 @@ pub(super) fn day<'a, Message: Clone + 'a>(
 
 /// The occurrences that touch `date`, whole days first.
 fn occurrences_on(state: &State, date: Date) -> Vec<Occurrence> {
-    let mut occurrences = state.entries().on(date);
+    let mut occurrences = state.shown().on(date);
     occurrences.sort_by_key(|occurrence| (!occurrence.all_day, occurrence.start, occurrence.entry));
     occurrences
 }
@@ -189,21 +191,48 @@ fn rows<'a, Message: Clone + 'a>(
 ) -> Column<'a, Message> {
     let mut rows = Column::new().width(Length::Fill);
     for occurrence in occurrences {
-        let Some(entry) = state.entries().get(occurrence.entry) else {
+        let Some(entry) = state.shown().get(occurrence.entry) else {
             continue;
         };
         let selection = selection_of(occurrence);
         let selected = state.is_selected(selection);
+        // The list keeps its own row look; the emphasis shows in the
+        // marker and the title.
+        let look = style::Look {
+            selected: false,
+            ..look_of(state, entry, false)
+        };
+        let tone = entry.tone_of();
         let time = text(span_label(occurrence, state.time_zone()))
             .size(text_size::XS)
             .wrapping(text::Wrapping::None)
             .style(|theme: &Theme| text::Style {
                 color: Some(Tokens::of(theme).muted_foreground),
             });
+        let marker = if look.emphasis == Emphasis::Outlined || look.preview {
+            ring(tone, 8.0)
+        } else {
+            dot(tone, 8.0)
+        };
+        let title = labelled(
+            entry_icon(entry, look, tone, text_size::SM),
+            entry.title().to_owned(),
+            text_size::SM,
+            20.0,
+            move |theme| {
+                let tokens = Tokens::of(theme);
+                if look.preview || matches!(look.emphasis, Emphasis::Struck | Emphasis::Faded) {
+                    tokens.muted_foreground
+                } else {
+                    tokens.foreground
+                }
+            },
+        );
+        let title = container(marked(title, tone, look)).height(Length::Fixed(20.0));
         let content = row![
-            dot(entry.tone_of(), 8.0),
+            marker,
             container(time).width(Length::Fixed(TIME_WIDTH)),
-            ellipsis(entry.title().to_owned()).colour(|theme| Tokens::of(theme).foreground),
+            title,
         ]
         .spacing(space::SM)
         .align_y(Alignment::Center)
@@ -222,7 +251,11 @@ fn rows<'a, Message: Clone + 'a>(
         if let Some(message) = send(on_event, Event::Press(selection)) {
             row = row.on_tap(message);
         }
-        rows = rows.push(row);
+        rows = rows.push(
+            container(pressable(state, row, selection, on_event))
+                .id(entry_id(occurrence.entry, occurrence.start))
+                .width(Length::Fill),
+        );
     }
     rows
 }

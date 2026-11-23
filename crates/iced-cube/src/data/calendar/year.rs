@@ -1,14 +1,14 @@
 //! The year view: twelve small months.
 
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 
 use iced::widget::{self, Column, Row, Space, column, container, responsive, text};
 use iced::{Alignment, Element, Length, Theme};
 use jiff::civil::Date;
 
-use super::entry::add_days;
+use super::entry::{Tone, add_days};
 use super::layout::month_weeks;
-use super::parts::{Handler, dot, send, weekday_label};
+use super::parts::{Handler, dot, pressable, send, weekday_label};
 use super::state::{Event, Selection, State};
 use super::style;
 use crate::primitives::scroll_area::scroll_area;
@@ -24,7 +24,7 @@ pub const MAX_COLUMNS: usize = 4;
 /// The width of a small month.
 const MONTH_WIDTH: f32 = 7.0 * CELL;
 /// The side of the dot under a day with entries.
-const DOT: f32 = 3.0;
+const DOT: f32 = 5.0;
 
 /// How many small months fit side by side in `width`, from one to
 /// [`MAX_COLUMNS`], choosing a number that divides twelve so every row is
@@ -64,16 +64,42 @@ pub(super) fn view<'a, Message: Clone + 'a>(
     .into()
 }
 
-/// The dates in the month of `first` that have an entry.
-fn busy(state: &State, first: Date) -> BTreeSet<Date> {
+/// The entries a day of the year view has: the tone to mark it in, which
+/// is theirs when they share one and the primary tone when they do not.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Busy {
+    pub tone: Tone,
+}
+
+impl Busy {
+    fn with(self, tone: Tone) -> Self {
+        Self {
+            tone: if tone == self.tone {
+                tone
+            } else {
+                Tone::Primary
+            },
+        }
+    }
+}
+
+/// The dates in the month of `first` that have an entry, and how.
+fn busy(state: &State, first: Date) -> BTreeMap<Date, Busy> {
     let last = first.last_of_month();
     let time_zone = state.time_zone();
-    let mut days = BTreeSet::new();
-    for occurrence in state.entries().between(first, last) {
+    let mut days: BTreeMap<Date, Busy> = BTreeMap::new();
+    for occurrence in state.shown().between(first, last) {
+        let tone = state
+            .shown()
+            .get(occurrence.entry)
+            .map_or(Tone::Primary, |entry| entry.tone_of());
         let (from, to) = occurrence.dates(time_zone);
         let mut date = from.max(first);
         while date <= to.min(last) {
-            let _ = days.insert(date);
+            let mark = days
+                .get(&date)
+                .map_or(Busy { tone }, |busy| busy.with(tone));
+            let _ = days.insert(date, mark);
             let next = add_days(date, 1);
             if next == date {
                 break;
@@ -116,17 +142,18 @@ fn month<'a, Message: Clone + 'a>(
                     .height(Length::Fixed(CELL))
                     .into();
             }
-            day(state, *date, busy.contains(date), on_event)
+            day(state, *date, busy.get(date).copied(), on_event)
         })));
     }
     container(grid).width(Length::Fixed(MONTH_WIDTH)).into()
 }
 
-/// One day: its number, with a dot under it when it has entries.
+/// One day: its number, with a dot under it in the entries' tone when it
+/// has entries, light on today's filled circle.
 fn day<'a, Message: Clone + 'a>(
     state: &State,
     date: Date,
-    busy: bool,
+    busy: Option<Busy>,
     on_event: &Handler<'a, Message>,
 ) -> Element<'a, Message> {
     let kind = style::Day {
@@ -138,22 +165,34 @@ fn day<'a, Message: Clone + 'a>(
         .size(11.0)
         .line_height(text::LineHeight::Absolute(14.0.into()))
         .wrapping(text::Wrapping::None);
-    let mark: Element<'a, Message> = if busy && !kind.today {
-        dot(super::entry::Tone::Primary, DOT)
-    } else {
-        Space::new().height(Length::Fixed(DOT)).into()
+    let mark: Element<'a, Message> = match busy {
+        Some(_) if kind.today => container(Space::new())
+            .width(Length::Fixed(DOT))
+            .height(Length::Fixed(DOT))
+            .style(|theme: &Theme| container::Style {
+                background: Some(Tokens::of(theme).primary_foreground.into()),
+                border: iced::Border {
+                    radius: crate::theme::radius::FULL.into(),
+                    ..iced::Border::default()
+                },
+                ..container::Style::default()
+            })
+            .into(),
+        Some(busy) => dot(busy.tone, DOT),
+        None => Space::new().height(Length::Fixed(DOT)).into(),
     };
-    widget::button(
+    let button = widget::button(
         column![number, mark]
+            .spacing(1.0)
             .align_x(Alignment::Center)
             .width(Length::Fill),
     )
     .width(Length::Fixed(CELL))
     .height(Length::Fixed(CELL))
-    .padding([7.0, 0.0])
+    .padding([6.0, 0.0])
     .on_press_maybe(send(on_event, Event::Press(Selection::Day(date))))
-    .style(move |theme, status| style::year_day(&Tokens::of(theme), kind, status))
-    .into()
+    .style(move |theme, status| style::year_day(&Tokens::of(theme), kind, status));
+    pressable(state, button, Selection::Day(date), on_event)
 }
 
 #[cfg(test)]
@@ -185,11 +224,37 @@ mod tests {
             Entry::all_day(EntryId(1), "Trip", date(2026, 5, 30), date(2026, 6, 2)),
             Entry::all_day(EntryId(2), "Day", date(2026, 6, 18), date(2026, 6, 18)),
         ]));
-        let days: Vec<_> = busy(&state, date(2026, 6, 1)).into_iter().collect();
+        let days: Vec<_> = busy(&state, date(2026, 6, 1)).into_keys().collect();
         assert_eq!(
             days,
             vec![date(2026, 6, 1), date(2026, 6, 2), date(2026, 6, 18)]
         );
         assert!(busy(&state, date(2026, 7, 1)).is_empty());
+    }
+
+    #[test]
+    fn a_busy_day_takes_the_tone_its_entries_share() {
+        let day = date(2026, 6, 18);
+        let state = State::new(day).with_entries(
+            Entries::utc().with([
+                Entry::all_day(EntryId(1), "One", day, day).tone(Tone::Success),
+                Entry::all_day(EntryId(2), "Two", day, date(2026, 6, 19)).tone(Tone::Success),
+                Entry::all_day(EntryId(3), "Three", date(2026, 6, 19), date(2026, 6, 19))
+                    .tone(Tone::Warning),
+            ]),
+        );
+        let busy = busy(&state, date(2026, 6, 1));
+        assert_eq!(
+            busy.get(&day),
+            Some(&Busy {
+                tone: Tone::Success
+            })
+        );
+        assert_eq!(
+            busy.get(&date(2026, 6, 19)),
+            Some(&Busy {
+                tone: Tone::Primary
+            })
+        );
     }
 }

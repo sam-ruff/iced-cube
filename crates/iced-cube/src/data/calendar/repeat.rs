@@ -1,216 +1,31 @@
 //! Repeating entries: how often, and expanding them into occurrences.
+//!
+//! The rules live in the `iced-cube-rules` crate, which has no GUI
+//! dependency, so tools outside the window can expand entries the same
+//! way. This module applies them to an [`Entry`].
 
-use jiff::civil::Date;
+use jiff::Timestamp;
 use jiff::tz::TimeZone;
-use jiff::{SignedDuration, Span, Timestamp};
 
-use super::entry::{Entry, Occurrence, When, midnight, next_day};
+pub use iced_cube_rules::{Ends, Frequency, Instance, MAX_OCCURRENCES, Repeat};
 
-/// The most occurrences one entry gives for a single range, so a rule
-/// that never ends cannot run away with a very long range.
-pub const MAX_OCCURRENCES: usize = 5_000;
+use super::entry::{Entry, Occurrence};
 
-/// The unit an entry repeats in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Frequency {
-    Daily,
-    Weekly,
-    Monthly,
-    Yearly,
-}
-
-impl Frequency {
-    pub const ALL: [Frequency; 4] = [
-        Frequency::Daily,
-        Frequency::Weekly,
-        Frequency::Monthly,
-        Frequency::Yearly,
-    ];
-
-    /// The span of `count` units.
-    fn span(self, count: i64) -> Option<Span> {
-        let span = Span::new();
-        match self {
-            Frequency::Daily => span.try_days(count),
-            Frequency::Weekly => span.try_weeks(count),
-            Frequency::Monthly => span.try_months(count),
-            Frequency::Yearly => span.try_years(count),
-        }
-        .ok()
-    }
-
-    /// The longest one unit can be, in seconds. A day is 25 hours when the
-    /// clocks go back.
-    fn longest(self) -> i64 {
-        const DAY: i64 = 25 * 60 * 60;
-        match self {
-            Frequency::Daily => DAY,
-            Frequency::Weekly => 7 * DAY,
-            Frequency::Monthly => 31 * DAY,
-            Frequency::Yearly => 366 * DAY,
-        }
-    }
-}
-
-/// When a repeating entry stops.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub enum Ends {
-    #[default]
-    Never,
-    /// After this many occurrences, counting the first.
-    After(u32),
-    /// No occurrence starts after this date.
-    On(Date),
-}
-
-/// How an entry repeats.
-///
-/// Occurrences are counted from the first, so an entry on the 31st that
-/// repeats monthly lands on the last day of shorter months and returns to
-/// the 31st afterwards. A timed entry keeps its local time across clock
-/// changes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Repeat {
-    frequency: Frequency,
-    interval: u32,
-    ends: Ends,
-}
-
-impl Repeat {
-    pub fn new(frequency: Frequency) -> Self {
-        Self {
-            frequency,
-            interval: 1,
-            ends: Ends::Never,
-        }
-    }
-
-    pub fn daily() -> Self {
-        Self::new(Frequency::Daily)
-    }
-
-    pub fn weekly() -> Self {
-        Self::new(Frequency::Weekly)
-    }
-
-    pub fn monthly() -> Self {
-        Self::new(Frequency::Monthly)
-    }
-
-    pub fn yearly() -> Self {
-        Self::new(Frequency::Yearly)
-    }
-
-    /// Repeats every `interval` units, such as every 2 weeks. At least 1.
-    pub fn interval(mut self, interval: u32) -> Self {
-        self.interval = interval.max(1);
-        self
-    }
-
-    /// Stops after `count` occurrences, counting the first.
-    pub fn count(mut self, count: u32) -> Self {
-        self.ends = Ends::After(count);
-        self
-    }
-
-    /// Stops once an occurrence would start after `date`.
-    pub fn until(mut self, date: Date) -> Self {
-        self.ends = Ends::On(date);
-        self
-    }
-
-    pub fn frequency(&self) -> Frequency {
-        self.frequency
-    }
-
-    pub fn every(&self) -> u32 {
-        self.interval
-    }
-
-    pub fn ends(&self) -> Ends {
-        self.ends
-    }
-
-    /// The span from the first occurrence to occurrence `index`.
-    fn offset(&self, index: u32) -> Option<Span> {
-        self.frequency
-            .span(i64::from(index) * i64::from(self.interval))
-    }
-
-    /// The longest `count` repetitions can take, in seconds.
-    fn longest(&self, count: i64) -> i64 {
-        self.frequency
-            .longest()
-            .saturating_mul(i64::from(self.interval))
-            .saturating_mul(count)
+fn occurrence(entry: &Entry, instance: Instance) -> Occurrence {
+    Occurrence {
+        entry: entry.id(),
+        index: instance.index,
+        start: instance.start,
+        end: instance.end,
+        all_day: instance.all_day,
     }
 }
 
 /// Occurrence `index` of `entry`, or `None` once the entry has stopped
 /// repeating or the date is out of range.
 pub fn nth(entry: &Entry, time_zone: &TimeZone, index: u32) -> Option<Occurrence> {
-    let Some(repeat) = entry.repeat_of() else {
-        return (index == 0).then(|| first(entry, time_zone));
-    };
-    if let Ends::After(count) = repeat.ends()
-        && index >= count
-    {
-        return None;
-    }
-    let offset = repeat.offset(index)?;
-    let (start_date, start, end) = match entry.when() {
-        When::Timed { start, end } => {
-            let moved = start
-                .to_zoned_datetime(time_zone.clone())
-                .checked_add(offset)
-                .ok()?;
-            let length = end.duration_since(start);
-            let end = moved.timestamp().checked_add(length).ok()?;
-            (moved.date(), moved.timestamp(), end)
-        }
-        When::AllDay { first, last } => {
-            let moved = first.checked_add(offset).ok()?;
-            let length = last.duration_since(first);
-            let moved_last = moved.checked_add(length).ok()?;
-            (
-                moved,
-                midnight(moved, time_zone),
-                midnight(next_day(moved_last), time_zone),
-            )
-        }
-    };
-    if let Ends::On(date) = repeat.ends()
-        && start_date > date
-    {
-        return None;
-    }
-    Some(Occurrence {
-        entry: entry.id(),
-        index,
-        start,
-        end,
-        all_day: entry.is_all_day(),
-    })
-}
-
-fn first(entry: &Entry, time_zone: &TimeZone) -> Occurrence {
-    let when = entry.when();
-    Occurrence {
-        entry: entry.id(),
-        index: 0,
-        start: when.start(time_zone),
-        end: when.end(time_zone),
-        all_day: when.is_all_day(),
-    }
-}
-
-/// Whether `occurrence` overlaps the time from `from` up to `to`. An
-/// occurrence with no length counts when it starts inside the range.
-fn overlaps(occurrence: &Occurrence, from: Timestamp, to: Timestamp) -> bool {
-    if occurrence.end <= occurrence.start {
-        return occurrence.start >= from && occurrence.start < to;
-    }
-    occurrence.start < to && occurrence.end > from
+    iced_cube_rules::nth(entry.when(), entry.repeat_of(), time_zone, index)
+        .map(|instance| occurrence(entry, instance))
 }
 
 /// The occurrences of `entry` that overlap the time from `from` up to
@@ -221,77 +36,18 @@ pub fn occurrences(
     from: Timestamp,
     to: Timestamp,
 ) -> Vec<Occurrence> {
-    let Some(repeat) = entry.repeat_of() else {
-        let only = first(entry, time_zone);
-        return if overlaps(&only, from, to) {
-            vec![only]
-        } else {
-            Vec::new()
-        };
-    };
-
-    let mut found = Vec::new();
-    let mut index = first_candidate(entry, &repeat, time_zone, from);
-    for _ in 0..2 * MAX_OCCURRENCES {
-        if found.len() == MAX_OCCURRENCES {
-            break;
-        }
-        let Some(occurrence) = nth(entry, time_zone, index) else {
-            break;
-        };
-        if occurrence.start >= to {
-            break;
-        }
-        if overlaps(&occurrence, from, to) {
-            found.push(occurrence);
-        }
-        let Some(next) = index.checked_add(1) else {
-            break;
-        };
-        index = next;
-    }
-    found
-}
-
-/// How many times [`first_candidate`] jumps ahead at most.
-const JUMPS: usize = 48;
-
-fn landing(entry: &Entry, time_zone: &TimeZone, index: u32, jump: u32) -> Option<Occurrence> {
-    nth(entry, time_zone, index.checked_add(jump)?)
-}
-
-/// An index no later than the first occurrence that can reach `from`,
-/// found by jumping ahead by the longest each repetition can be.
-fn first_candidate(entry: &Entry, repeat: &Repeat, time_zone: &TimeZone, from: Timestamp) -> u32 {
-    let mut index: u32 = 0;
-    // Each jump lands short of `from`, and a handful get close enough.
-    for _ in 0..JUMPS {
-        let Some(occurrence) = nth(entry, time_zone, index) else {
-            break;
-        };
-        let short_by = from.duration_since(occurrence.end);
-        if short_by <= SignedDuration::ZERO {
-            break;
-        }
-        let jump = short_by.as_secs() / repeat.longest(1).max(1);
-        let mut jump = u32::try_from(jump).unwrap_or(u32::MAX - index);
-        // A jump past the end of the series is halved until it lands on it.
-        while jump > 0 && landing(entry, time_zone, index, jump).is_none() {
-            jump /= 2;
-        }
-        if jump == 0 {
-            break;
-        }
-        index = index.saturating_add(jump);
-    }
-    index
+    iced_cube_rules::occurrences(entry.when(), entry.repeat_of(), time_zone, from, to)
+        .into_iter()
+        .map(|instance| occurrence(entry, instance))
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::data::calendar::entry::EntryId;
-    use jiff::civil::{date, time};
+    use jiff::SignedDuration;
+    use jiff::civil::{Date, date, time};
 
     fn utc(year: i16, month: i8, day: i8, hour: i8) -> Timestamp {
         zoned(&TimeZone::UTC, year, month, day, hour)
@@ -345,8 +101,8 @@ mod tests {
         let entry = Entry::new(EntryId(1), "Once", start, end);
         let first = nth(&entry, &TimeZone::UTC, 0);
         assert_eq!(
-            first.map(|o| (o.index, o.start, o.end)),
-            Some((0, start, end))
+            first.map(|o| (o.entry, o.index, o.start, o.end)),
+            Some((EntryId(1), 0, start, end))
         );
         assert_eq!(nth(&entry, &TimeZone::UTC, 1), None);
     }
@@ -491,27 +247,6 @@ mod tests {
         );
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].start, utc(2026, 11, 30, 9));
-    }
-
-    #[test]
-    fn the_first_candidate_never_skips_an_occurrence() {
-        for repeat in [
-            Repeat::daily(),
-            Repeat::weekly().interval(3),
-            Repeat::monthly(),
-            Repeat::yearly(),
-        ] {
-            let entry = timed(utc(2001, 1, 31, 9), repeat);
-            let from = utc(2026, 6, 15, 0);
-            let index = first_candidate(&entry, &repeat, &TimeZone::UTC, from);
-            if index == 0 {
-                continue;
-            }
-            let Some(previous) = nth(&entry, &TimeZone::UTC, index - 1) else {
-                panic!("{repeat:?}");
-            };
-            assert!(previous.end <= from, "{repeat:?}");
-        }
     }
 
     #[test]

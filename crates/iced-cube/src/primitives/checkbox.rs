@@ -1,9 +1,14 @@
 //! Checkboxes with checked, unchecked and indeterminate states.
+//!
+//! An enabled checkbox takes keyboard focus from iced's focus operations,
+//! such as a dialog's Tab order. While focused its box rings and Space or
+//! Enter toggles it.
 
 use iced::keyboard::key::Named;
 use iced::widget::{self, button::Status, container, mouse_area, row, space, text};
 use iced::{Alignment, Background, Border, Color, Element, Length, Shadow, Theme, mouse};
 
+use crate::focus::{Ring, focusable};
 use crate::icon::{Glyph, opacity, themed};
 use crate::keys::{self, Chord, Keymap};
 use crate::theme::{Tokens, fade, mix, radius, space as spacing, text_size};
@@ -138,9 +143,15 @@ impl<'a, Message: Clone + 'a> From<Checkbox<'a, Message>> for Element<'a, Messag
             .padding(0)
             .on_press_maybe(checkbox.on_toggle.clone())
             .style(move |theme, status| style(&Tokens::of(theme), state, status));
+        let on_activate = checkbox
+            .on_toggle
+            .clone()
+            .map(|message| Box::new(move || message.clone()) as Box<dyn Fn() -> Message + 'a>);
+        let indicator = focusable(indicator, on_activate, Ring::around(radius::SM));
 
+        let indicator: Element<'a, Message> = indicator.into();
         let Some(label) = checkbox.label else {
-            return indicator.into();
+            return indicator;
         };
 
         let label = text(label)

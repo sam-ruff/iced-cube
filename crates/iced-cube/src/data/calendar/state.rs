@@ -1,11 +1,14 @@
 //! What the calendar shows and what is selected in it.
 
 use iced::keyboard::key::Named;
+use iced::time::Duration;
+
+pub use super::gesture::DOUBLE_CLICK;
 use jiff::civil::{Date, Weekday};
 use jiff::tz::TimeZone;
 use jiff::{SignedDuration, Timestamp, ToSpan};
 
-use super::entry::{Changed, Draft, Entries, Entry, EntryId, When, add_days};
+use super::entry::{Change, Changed, Draft, Entries, Entry, EntryId, When, add_days};
 use super::layout::{self, DAY_MINUTES, instant_at};
 use crate::keys::{self, Chord, Keymap};
 
@@ -131,10 +134,16 @@ pub enum Event {
     Today,
     /// Shows the period holding this date, without selecting anything.
     GoTo(Date),
-    /// A press on a day, a time slot or an entry. The first press selects
-    /// it; a press on what is already selected activates it, as
-    /// [`Event::Activate`] does.
+    /// A single press on a day, a time slot or an entry, which selects it.
+    /// A press on what is already selected activates it, as
+    /// [`Event::Activate`] does, unless
+    /// [`with_activate_on_second_press`](State::with_activate_on_second_press)
+    /// turned that off.
     Press(Selection),
+    /// A double click or double tap: selects what was pressed and
+    /// activates it, opening an entry or asking for a new one on a day or
+    /// a time.
+    DoublePress(Selection),
     /// Activates the selection: an entry is opened, and a day or a time
     /// slot asks for a new entry there. With nothing selected it asks for
     /// one on the day on show.
@@ -152,14 +161,36 @@ pub enum Event {
     /// A span dragged out on empty space.
     Request(Draft),
     /// An occurrence dragged to a new time. `start` says which occurrence;
-    /// a repeating entry moves as a whole by the same amount.
+    /// a repeating entry moves as a whole by the same amount. A whole-day
+    /// entry moves by the days between the two starts.
     Reschedule {
         entry: EntryId,
         start: Timestamp,
         to: (Timestamp, Timestamp),
     },
-    /// Adds an entry, or replaces the one with the same id.
+    /// An occurrence dragged by whole days, as in the month view and the
+    /// strip of whole-day entries. A timed entry keeps its time of day and
+    /// a whole-day entry its length in days. A repeating entry moves as a
+    /// whole.
+    MoveDays {
+        entry: EntryId,
+        start: Timestamp,
+        days: i32,
+    },
+    /// The user asked to remove an entry, such as with the Delete key.
+    /// Like the drags, it is limited by [`Allow`] and locked entries, and
+    /// only proposed when [`with_proposals`](State::with_proposals) is on.
+    Delete(EntryId),
+    /// Applies the change waiting in [`State::pending`].
+    Confirm,
+    /// Drops the change waiting in [`State::pending`], leaving the entry
+    /// where it was.
+    Discard,
+    /// Adds an entry, or replaces the one with the same id. Always
+    /// applies, and clears a pending change to the same entry.
     Insert(Entry),
+    /// Removes an entry. Always applies, and clears a pending change to
+    /// it.
     Remove(EntryId),
     /// The current time, for "today" and the now line.
     Tick(Timestamp),
@@ -181,8 +212,14 @@ pub enum Output {
     /// [`Scheduler::observe`](super::schedule::Scheduler::observe) for
     /// triggers on changes.
     Changed(Box<Changed>),
+    /// With [`with_proposals`](State::with_proposals) on, a drag or the
+    /// Delete key asks for this change without making it. The entries are
+    /// untouched and the change is drawn as a preview until the app sends
+    /// [`Event::Confirm`] or [`Event::Discard`].
+    Proposed(Box<Changed>),
     /// A different period or view is on show, such as after
-    /// [`Event::Next`]. Useful for loading the entries of that period.
+    /// [`Event::Next`], and once for the first period on the first
+    /// [`Event::Tick`]. Useful for loading the entries of that period.
     Viewed {
         view: View,
         first: Date,
@@ -202,6 +239,25 @@ pub struct State {
     selection: Option<Selection>,
     week_start: Weekday,
     allow: Allow,
+    proposals: bool,
+    pending: Option<Pending>,
+    /// The entries with the pending change applied, drawn while it waits.
+    shown: Option<Entries>,
+    second_press: bool,
+    double_click: Duration,
+    /// Whether the period on show has been reported with
+    /// [`Output::Viewed`].
+    announced: bool,
+    /// Counts the times the hours should scroll back to the start hour.
+    scrolls: u32,
+}
+
+/// A change waiting for [`Event::Confirm`], and the new start a selection
+/// on the moved entry follows to.
+#[derive(Debug, Clone, PartialEq)]
+struct Pending {
+    changed: Changed,
+    follow: Option<Timestamp>,
 }
 
 impl State {
@@ -219,7 +275,71 @@ impl State {
             selection: None,
             week_start: Weekday::Monday,
             allow: Allow::ALL,
+            proposals: false,
+            pending: None,
+            shown: None,
+            second_press: true,
+            double_click: DOUBLE_CLICK,
+            announced: false,
+            scrolls: 0,
         }
+    }
+
+    /// How soon a second press must follow the first to make a double
+    /// click or double tap. Defaults to [`DOUBLE_CLICK`].
+    pub fn with_double_click(mut self, interval: Duration) -> Self {
+        self.double_click = interval;
+        self
+    }
+
+    pub fn double_click(&self) -> Duration {
+        self.double_click
+    }
+
+    /// Makes drags and the Delete key propose their change with
+    /// [`Output::Proposed`] instead of making it, so the app can ask
+    /// first. Off by default: changes apply at once.
+    pub fn with_proposals(mut self, proposals: bool) -> Self {
+        self.proposals = proposals;
+        self
+    }
+
+    /// Whether a press on what is already selected activates it. On by
+    /// default, which suits touch screens; turn it off where a double
+    /// click opens things, so only [`Event::DoublePress`] activates.
+    pub fn with_activate_on_second_press(mut self, activates: bool) -> Self {
+        self.second_press = activates;
+        self
+    }
+
+    pub fn proposes(&self) -> bool {
+        self.proposals
+    }
+
+    pub fn activates_on_second_press(&self) -> bool {
+        self.second_press
+    }
+
+    /// The change waiting for [`Event::Confirm`] or [`Event::Discard`].
+    pub fn pending(&self) -> Option<&Changed> {
+        self.pending.as_ref().map(|pending| &pending.changed)
+    }
+
+    /// The entries as drawn: [`entries`](State::entries) with any pending
+    /// change applied.
+    pub fn shown(&self) -> &Entries {
+        self.shown.as_ref().unwrap_or(&self.entries)
+    }
+
+    /// Whether `entry` is drawn as a preview of a pending change.
+    pub fn is_preview(&self, entry: EntryId) -> bool {
+        self.pending
+            .as_ref()
+            .is_some_and(|pending| pending.changed.entry.id() == entry)
+    }
+
+    pub(super) fn scrolls(&self) -> u32 {
+        self.scrolls
     }
 
     /// A calendar showing the month of `now` in the time zone of
@@ -398,6 +518,14 @@ impl State {
 
     /// Applies an event and returns what the app may want to act on.
     pub fn update(&mut self, event: Event) -> Option<Output> {
+        let output = self.apply(event);
+        if matches!(output, Some(Output::Viewed { .. })) {
+            self.announced = true;
+        }
+        output
+    }
+
+    fn apply(&mut self, event: Event) -> Option<Output> {
         match event {
             Event::Show(view) => {
                 if view == self.view {
@@ -415,6 +543,7 @@ impl State {
                 let before = (self.range(), self.selection);
                 self.cursor = self.today;
                 self.selection = Some(Selection::Day(self.today));
+                self.scrolls = self.scrolls.wrapping_add(1);
                 if before.0 != self.range() {
                     return Some(self.viewed());
                 }
@@ -423,10 +552,20 @@ impl State {
             Event::GoTo(date) => self.show(date),
             Event::Press(selection) => {
                 if self.selection == Some(selection) {
-                    return self.activate();
+                    return if self.second_press {
+                        self.activate()
+                    } else {
+                        None
+                    };
                 }
                 self.selection = Some(selection);
                 Some(Output::Selected(self.selection))
+            }
+            Event::DoublePress(selection) => {
+                let changed = self.selection != Some(selection);
+                self.selection = Some(selection);
+                self.activate()
+                    .or_else(|| changed.then_some(Output::Selected(self.selection)))
             }
             Event::Activate => self.activate(),
             Event::Clear => {
@@ -460,40 +599,138 @@ impl State {
             }
             Event::Request(draft) => self.allow.create.then_some(Output::Requested(draft)),
             Event::Reschedule { entry, start, to } => {
-                if !self.allow.reschedule {
+                let (moved, new_start) = self.rescheduled(entry, start, to)?;
+                self.change(moved, Some(new_start))
+            }
+            Event::MoveDays { entry, start, days } => {
+                if days == 0 {
                     return None;
                 }
-                let moved = self.rescheduled(entry, start, to)?;
-                let changed = self.entries.insert(moved)?;
-                if let Some(Selection::Entry {
-                    entry: selected, ..
-                }) = self.selection
-                    && selected == entry
-                {
-                    self.selection = Some(Selection::Entry {
-                        entry,
-                        start: to.0.min(to.1),
-                    });
-                }
-                Some(report(changed))
+                let moved = self.moved_by_days(entry, days)?;
+                let new_start = shift_days(start, days, self.entries.time_zone());
+                self.change(moved, Some(new_start))
             }
-            Event::Insert(entry) => self.entries.insert(entry).map(report),
-            Event::Remove(id) => {
-                let changed = self.entries.remove(id)?;
-                if matches!(self.selection, Some(Selection::Entry { entry, .. }) if entry == id) {
-                    self.selection = None;
+            Event::Delete(id) => {
+                let entry = self.entries.get(id)?;
+                if !self.allow.remove || entry.is_locked() {
+                    return None;
                 }
-                Some(report(changed))
+                if !self.proposals {
+                    return self.remove(id);
+                }
+                let changed = Changed {
+                    change: Change::Removed,
+                    entry: entry.clone(),
+                    before: None,
+                };
+                self.propose(Pending {
+                    changed,
+                    follow: None,
+                })
+            }
+            Event::Confirm => {
+                let pending = self.pending.take()?;
+                self.shown = None;
+                match pending.changed.change {
+                    Change::Removed => self.remove(pending.changed.entry.id()),
+                    Change::Created | Change::Updated => {
+                        self.insert(pending.changed.entry, pending.follow)
+                    }
+                }
+            }
+            Event::Discard => {
+                self.pending.take()?;
+                self.shown = None;
+                None
+            }
+            Event::Insert(entry) => {
+                // Inserting the proposed entry confirms it, selection and all.
+                let follow = self
+                    .pending
+                    .as_ref()
+                    .filter(|pending| pending.changed.entry == entry)
+                    .and_then(|pending| pending.follow);
+                self.clear_pending(entry.id());
+                self.insert(entry, follow)
+            }
+            Event::Remove(id) => {
+                self.clear_pending(id);
+                self.remove(id)
             }
             Event::Tick(now) => {
                 self.now = Some(now);
                 self.today = self.entries.date_of(now);
-                None
+                (!self.announced).then(|| self.viewed())
             }
         }
     }
 
+    /// Makes a change from a gesture, or proposes it when proposals are
+    /// on. A selection on the entry follows to the start in `follow`.
+    fn change(&mut self, moved: Entry, follow: Option<Timestamp>) -> Option<Output> {
+        let before = self.entries.get(moved.id())?;
+        if !self.allow.reschedule || before.is_locked() || *before == moved {
+            return None;
+        }
+        if !self.proposals {
+            return self.insert(moved, follow);
+        }
+        let changed = Changed {
+            change: Change::Updated,
+            entry: moved,
+            before: Some(before.clone()),
+        };
+        self.propose(Pending { changed, follow })
+    }
+
+    fn propose(&mut self, pending: Pending) -> Option<Output> {
+        let output = Output::Proposed(Box::new(pending.changed.clone()));
+        self.shown = match pending.changed.change {
+            Change::Removed => None,
+            Change::Created | Change::Updated => {
+                let mut shown = self.entries.clone();
+                let _ = shown.insert(pending.changed.entry.clone());
+                Some(shown)
+            }
+        };
+        self.pending = Some(pending);
+        Some(output)
+    }
+
+    fn clear_pending(&mut self, id: EntryId) {
+        if self.is_preview(id) {
+            self.pending = None;
+            self.shown = None;
+        }
+    }
+
+    fn insert(&mut self, entry: Entry, follow: Option<Timestamp>) -> Option<Output> {
+        let id = entry.id();
+        let changed = self.entries.insert(entry)?;
+        if let Some(to) = follow
+            && matches!(self.selection, Some(Selection::Entry { entry, .. }) if entry == id)
+        {
+            self.selection = Some(Selection::Entry {
+                entry: id,
+                start: to,
+            });
+        }
+        Some(report(changed))
+    }
+
+    fn remove(&mut self, id: EntryId) -> Option<Output> {
+        let changed = self.entries.remove(id)?;
+        if matches!(self.selection, Some(Selection::Entry { entry, .. }) if entry == id) {
+            self.selection = None;
+        }
+        Some(report(changed))
+    }
+
     fn set_view(&mut self, view: View) {
+        let timed = |view: View| matches!(view, View::Day | View::Week | View::FourDays);
+        if timed(view) && !timed(self.view) {
+            self.scrolls = self.scrolls.wrapping_add(1);
+        }
         self.view = view;
     }
 
@@ -591,26 +828,63 @@ impl State {
         Some(Output::Selected(self.selection))
     }
 
-    /// `entry` with the occurrence starting at `start` moved to `to`.
+    /// `entry` with the occurrence starting at `start` moved to `to`, and
+    /// where that occurrence now starts. A whole-day entry moves by the
+    /// days between `start` and the new start.
     fn rescheduled(
         &self,
-        entry: EntryId,
+        id: EntryId,
         start: Timestamp,
         to: (Timestamp, Timestamp),
-    ) -> Option<Entry> {
-        let entry = self.entries.get(entry)?;
+    ) -> Option<(Entry, Timestamp)> {
+        let entry = self.entries.get(id)?;
+        let (new_start, new_end) = (to.0.min(to.1), to.0.max(to.1));
         let When::Timed {
             start: first_start, ..
         } = entry.when()
         else {
-            return None;
+            let days = days_between(self.entries.date_of(start), self.entries.date_of(new_start));
+            let moved = self.moved_by_days(id, days)?;
+            return Some((moved, shift_days(start, days, self.entries.time_zone())));
         };
-        let (new_start, new_end) = (to.0.min(to.1), to.0.max(to.1));
         let shift: SignedDuration = new_start.duration_since(start);
         let first = first_start.checked_add(shift).ok()?;
         let end = first.checked_add(new_end.duration_since(new_start)).ok()?;
-        Some(entry.clone().rescheduled(When::timed(first, end)))
+        Some((
+            entry.clone().rescheduled(When::timed(first, end)),
+            new_start,
+        ))
     }
+
+    /// `entry` moved by whole days, keeping a timed entry's time of day
+    /// and a whole-day entry's length.
+    fn moved_by_days(&self, id: EntryId, days: i32) -> Option<Entry> {
+        let entry = self.entries.get(id)?;
+        let when = match entry.when() {
+            When::AllDay { first, last } => {
+                When::all_day(add_days(first, days), add_days(last, days))
+            }
+            When::Timed { start, end } => {
+                let moved = shift_days(start, days, self.entries.time_zone());
+                When::timed(moved, moved.checked_add(end.duration_since(start)).ok()?)
+            }
+        };
+        Some(entry.clone().rescheduled(when))
+    }
+}
+
+/// `instant` moved by whole days at the same local time in `time_zone`.
+fn shift_days(instant: Timestamp, days: i32, time_zone: &TimeZone) -> Timestamp {
+    instant
+        .to_zoned_datetime(time_zone.clone())
+        .checked_add(i64::from(days).days())
+        .map(|zoned| zoned.timestamp())
+        .unwrap_or(instant)
+}
+
+/// How many days `to` is after `from`, negative when before.
+pub(super) fn days_between(from: Date, to: Date) -> i32 {
+    from.until(to).ok().map(|span| span.get_days()).unwrap_or(0)
 }
 
 fn report(changed: Changed) -> Output {
@@ -674,8 +948,8 @@ impl Action {
                 .then_some(Event::Activate),
             Action::Remove => state
                 .selected_entry()
-                .filter(|_| state.allow().remove)
-                .map(|entry| Event::Remove(entry.id())),
+                .filter(|entry| state.allow().remove && !entry.is_locked())
+                .map(|entry| Event::Delete(entry.id())),
             Action::Close => state.selection().map(|_| Event::Clear),
         }
     }
@@ -1221,7 +1495,7 @@ mod tests {
         let _ = state.update(Event::Press(entry(1, 19, 9)));
         assert_eq!(
             Action::Remove.event(&state),
-            Some(Event::Remove(EntryId(1)))
+            Some(Event::Delete(EntryId(1)))
         );
         let drag = Event::Reschedule {
             entry: EntryId(1),
@@ -1404,19 +1678,14 @@ mod tests {
     }
 
     #[test]
-    fn rescheduling_ignores_unknown_whole_day_and_unmoved_entries() {
+    fn rescheduling_ignores_unknown_and_unmoved_entries() {
         let mut state = state();
-        let day = date(2026, 11, 19);
-        let _ = state.update(Event::Insert(Entry::all_day(EntryId(8), "Trip", day, day)));
-        let to = (at(20, 9), at(20, 10));
-        for id in [8, 99] {
-            let event = Event::Reschedule {
-                entry: EntryId(id),
-                start: at(19, 0),
-                to,
-            };
-            assert_eq!(state.update(event), None, "{id}");
-        }
+        let unknown = Event::Reschedule {
+            entry: EntryId(99),
+            start: at(19, 0),
+            to: (at(20, 9), at(20, 10)),
+        };
+        assert_eq!(state.update(unknown), None);
         let unmoved = Event::Reschedule {
             entry: EntryId(1),
             start: at(19, 9),
@@ -1428,6 +1697,7 @@ mod tests {
     #[test]
     fn a_tick_moves_today_and_the_now_line() {
         let mut state = state();
+        let _ = state.update(Event::Tick(at(19, 0)));
         assert_eq!(state.update(Event::Tick(at(20, 0))), None);
         assert_eq!(state.now(), Some(at(20, 0)));
         assert_eq!(state.today(), date(2026, 11, 20));
@@ -1540,8 +1810,326 @@ mod tests {
         let Some(event) = Action::Remove.event(&state) else {
             panic!("an entry is selected");
         };
-        assert_eq!(event, Event::Remove(EntryId(2)));
+        assert_eq!(event, Event::Delete(EntryId(2)));
         assert!(state.update(event).is_some());
         assert_eq!(state.entries().len(), 2);
+    }
+
+    fn when_of(state: &State, id: u64) -> Option<When> {
+        state.entries().get(EntryId(id)).map(Entry::when)
+    }
+
+    #[test]
+    fn moving_by_days_keeps_the_time_of_day_and_follows_the_selection() {
+        let mut state = state();
+        let _ = state.update(Event::Press(entry(1, 19, 9)));
+        let output = state.update(Event::MoveDays {
+            entry: EntryId(1),
+            start: at(19, 9),
+            days: 3,
+        });
+        assert!(matches!(output, Some(Output::Changed(_))));
+        assert_eq!(when_of(&state, 1), Some(When::timed(at(22, 9), at(22, 10))));
+        assert_eq!(state.selection(), Some(entry(1, 22, 9)));
+        let back = Event::MoveDays {
+            entry: EntryId(1),
+            start: at(22, 9),
+            days: -5,
+        };
+        assert!(state.update(back).is_some());
+        assert_eq!(when_of(&state, 1), Some(When::timed(at(17, 9), at(17, 10))));
+        let nowhere = Event::MoveDays {
+            entry: EntryId(1),
+            start: at(17, 9),
+            days: 0,
+        };
+        assert_eq!(state.update(nowhere), None);
+    }
+
+    #[test]
+    fn whole_day_entries_move_by_days_and_keep_their_length() {
+        let mut state = state();
+        let trip = Entry::all_day(EntryId(8), "Trip", date(2026, 11, 19), date(2026, 11, 21));
+        let _ = state.update(Event::Insert(trip));
+        let _ = state.update(Event::MoveDays {
+            entry: EntryId(8),
+            start: at(19, 0),
+            days: 7,
+        });
+        assert_eq!(
+            when_of(&state, 8),
+            Some(When::all_day(date(2026, 11, 26), date(2026, 11, 28)))
+        );
+        // A reschedule of a whole-day entry moves it by the days between.
+        let _ = state.update(Event::Reschedule {
+            entry: EntryId(8),
+            start: at(26, 0),
+            to: (at(24, 0), at(25, 0)),
+        });
+        assert_eq!(
+            when_of(&state, 8),
+            Some(When::all_day(date(2026, 11, 24), date(2026, 11, 26)))
+        );
+    }
+
+    #[test]
+    fn moving_one_occurrence_by_days_moves_the_whole_series() {
+        let mut state = State::new(today()).with_entries(
+            Entries::utc().with([Entry::all_day(
+                EntryId(1),
+                "Bins",
+                date(2026, 11, 2),
+                date(2026, 11, 2),
+            )
+            .repeat(Repeat::weekly())]),
+        );
+        let _ = state.update(Event::MoveDays {
+            entry: EntryId(1),
+            start: at(16, 0),
+            days: 1,
+        });
+        assert_eq!(when_of(&state, 1), Some(When::day(date(2026, 11, 3))));
+    }
+
+    #[test]
+    fn drags_by_days_follow_the_permission_to_reschedule() {
+        let mut state = state().with_allow(Allow {
+            reschedule: false,
+            ..Allow::ALL
+        });
+        let event = Event::MoveDays {
+            entry: EntryId(1),
+            start: at(19, 9),
+            days: 1,
+        };
+        assert_eq!(state.update(event), None);
+        assert_eq!(when_of(&state, 1), Some(When::timed(at(19, 9), at(19, 10))));
+    }
+
+    #[test]
+    fn a_locked_entry_is_never_moved_or_deleted_by_the_calendar() {
+        let mut state = state();
+        let _ = state.update(Event::Insert(meeting(5, 19, 16).locked(true)));
+        let _ = state.update(Event::Press(entry(5, 19, 16)));
+        assert_eq!(Action::Remove.event(&state), None);
+        for event in [
+            Event::Delete(EntryId(5)),
+            Event::MoveDays {
+                entry: EntryId(5),
+                start: at(19, 16),
+                days: 1,
+            },
+            Event::Reschedule {
+                entry: EntryId(5),
+                start: at(19, 16),
+                to: (at(19, 17), at(19, 18)),
+            },
+        ] {
+            assert_eq!(state.update(event.clone()), None, "{event:?}");
+        }
+        assert_eq!(
+            when_of(&state, 5),
+            Some(When::timed(at(19, 16), at(19, 17)))
+        );
+        // It can still be opened, and the app can still change it.
+        assert!(matches!(
+            state.update(Event::Activate),
+            Some(Output::Opened { .. })
+        ));
+        assert!(state.update(Event::Remove(EntryId(5))).is_some());
+    }
+
+    #[test]
+    fn with_proposals_a_drag_is_proposed_and_drawn_until_confirmed() {
+        let mut state = state().with_proposals(true);
+        assert!(state.proposes());
+        let _ = state.update(Event::Press(entry(1, 19, 9)));
+        let output = state.update(Event::MoveDays {
+            entry: EntryId(1),
+            start: at(19, 9),
+            days: 1,
+        });
+        let Some(Output::Proposed(proposed)) = output else {
+            panic!("a proposal, not {output:?}");
+        };
+        assert_eq!(proposed.change, Change::Updated);
+        assert_eq!(proposed.entry.when(), When::timed(at(20, 9), at(20, 10)));
+        assert_eq!(
+            proposed.before.map(|before| before.when()),
+            Some(When::timed(at(19, 9), at(19, 10)))
+        );
+        // Nothing has changed yet, but the move is drawn.
+        assert_eq!(when_of(&state, 1), Some(When::timed(at(19, 9), at(19, 10))));
+        assert_eq!(
+            state.shown().get(EntryId(1)).map(Entry::when),
+            Some(When::timed(at(20, 9), at(20, 10)))
+        );
+        assert!(state.is_preview(EntryId(1)));
+        assert!(!state.is_preview(EntryId(2)));
+
+        assert!(matches!(
+            state.update(Event::Confirm),
+            Some(Output::Changed(_))
+        ));
+        assert_eq!(when_of(&state, 1), Some(When::timed(at(20, 9), at(20, 10))));
+        assert_eq!(state.pending(), None);
+        assert_eq!(state.selection(), Some(entry(1, 20, 9)));
+        assert_eq!(state.update(Event::Confirm), None, "nothing is pending");
+    }
+
+    #[test]
+    fn a_discarded_proposal_leaves_the_entry_where_it_was() {
+        let mut state = state().with_proposals(true);
+        let _ = state.update(Event::Reschedule {
+            entry: EntryId(1),
+            start: at(19, 9),
+            to: (at(19, 11), at(19, 12)),
+        });
+        assert!(state.pending().is_some());
+        assert_eq!(state.update(Event::Discard), None);
+        assert_eq!(state.pending(), None);
+        assert_eq!(state.shown(), state.entries());
+        assert_eq!(when_of(&state, 1), Some(When::timed(at(19, 9), at(19, 10))));
+    }
+
+    #[test]
+    fn inserting_the_proposed_entry_confirms_it_and_others_clear_it() {
+        let mut state = state().with_proposals(true);
+        let _ = state.update(Event::MoveDays {
+            entry: EntryId(1),
+            start: at(19, 9),
+            days: 1,
+        });
+        let Some(proposed) = state.pending().map(|pending| pending.entry.clone()) else {
+            panic!("a proposal");
+        };
+        assert!(state.update(Event::Insert(proposed)).is_some());
+        assert_eq!(state.pending(), None);
+        assert_eq!(when_of(&state, 1), Some(When::timed(at(20, 9), at(20, 10))));
+
+        let _ = state.update(Event::MoveDays {
+            entry: EntryId(2),
+            start: at(19, 14),
+            days: 1,
+        });
+        let _ = state.update(Event::Remove(EntryId(2)));
+        assert_eq!(state.pending(), None);
+    }
+
+    #[test]
+    fn with_proposals_the_delete_key_proposes_a_removal() {
+        let mut state = state().with_proposals(true);
+        let _ = state.update(Event::Press(entry(2, 19, 14)));
+        let Some(event) = Action::Remove.event(&state) else {
+            panic!("an entry is selected");
+        };
+        let Some(Output::Proposed(proposed)) = state.update(event) else {
+            panic!("a proposal");
+        };
+        assert_eq!(proposed.change, Change::Removed);
+        assert_eq!(state.entries().len(), 3, "still there");
+        assert!(
+            state.shown().get(EntryId(2)).is_some(),
+            "drawn as a preview"
+        );
+        assert!(state.is_preview(EntryId(2)));
+        assert!(matches!(
+            state.update(Event::Confirm),
+            Some(Output::Changed(_))
+        ));
+        assert_eq!(state.entries().len(), 2);
+        assert_eq!(state.selection(), None);
+    }
+
+    #[test]
+    fn a_double_press_selects_and_activates_at_once() {
+        let mut state = state();
+        assert_eq!(
+            state.update(Event::DoublePress(entry(1, 19, 9))),
+            Some(Output::Opened {
+                entry: EntryId(1),
+                start: at(19, 9)
+            })
+        );
+        assert_eq!(state.selection(), Some(entry(1, 19, 9)));
+        let slot = Selection::Slot {
+            date: today(),
+            minute: 600,
+        };
+        assert!(matches!(
+            state.update(Event::DoublePress(slot)),
+            Some(Output::Requested(_))
+        ));
+        // Without leave to create, a double press on a day only selects it.
+        let mut read_only = State::new(today()).read_only();
+        assert_eq!(
+            read_only.update(Event::DoublePress(Selection::Day(today()))),
+            Some(Output::Selected(Some(Selection::Day(today()))))
+        );
+    }
+
+    #[test]
+    fn a_second_press_can_be_left_to_select_only() {
+        let mut state = state().with_activate_on_second_press(false);
+        assert!(!state.activates_on_second_press());
+        let _ = state.update(Event::Press(entry(1, 19, 9)));
+        assert_eq!(state.update(Event::Press(entry(1, 19, 9))), None);
+        assert!(matches!(
+            state.update(Event::DoublePress(entry(1, 19, 9))),
+            Some(Output::Opened { .. })
+        ));
+        // By default a second press activates, for touch screens.
+        let mut touch = self::state();
+        assert!(touch.activates_on_second_press());
+        let _ = touch.update(Event::Press(entry(1, 19, 9)));
+        assert!(matches!(
+            touch.update(Event::Press(entry(1, 19, 9))),
+            Some(Output::Opened { .. })
+        ));
+    }
+
+    #[test]
+    fn the_double_click_interval_can_be_set() {
+        let state = state();
+        assert_eq!(state.double_click(), DOUBLE_CLICK);
+        let state = state.with_double_click(Duration::from_secs(3600));
+        assert_eq!(state.double_click(), Duration::from_secs(3600));
+    }
+
+    #[test]
+    fn the_first_tick_reports_the_period_on_show_once() {
+        let mut state = state();
+        let (first, last) = state.range();
+        assert_eq!(
+            state.update(Event::Tick(at(19, 8))),
+            Some(Output::Viewed {
+                view: View::Month,
+                first,
+                last
+            })
+        );
+        assert_eq!(state.update(Event::Tick(at(19, 9))), None);
+
+        // Once a period has been reported another way, the tick says nothing.
+        let mut moved = self::state();
+        assert!(matches!(
+            moved.update(Event::Next),
+            Some(Output::Viewed { .. })
+        ));
+        assert_eq!(moved.update(Event::Tick(at(19, 8))), None);
+    }
+
+    #[test]
+    fn today_and_timed_views_ask_the_hours_to_scroll_to_the_start() {
+        let mut state = state();
+        let start = state.scrolls();
+        let _ = state.update(Event::Show(View::Week));
+        assert_eq!(state.scrolls(), start + 1);
+        let _ = state.update(Event::Show(View::Day));
+        assert_eq!(state.scrolls(), start + 1, "already in a timed view");
+        let _ = state.update(Event::Today);
+        assert_eq!(state.scrolls(), start + 2);
+        let _ = state.update(Event::Show(View::Month));
+        assert_eq!(state.scrolls(), start + 2);
     }
 }

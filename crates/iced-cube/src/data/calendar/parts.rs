@@ -7,20 +7,23 @@ use iced::advanced::layout::{self, Layout};
 use iced::advanced::widget::{Tree, Widget};
 use iced::advanced::{Renderer as _, renderer};
 use iced::widget::button::Status;
-use iced::widget::{self, Column, Row, Space, column, container, text};
+use iced::widget::{self, Column, Row, Space, column, container, row, stack, svg, text};
 use iced::{
-    Alignment, Background, Border, Element, Length, Padding, Rectangle, Renderer, Size, Theme,
-    mouse,
+    Alignment, Background, Border, Color, Element, Length, Padding, Rectangle, Renderer, Size,
+    Theme, mouse,
 };
 use jiff::Timestamp;
 use jiff::civil::Date;
 use jiff::tz::TimeZone;
 
-use super::entry::{Occurrence, When};
+use super::entry::{Change, Emphasis, Entry, EntryId, Occurrence, Tone, When};
+use super::gesture::Pressable;
 use super::layout::{Bar, Fitted};
 use super::state::{Event, Selection, State};
 use super::style;
 use crate::data::ellipsis::ellipsis;
+use crate::icon::{opaque, themed};
+use crate::overlay::tooltip::tooltip;
 use crate::theme::{self, Tokens, radius, text_size};
 
 pub(super) type Handler<'a, Message> = Option<Rc<dyn Fn(Event) -> Message + 'a>>;
@@ -158,29 +161,223 @@ fn number_pill<'a, Message: 'a>(
         .into()
 }
 
-/// An entry as a bar: its label on a wash of its tone.
+/// The id of an occurrence's chip, bar or block in every view, for
+/// finding exactly one entry in tests and for operations on it.
+pub fn entry_id(entry: EntryId, start: Timestamp) -> widget::Id {
+    widget::Id::from(format!(
+        "iced-cube-calendar-entry-{}-{}",
+        entry.0,
+        start.as_millisecond()
+    ))
+}
+
+/// The id of a day's cell in the month, or its heading over the hours,
+/// for finding it in tests and for drags that end on it.
+pub fn day_id(date: Date) -> widget::Id {
+    widget::Id::from(format!("iced-cube-calendar-day-{date}"))
+}
+
+/// Diagonal stripes exactly `size` big, so they keep the same spacing on
+/// any bar and never draw past it. The picture is cached by its bytes, so
+/// each size is drawn once.
+pub(super) fn hatch_handle(size: Size) -> svg::Handle {
+    let (width, height) = (size.width.round().max(1.0), size.height.round().max(1.0));
+    svg::Handle::from_memory(format!(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}"><defs><pattern id="h" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="3" height="8" fill="#000"/></pattern></defs><rect width="{width}" height="{height}" fill="url(#h)"/></svg>"##
+    ).into_bytes())
+}
+
+/// Stripes in a colour from the theme, filling the space they are given.
+struct Hatch<C> {
+    colour: C,
+}
+
+impl<Message, C: Fn(&Theme) -> Option<Color>> Widget<Message, Theme, Renderer> for Hatch<C> {
+    fn size(&self) -> Size<Length> {
+        Size::new(Length::Fill, Length::Fill)
+    }
+
+    fn layout(
+        &mut self,
+        _tree: &mut Tree,
+        _renderer: &Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
+        layout::Node::new(limits.max())
+    }
+
+    fn draw(
+        &self,
+        _tree: &Tree,
+        renderer: &mut Renderer,
+        theme: &Theme,
+        _style: &renderer::Style,
+        layout: Layout<'_>,
+        _cursor: mouse::Cursor,
+        viewport: &Rectangle,
+    ) {
+        let Some(colour) = (self.colour)(theme) else {
+            return;
+        };
+        let bounds = layout.bounds();
+        let Some(clip) = bounds.intersection(viewport) else {
+            return;
+        };
+        let svg = iced::advanced::svg::Svg::new(hatch_handle(bounds.size()))
+            .color(opaque(colour))
+            .opacity(colour.a);
+        iced::advanced::svg::Renderer::draw_svg(renderer, svg, bounds, clip);
+    }
+}
+
+/// The marks of `look` laid over and under `label`: stripes behind a
+/// hatched entry and a line through a struck one. Their colours follow
+/// the theme as it draws.
+pub(super) fn marked<'a, Message: 'a>(
+    label: Element<'a, Message>,
+    tone: Tone,
+    look: style::Look,
+) -> Element<'a, Message> {
+    if !look.hatched() && !look.struck() {
+        return label;
+    }
+    let marks = move |theme: &Theme| style::marked(&Tokens::of(theme), tone, look, Status::Active);
+    let mut layers = stack![];
+    if look.hatched() {
+        layers = layers.push(Element::new(Hatch {
+            colour: move |theme: &Theme| marks(theme).hatch,
+        }));
+    }
+    layers = layers.push(label);
+    if look.struck() {
+        layers = layers.push(
+            container(
+                container(Space::new())
+                    .width(Length::Fill)
+                    .height(Length::Fixed(1.0))
+                    .style(move |theme: &Theme| container::Style {
+                        background: marks(theme).strike.map(Background::Color),
+                        ..container::Style::default()
+                    }),
+            )
+            .center_y(Length::Fill)
+            .width(Length::Fill),
+        );
+    }
+    layers.into()
+}
+
+/// How `entry` is drawn, given what is selected and pending.
+pub(super) fn look_of(state: &State, entry: &Entry, selected: bool) -> style::Look {
+    let removing = state.pending().is_some_and(|pending| {
+        pending.change == Change::Removed && pending.entry.id() == entry.id()
+    });
+    style::Look {
+        selected,
+        emphasis: if removing {
+            Emphasis::Struck
+        } else {
+            entry.emphasis_of()
+        },
+        preview: state.is_preview(entry.id()),
+    }
+}
+
+/// An entry's icon at `size`: muted, or in the entry's text colour when
+/// it is selected and filled with its tone, with its label as a tooltip.
+pub(super) fn entry_icon<'a, Message: 'a>(
+    entry: &Entry,
+    look: style::Look,
+    tone: Tone,
+    size: f32,
+) -> Option<Element<'a, Message>> {
+    let glyph = entry.icon_of()?;
+    let icon = themed(glyph, size, 1.0, move |theme: &Theme| {
+        let tokens = Tokens::of(theme);
+        if look.selected && !look.preview {
+            return style::marked(&tokens, tone, look, Status::Active)
+                .chip
+                .foreground;
+        }
+        tokens.muted_foreground
+    });
+    Some(match entry.icon_label_of() {
+        Some(label) => tooltip(icon, label.to_owned()).into(),
+        None => icon.into(),
+    })
+}
+
+/// An entry's icon, which is never cut off, then its label, which is.
+pub(super) fn labelled<'a, Message: 'a>(
+    icon: Option<Element<'a, Message>>,
+    label: String,
+    size: f32,
+    line: f32,
+    colour: impl Fn(&Theme) -> Color + 'a,
+) -> Element<'a, Message> {
+    let label = ellipsis(label).size(size, line).colour(colour);
+    let Some(icon) = icon else {
+        return label.into();
+    };
+    row![icon, label]
+        .spacing(3.0)
+        .align_y(Alignment::Center)
+        .into()
+}
+
+/// `content`, which sends `press`, sending a double press of `selection`
+/// instead when it completes a double click.
+pub(super) fn pressable<'a, Message: Clone + 'a>(
+    state: &State,
+    content: impl Into<Element<'a, Message>>,
+    selection: Selection,
+    on_event: &Handler<'a, Message>,
+) -> Element<'a, Message> {
+    Pressable::new(
+        content,
+        send(on_event, Event::DoublePress(selection)),
+        state.double_click(),
+    )
+    .into()
+}
+
+/// An entry as a bar: its icon and label on a wash of its tone, marked
+/// with its emphasis.
 pub(super) fn chip<'a, Message: Clone + 'a>(
     state: &State,
     bar: &Bar,
     on_event: &Handler<'a, Message>,
 ) -> Element<'a, Message> {
-    let Some(entry) = state.entries().get(bar.occurrence.entry) else {
+    let Some(entry) = state.shown().get(bar.occurrence.entry) else {
         return Space::new().into();
     };
     let tone = entry.tone_of();
     let selection = selection_of(&bar.occurrence);
-    let selected = state.is_selected(selection);
-    let label = ellipsis(bar_label(entry.title(), bar, state.time_zone()))
-        .size(text_size::XS, CHIP_HEIGHT)
-        .colour(move |theme| {
-            style::chip(&Tokens::of(theme), tone, selected, Status::Active).foreground
-        });
-    widget::button(label)
+    let look = look_of(state, entry, state.is_selected(selection));
+    let label = labelled(
+        entry_icon(entry, look, tone, text_size::XS),
+        bar_label(entry.title(), bar, state.time_zone()),
+        text_size::XS,
+        CHIP_HEIGHT,
+        move |theme| {
+            style::marked(&Tokens::of(theme), tone, look, Status::Active)
+                .chip
+                .foreground
+        },
+    );
+    let label = container(label)
+        .padding(Padding::from([0.0, 6.0]))
+        .center_y(Length::Fill)
+        .into();
+    let button = widget::button(marked(label, tone, look))
         .width(Length::Fill)
         .height(Length::Fixed(CHIP_HEIGHT))
-        .padding(Padding::from([0.0, 6.0]))
+        .padding(0)
         .on_press_maybe(send(on_event, Event::Press(selection)))
-        .style(move |theme, status| style::chip_button(&Tokens::of(theme), tone, selected, status))
+        .style(move |theme, status| style::marked_button(&Tokens::of(theme), tone, look, status));
+    container(pressable(state, button, selection, on_event))
+        .id(entry_id(bar.occurrence.entry, bar.occurrence.start))
+        .width(Length::Fill)
         .into()
 }
 
@@ -197,27 +394,56 @@ pub(super) fn line<'a, Message: Clone + 'a>(
     bar: &Bar,
     on_event: &Handler<'a, Message>,
 ) -> Element<'a, Message> {
-    let Some(entry) = state.entries().get(bar.occurrence.entry) else {
+    let Some(entry) = state.shown().get(bar.occurrence.entry) else {
         return Space::new().into();
     };
     let tone = entry.tone_of();
     let selection = selection_of(&bar.occurrence);
-    let selected = state.is_selected(selection);
-    let label = ellipsis(bar_label(entry.title(), bar, state.time_zone()))
-        .size(text_size::XS, CHIP_HEIGHT)
-        .colour(move |theme| {
-            style::entry_line(&Tokens::of(theme), tone, selected, Status::Active).text_color
-        });
+    let look = look_of(state, entry, state.is_selected(selection));
+    let label = labelled(
+        entry_icon(entry, look, tone, text_size::XS),
+        bar_label(entry.title(), bar, state.time_zone()),
+        text_size::XS,
+        CHIP_HEIGHT,
+        move |theme| style::marked_line(&Tokens::of(theme), tone, look, Status::Active).text_color,
+    );
     let mut content = Row::new().spacing(4.0).align_y(Alignment::Center);
-    if !selected {
-        content = content.push(dot(tone, 6.0));
+    if !look.selected {
+        content = content.push(if look.emphasis == Emphasis::Outlined || look.preview {
+            ring(tone, 6.0)
+        } else {
+            dot(tone, 6.0)
+        });
     }
-    widget::button(content.push(label))
+    let content = container(content.push(label))
+        .padding(Padding::from([0.0, 4.0]))
+        .center_y(Length::Fill)
+        .into();
+    let button = widget::button(marked(content, tone, look))
         .width(Length::Fill)
         .height(Length::Fixed(CHIP_HEIGHT))
-        .padding(Padding::from([0.0, 4.0]))
+        .padding(0)
         .on_press_maybe(send(on_event, Event::Press(selection)))
-        .style(move |theme, status| style::entry_line(&Tokens::of(theme), tone, selected, status))
+        .style(move |theme, status| style::marked_line(&Tokens::of(theme), tone, look, status));
+    container(pressable(state, button, selection, on_event))
+        .id(entry_id(bar.occurrence.entry, bar.occurrence.start))
+        .width(Length::Fill)
+        .into()
+}
+
+/// A circle outlined in a tone.
+pub(super) fn ring<'a, Message: 'a>(tone: Tone, size: f32) -> Element<'a, Message> {
+    container(Space::new())
+        .width(Length::Fixed(size))
+        .height(Length::Fixed(size))
+        .style(move |theme: &Theme| container::Style {
+            border: Border {
+                color: style::tone(&Tokens::of(theme), tone),
+                width: 1.5,
+                radius: radius::FULL.into(),
+            },
+            ..container::Style::default()
+        })
         .into()
 }
 
@@ -305,7 +531,7 @@ pub(super) fn lanes<'a, Message: Clone + 'a>(
 pub(super) fn dots<'a, Message: 'a>(state: &State, occurrences: &[Occurrence]) -> Row<'a, Message> {
     let mut row = Row::new().spacing(3.0).align_y(Alignment::Center);
     for occurrence in occurrences.iter().take(3) {
-        let Some(entry) = state.entries().get(occurrence.entry) else {
+        let Some(entry) = state.shown().get(occurrence.entry) else {
             continue;
         };
         let tone = entry.tone_of();

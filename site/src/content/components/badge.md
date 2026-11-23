@@ -7,8 +7,8 @@ module: feedback::badge
 imports: |
   use iced_cube::badge;
   use iced_cube::feedback::badge::Variant;
-keywords: [tag, chip, pill]
-related: [alert]
+keywords: [tag, pill]
+related: [alert, chip]
 hero: badge/variants
 stories: [badge/variants, badge/with-icon, badge/in-a-list]
 api:
@@ -24,4 +24,4 @@ Badges are for short labels that sit next to other content: a status in a table 
 
 Success, Warning and Destructive map to the theme's status colours, so use them only when the badge actually reports a state. For neutral tags, Secondary and Outline stay out of the way.
 
-Badges are not interactive. If a label needs to respond to clicks, use a button instead.
+Badges are not interactive. If a label needs to respond to clicks, use a button instead, and for a value someone can remove, a [chip](../chip/).

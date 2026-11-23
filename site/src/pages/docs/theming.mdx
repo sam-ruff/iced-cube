@@ -26,9 +26,18 @@ let border = tokens.border;
 let text = tokens.muted_foreground;
 ```
 
-Tokens include `background`, `foreground`, `popover`, `muted`, `muted_foreground`, `accent`, `border`, `ring`, `primary`, `secondary`, `destructive`, `success` and `warning`, each with a matching foreground where it makes sense. `popover` is the surface of menus, popovers, lists and dialogs: the background in light themes, lifted a little in dark ones so a menu over a card still looks raised. Here they are as the current theme resolves them; switch the site between light and dark to see both sets:
+Tokens include `background`, `foreground`, `popover`, `muted`, `muted_foreground`, `accent`, `border`, `ring`, `primary`, `secondary`, `destructive`, `success` and `warning`, each with a matching foreground where it makes sense. Text on a coloured fill takes near-black or near-white, whichever has the higher contrast. Red text on the page, such as an error message, uses `destructive_text`, which is lightened on dark backgrounds until it reads at 4.5 to 1, while fills keep `destructive`; `theme::readable(colour, background)` does the same for any colour. `popover` is the surface of menus, popovers, lists and dialogs: the background in light themes, lifted a little in dark ones so a menu over a card still looks raised. Here they are as the current theme resolves them; switch the site between light and dark to see both sets:
 
 <Preview id="theme/tokens" height={260} />
+
+To show a colour in your own layout, such as a legend or a status, use `theme::swatch`. It draws a small filled circle, 12 pixels across unless you set `.size(...)`, and takes a closure on the theme so the colour is resolved from the tokens each time it is drawn. `theme::swatch_color` draws one fixed colour instead. The [select](../components/select/) takes swatches as leading elements on its options.
+
+```rust
+use iced_cube::theme::{self, Tokens};
+
+let at_risk: iced::Element<'_, Message> =
+    theme::swatch(|theme| Tokens::of(theme).warning).into();
+```
 
 Because tokens come from iced's extended palette, any iced theme works, including the built-in ones such as `Theme::Dracula` or a `Theme::custom` palette of your own. `secondary` and `accent` are read from the extended palette's secondary colours, which iced derives from the background and text for its own themes.
 

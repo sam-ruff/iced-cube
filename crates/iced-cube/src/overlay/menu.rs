@@ -76,8 +76,8 @@ pub fn row_style(tokens: &Tokens, status: RowStatus, destructive: bool) -> RowSt
         },
         (RowStatus::Idle, true) => RowStyle {
             background: None,
-            text: tokens.destructive,
-            icon: tokens.destructive,
+            text: tokens.destructive_text,
+            icon: tokens.destructive_text,
             hint: tokens.muted_foreground,
         },
         (RowStatus::Highlighted, true) => RowStyle {
@@ -85,8 +85,8 @@ pub fn row_style(tokens: &Tokens, status: RowStatus, destructive: bool) -> RowSt
                 tokens.destructive,
                 if tokens.is_dark { 0.2 } else { 0.1 },
             )),
-            text: tokens.destructive,
-            icon: tokens.destructive,
+            text: tokens.destructive_text,
+            icon: tokens.destructive_text,
             hint: tokens.muted_foreground,
         },
     }
@@ -402,8 +402,8 @@ mod tests {
             let tokens = Tokens::of(&theme);
             for status in [RowStatus::Idle, RowStatus::Highlighted] {
                 let style = row_style(&tokens, status, true);
-                assert_eq!(style.text, tokens.destructive);
-                assert_eq!(style.icon, tokens.destructive);
+                assert_eq!(style.text, tokens.destructive_text);
+                assert_eq!(style.icon, tokens.destructive_text);
             }
             let tint = row_style(&tokens, RowStatus::Highlighted, true).background;
             let expected = if tokens.is_dark { 0.2 } else { 0.1 };

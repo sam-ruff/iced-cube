@@ -213,10 +213,8 @@ fn cancelling_or_escape_adds_nothing() {
 
     drag_out_friday(&mut gallery);
     assert_shows(&gallery, &["New entry"]);
-    // The dialog puts focus in the title, which takes the first Escape to
-    // give it up. The second closes the dialog.
+    // One Escape closes the dialog, even with the title focused.
     step(&mut gallery, |ui| {
-        let _ = ui.tap_key(Named::Escape);
         let _ = ui.tap_key(Named::Escape);
     });
     assert_hides(&gallery, &["New entry", "(No title)"]);
@@ -296,18 +294,7 @@ fn an_all_day_entry_has_dates_and_no_times() {
         click(ui, "Add a title");
         let _ = ui.typewrite("Offsite");
     });
-    // The switch's label is not text a selector finds; its track sits at
-    // the left of the form, between the title and "Starts".
-    step(&mut gallery, |ui| {
-        let title = ui.find("Offsite").map(|target| target.bounds());
-        let starts = centre(ui, "Starts");
-        let Ok(title) = title else {
-            panic!("the title is not rendered");
-        };
-        let track = Point::new(title.x + 16.0, (title.center_y() + starts.y) / 2.0);
-        move_to(ui, track);
-        let _ = ui.simulate(iced_test::simulator::click());
-    });
+    step(&mut gallery, |ui| click(ui, "All day"));
     assert_hides(&gallery, &["11:15", "12:15"]);
     assert_shows(&gallery, &["Fri 19 Jun 2026"]);
 
