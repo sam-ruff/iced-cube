@@ -1,3 +1,9 @@
+## [0.0.16](https://github.com/sam-ruff/iced-cube/compare/v0.0.15...v0.0.16) (2026-11-24)
+
+### Features
+
+* **calendar:** drag by day, proposals, double click and entry status, plus the widgets the calendar app asked for ([#11](https://github.com/sam-ruff/iced-cube/issues/11)) ([c0f2781](https://github.com/sam-ruff/iced-cube/commit/c0f27816ef69bfe8c0d2a31620e6c1b017f8f69e))
+
 ## [0.0.15](https://github.com/sam-ruff/iced-cube/compare/v0.0.14...v0.0.15) (2026-11-22)
 
 ### Features
