@@ -92,10 +92,12 @@
 mod agenda;
 pub mod editor;
 pub mod entry;
+mod gesture;
 pub mod layout;
 mod month;
 mod parts;
 pub mod repeat;
+pub mod rules;
 pub mod schedule;
 mod state;
 pub mod style;
@@ -105,19 +107,26 @@ mod year;
 use std::ops::Range;
 use std::rc::Rc;
 
-use iced::widget::{column, container, responsive, row, text};
+use iced::widget::{self, column, container, responsive, row, text};
 use iced::{Alignment, Element, Length, Theme};
 
-pub use entry::{Change, Changed, Draft, Entries, Entry, EntryId, Occurrence, Tone, When, instant};
+pub use entry::{
+    Change, Changed, Draft, Emphasis, Entries, Entry, EntryId, Occurrence, Tone, When, instant,
+};
 /// The date and time library the calendar's types come from, so an app
 /// can use the same version without depending on it directly.
 pub use jiff;
-pub use parts::{bar_label, is_line, span_label, time_label, weekday_label, when_label};
+pub use parts::{
+    bar_label, day_id, entry_id, is_line, span_label, time_label, weekday_label, when_label,
+};
 pub use repeat::{Ends, Frequency, Repeat};
 pub use state::{
-    Action, Allow, Event, FOUR_DAYS, Output, SLOT_MINUTES, Selection, State, View, default_keymap,
+    Action, Allow, DOUBLE_CLICK, Event, FOUR_DAYS, Output, SLOT_MINUTES, Selection, State, View,
+    default_keymap,
 };
-pub use time_grid::{SNAP_MINUTES, hour_offset, scroll_id, scroll_to_hour};
+pub use time_grid::{
+    GUTTER, SNAP_MINUTES, hour_offset, hours_id, point_at, scroll_id, scroll_to_hour,
+};
 
 use crate::forms::select::select;
 use crate::lucide;
@@ -139,6 +148,26 @@ pub const HEADER_BREAK: f32 = 520.0;
 /// The width of the menu of views in the header.
 pub const VIEW_MENU_WIDTH: f32 = 124.0;
 
+/// The id of the header's Today button.
+pub fn today_button_id() -> widget::Id {
+    widget::Id::new("iced-cube-calendar-today")
+}
+
+/// The id of the header's button to the previous period.
+pub fn previous_button_id() -> widget::Id {
+    widget::Id::new("iced-cube-calendar-previous")
+}
+
+/// The id of the header's button to the next period.
+pub fn next_button_id() -> widget::Id {
+    widget::Id::new("iced-cube-calendar-next")
+}
+
+/// The id of the header's menu of views.
+pub fn view_menu_id() -> widget::Id {
+    widget::Id::new("iced-cube-calendar-views")
+}
+
 /// A calendar builder. Convert it into an [`Element`] to render.
 pub struct Calendar<'a, Message> {
     state: &'a State,
@@ -146,8 +175,11 @@ pub struct Calendar<'a, Message> {
     width: Length,
     height: Length,
     header: bool,
+    leading: Option<Element<'a, Message>>,
+    trailing: Option<Element<'a, Message>>,
     hours: (u8, u8),
     hour_height: f32,
+    start_hour: Option<u8>,
 }
 
 /// Renders `state`. Without [`on_event`](Calendar::on_event) it renders
@@ -159,8 +191,11 @@ pub fn calendar<Message>(state: &State) -> Calendar<'_, Message> {
         width: Length::Fill,
         height: Length::Fill,
         header: true,
+        leading: None,
+        trailing: None,
         hours: (0, 24),
         hour_height: DEFAULT_HOUR_HEIGHT,
+        start_hour: None,
     }
 }
 
@@ -172,8 +207,11 @@ impl<Message> std::fmt::Debug for Calendar<'_, Message> {
             .field("width", &self.width)
             .field("height", &self.height)
             .field("header", &self.header)
+            .field("leading", &self.leading.is_some())
+            .field("trailing", &self.trailing.is_some())
             .field("hours", &self.hours)
             .field("hour_height", &self.hour_height)
+            .field("start_hour", &self.start_hour)
             .field("enabled", &self.on_event.is_some())
             .finish()
     }
@@ -205,6 +243,28 @@ impl<'a, Message> Calendar<'a, Message> {
         self
     }
 
+    /// Something of the app's at the start of the header, before Today,
+    /// such as a button for a new entry.
+    pub fn header_leading(mut self, element: impl Into<Element<'a, Message>>) -> Self {
+        self.leading = Some(element.into());
+        self
+    }
+
+    /// Something of the app's at the end of the header, after the menu of
+    /// views.
+    pub fn header_trailing(mut self, element: impl Into<Element<'a, Message>>) -> Self {
+        self.trailing = Some(element.into());
+        self
+    }
+
+    /// Scrolls a whole-day week or day view to `hour` whenever a timed
+    /// view comes on show and when Today is pressed, so the working day is
+    /// in view instead of midnight. Off by default.
+    pub fn start_at_hour(mut self, hour: u8) -> Self {
+        self.start_hour = Some(hour.min(23));
+        self
+    }
+
     /// The hours the week and day views show, such as `8..18` for a
     /// working day. Defaults to the whole day, which scrolls.
     pub fn hours(mut self, hours: Range<u8>) -> Self {
@@ -231,11 +291,18 @@ impl<'a, Message: Clone + 'a> From<Calendar<'a, Message>> for Element<'a, Messag
             width,
             height,
             header,
+            leading,
+            trailing,
             hours,
             hour_height,
+            start_hour,
         } = calendar;
         let on_event: Handler<'a, Message> = on_event.map(Rc::from);
-        let options = time_grid::Options { hours, hour_height };
+        let options = time_grid::Options {
+            hours,
+            hour_height,
+            start_hour,
+        };
 
         let body = match state.view() {
             View::Month => month::view(state, &on_event),
@@ -252,32 +319,46 @@ impl<'a, Message: Clone + 'a> From<Calendar<'a, Message>> for Element<'a, Messag
 
         let mut content = column![].spacing(space::MD).width(width).height(height);
         if header {
-            content = content.push(self::header(state, on_event.clone()));
+            content = content.push(self::header(state, on_event.clone(), leading, trailing));
         }
         content.push(framed).into()
     }
 }
 
-/// The Today button and arrows, the title, and the menu of views.
+/// The app's leading element, the Today button and arrows, the title, the
+/// menu of views and the app's trailing element.
 fn header<'a, Message: Clone + 'a>(
     state: &'a State,
     on_event: Handler<'a, Message>,
+    leading: Option<Element<'a, Message>>,
+    trailing: Option<Element<'a, Message>>,
 ) -> Element<'a, Message> {
-    responsive(move |size| {
-        let step = |glyph, label: &'static str, event: Event| {
+    // The app's slots sit outside the part that rearranges itself on a
+    // narrow screen, since an element can only be placed once.
+    let adaptive = responsive(move |size| {
+        let step = |glyph, label: &'static str, event: Event, id: widget::Id| {
             icon_button(glyph)
                 .label(label)
+                .id(id)
                 .variant(icon_button::Variant::Ghost)
                 .size(Size::Md)
                 .on_press_maybe(send(&on_event, event))
         };
         let navigation = row![
-            button("Today")
-                .variant(button::Variant::Outline)
-                .size(Size::Md)
-                .on_press_maybe(send(&on_event, Event::Today)),
-            step(lucide!(ChevronLeft), "Previous", Event::Previous),
-            step(lucide!(ChevronRight), "Next", Event::Next),
+            container(
+                button("Today")
+                    .variant(button::Variant::Outline)
+                    .size(Size::Md)
+                    .on_press_maybe(send(&on_event, Event::Today))
+            )
+            .id(today_button_id()),
+            step(
+                lucide!(ChevronLeft),
+                "Previous",
+                Event::Previous,
+                previous_button_id()
+            ),
+            step(lucide!(ChevronRight), "Next", Event::Next, next_button_id()),
         ]
         .spacing(space::XS)
         .align_y(Alignment::Center);
@@ -296,13 +377,16 @@ fn header<'a, Message: Clone + 'a>(
                 color: Some(Tokens::of(theme).foreground),
             });
 
-        let views = select(&View::ALL[..], Some(state.view()))
-            .width(VIEW_MENU_WIDTH)
-            .on_select_maybe(
-                on_event
-                    .clone()
-                    .map(|handler| move |view| handler(Event::Show(view))),
-            );
+        let views = container(
+            select(&View::ALL[..], Some(state.view()))
+                .width(VIEW_MENU_WIDTH)
+                .on_select_maybe(
+                    on_event
+                        .clone()
+                        .map(|handler| move |view| handler(Event::Show(view))),
+                ),
+        )
+        .id(view_menu_id());
         let title = container(title).width(Length::Fill).clip(true);
 
         // A phone has the title beside the menu and the buttons below.
@@ -318,8 +402,20 @@ fn header<'a, Message: Clone + 'a>(
             .into()
     })
     .width(Length::Fill)
-    .height(Length::Shrink)
-    .into()
+    .height(Length::Shrink);
+
+    if leading.is_none() && trailing.is_none() {
+        return adaptive.into();
+    }
+    let mut header = row![].spacing(space::XS).align_y(Alignment::Center);
+    if let Some(leading) = leading {
+        header = header.push(leading);
+    }
+    header = header.push(adaptive);
+    if let Some(trailing) = trailing {
+        header = header.push(trailing);
+    }
+    header.width(Length::Fill).into()
 }
 
 #[cfg(test)]

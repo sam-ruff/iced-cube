@@ -1,7 +1,7 @@
 #![cfg(feature = "button")]
 
 use iced::widget::column;
-use iced::{Element, Length};
+use iced::{Alignment, Element, Length};
 use iced_cube::primitives::button::{Size, Variant};
 use iced_cube::{button, lucide};
 use iced_test::simulator;
@@ -79,6 +79,58 @@ fn fill_width_button_keeps_the_container_width() -> Result<(), iced_test::Error>
     assert!(
         (centre - 150.0).abs() < 1.0,
         "label centred in 300px, got {centre}"
+    );
+    Ok(())
+}
+
+#[test]
+fn start_aligned_buttons_line_their_labels_up_on_the_left() -> Result<(), iced_test::Error> {
+    let padding = Size::Md.metrics().padding_x;
+    let element: Element<'_, Message> = column![
+        button("General")
+            .variant(Variant::Ghost)
+            .width(Length::Fill)
+            .align_x(Alignment::Start)
+            .on_press(Message::Save),
+        button("Notifications")
+            .variant(Variant::Ghost)
+            .icon(lucide!(Bell))
+            .width(Length::Fill)
+            .align_x(Alignment::Start)
+            .on_press(Message::Delete),
+        button("End")
+            .width(Length::Fill)
+            .align_x(Alignment::End)
+            .on_press(Message::Save),
+    ]
+    .width(300)
+    .into();
+    let mut ui = simulator(element);
+
+    let general = ui.find("General")?.bounds();
+    assert!(
+        (general.x - padding).abs() < 1.0,
+        "label starts after the padding, got {}",
+        general.x
+    );
+    let notifications = ui.find("Notifications")?.bounds();
+    let icon_and_gap = Size::Md.metrics().icon + 8.0;
+    assert!(
+        (notifications.x - padding - icon_and_gap).abs() < 1.0,
+        "label follows the icon, got {}",
+        notifications.x
+    );
+    let end = ui.find("End")?.bounds();
+    assert!(
+        (end.x + end.width - (300.0 - padding)).abs() < 1.0,
+        "label ends before the padding, got {}",
+        end.x + end.width
+    );
+
+    ui.click("Notifications")?;
+    assert_eq!(
+        ui.into_messages().collect::<Vec<_>>(),
+        vec![Message::Delete]
     );
     Ok(())
 }

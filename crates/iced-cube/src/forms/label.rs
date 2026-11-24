@@ -214,15 +214,15 @@ pub fn colour(tokens: &Tokens, state: State) -> Color {
     match state {
         State::Normal => tokens.foreground,
         State::Disabled => fade(tokens.foreground, 0.5),
-        State::Invalid => tokens.destructive,
+        State::Invalid => tokens.destructive_text,
     }
 }
 
 /// Colour of the required marker.
 pub fn required_colour(tokens: &Tokens, state: State) -> Color {
     match state {
-        State::Disabled => fade(tokens.destructive, 0.5),
-        State::Normal | State::Invalid => tokens.destructive,
+        State::Disabled => fade(tokens.destructive_text, 0.5),
+        State::Normal | State::Invalid => tokens.destructive_text,
     }
 }
 
@@ -233,7 +233,7 @@ pub fn description_colour(tokens: &Tokens) -> Color {
 
 /// Colour of a field's error message.
 pub fn error_colour(tokens: &Tokens) -> Color {
-    tokens.destructive
+    tokens.destructive_text
 }
 
 #[cfg(test)]
@@ -283,9 +283,15 @@ mod tests {
     #[test]
     fn required_marker_is_destructive_and_fades_when_disabled() {
         let tokens = Tokens::of(&dark());
-        assert_eq!(required_colour(&tokens, State::Normal), tokens.destructive);
-        assert_eq!(required_colour(&tokens, State::Invalid), tokens.destructive);
-        assert!(required_colour(&tokens, State::Disabled).a < tokens.destructive.a);
+        assert_eq!(
+            required_colour(&tokens, State::Normal),
+            tokens.destructive_text
+        );
+        assert_eq!(
+            required_colour(&tokens, State::Invalid),
+            tokens.destructive_text
+        );
+        assert!(required_colour(&tokens, State::Disabled).a < tokens.destructive_text.a);
     }
 
     #[test]
@@ -293,7 +299,7 @@ mod tests {
         for theme in [light(), dark()] {
             let tokens = Tokens::of(&theme);
             assert_eq!(description_colour(&tokens), tokens.muted_foreground);
-            assert_eq!(error_colour(&tokens), tokens.destructive);
+            assert_eq!(error_colour(&tokens), tokens.destructive_text);
         }
     }
 

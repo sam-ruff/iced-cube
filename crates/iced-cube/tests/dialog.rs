@@ -1,11 +1,14 @@
 #![cfg(feature = "dialog")]
 
+#[cfg(feature = "combobox")]
+mod support;
+
 use iced::keyboard::{self, Key, Modifiers, key::Named};
-use iced::widget::{self, column, text_input};
-use iced::{Element, Event, Point, event, mouse, touch};
+use iced::widget::{self, column, text, text_input};
+use iced::{Element, Event, Point, Rectangle, Settings, Size, Vector, event, mouse, touch};
 use iced_cube::button;
 use iced_cube::overlay::dialog::{self, CLOSE_BUTTON_ID, alert_dialog, dialog};
-use iced_test::selector::Candidate;
+use iced_test::selector::{Bounded, Candidate};
 use iced_test::simulator::{Simulator, click, simulator};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -235,6 +238,15 @@ fn focused(ui: &mut Simulator<'_, Message>) -> Option<widget::Id> {
     .ok()
 }
 
+/// Whether any field or control has focus, with or without an id.
+fn any_focused(ui: &mut Simulator<'_, Message>) -> bool {
+    ui.find(|candidate: Candidate<'_>| match candidate {
+        Candidate::Focusable { state, .. } if state.is_focused() => Some(()),
+        _ => None,
+    })
+    .is_ok()
+}
+
 fn press(ui: &mut Simulator<'_, Message>, key: Named, modifiers: Modifiers) {
     let key = Key::Named(key);
     let _ = ui.simulate([Event::Keyboard(keyboard::Event::KeyPressed {
@@ -273,10 +285,10 @@ fn tab_and_shift_tab_cycle_inside_the_dialog() {
         press(&mut ui, Named::Tab, Modifiers::empty());
         order.extend(focused(&mut ui));
     }
-    assert_eq!(order, vec![email(), name(), email()]);
+    assert_eq!(order, vec![email(), CLOSE_BUTTON_ID, name()]);
 
     press(&mut ui, Named::Tab, Modifiers::SHIFT);
-    assert_eq!(focused(&mut ui), Some(name()));
+    assert_eq!(focused(&mut ui), Some(CLOSE_BUTTON_ID));
     press(&mut ui, Named::Tab, Modifiers::SHIFT);
     assert_eq!(focused(&mut ui), Some(email()));
     assert!(ui.into_messages().next().is_none());
@@ -381,10 +393,10 @@ fn enter_does_not_run_the_destructive_action_by_default() {
 fn tab_reaches_the_alert_buttons_and_enter_or_space_presses_them() {
     let mut ui = simulator(confirmation(true));
     nudge(&mut ui);
-    assert_eq!(focused(&mut ui), None, "nothing focused on open");
+    assert!(!any_focused(&mut ui), "nothing focused on open");
 
     press(&mut ui, Named::Tab, Modifiers::empty());
-    assert!(focused(&mut ui).is_some(), "Tab focuses Cancel");
+    assert!(any_focused(&mut ui), "Tab focuses Cancel");
     let _ = ui.tap_key(Named::Enter);
 
     press(&mut ui, Named::Tab, Modifiers::empty());
@@ -404,8 +416,9 @@ fn a_pointer_press_clears_the_focused_alert_button() {
     nudge(&mut ui);
     press(&mut ui, Named::Tab, Modifiers::empty());
     press(&mut ui, Named::Tab, Modifiers::empty());
+    assert!(any_focused(&mut ui));
     click_at(&mut ui, SCRIM);
-    assert_eq!(focused(&mut ui), None);
+    assert!(!any_focused(&mut ui));
     let _ = ui.tap_key(Named::Enter);
     assert!(messages(ui).is_empty());
 }
@@ -467,4 +480,478 @@ fn a_field_that_submits_on_enter_keeps_the_key() {
     let mut ui = simulator(plain);
     let _ = ui.tap_key(Named::Enter);
     assert!(messages(ui).is_empty(), "no on_confirm, no message");
+}
+
+#[test]
+fn alert_dialog_cancels_on_the_scrim_when_it_opts_in() {
+    let element: Element<'_, Message> =
+        alert_dialog(base(), "Discard draft?", "It has not been saved.")
+            .open(true)
+            .on_cancel(Message::Dismiss)
+            .on_confirm(Message::Delete)
+            .dismiss_on_scrim(true)
+            .into();
+    let mut ui = simulator(element);
+    click_at(&mut ui, SCRIM);
+    assert_eq!(messages(ui), vec![Message::Dismiss]);
+}
+
+/// A window much shorter than a tall dialog.
+const SMALL: Size = Size::new(480.0, 360.0);
+
+fn small<'a>(element: impl Into<Element<'a, Message>>) -> Simulator<'a, Message> {
+    Simulator::with_size(Settings::default(), SMALL, element)
+}
+
+fn lines(count: usize) -> iced::widget::Column<'static, Message> {
+    column((0..count).map(|line| text(format!("Line {line}")).into())).spacing(8)
+}
+
+fn tall(count: usize) -> dialog::Dialog<'static, Message> {
+    dialog(base())
+        .open(true)
+        .title("Edit event")
+        .description("Everything about this event.")
+        .body(lines(count))
+        .action(button("Cancel").on_press(Message::Dismiss))
+        .action(button("Save").on_press(Message::Save))
+        .on_dismiss(Message::Dismiss)
+}
+
+/// Whether the whole of a target is on screen. Scrolled targets report
+/// their visible bounds where they are drawn, so only the sizes compare.
+fn shows_whole(target: &impl Bounded) -> bool {
+    let bounds = target.bounds();
+    target.visible_bounds().is_some_and(|visible| {
+        (visible.width - bounds.width).abs() < 0.5 && (visible.height - bounds.height).abs() < 0.5
+    })
+}
+
+fn fully_visible(ui: &mut Simulator<'_, Message>, label: &str) -> Result<bool, iced_test::Error> {
+    let target = ui.find(label)?;
+    Ok(shows_whole(&target))
+}
+
+#[test]
+fn a_tall_dialog_keeps_its_header_and_actions_in_a_small_window() -> Result<(), iced_test::Error> {
+    let mut ui = small(tall(60));
+    let window = Rectangle::with_size(SMALL);
+    for label in [
+        "Edit event",
+        "Everything about this event.",
+        "Cancel",
+        "Save",
+    ] {
+        let bounds = ui.find(label)?.bounds();
+        assert!(fully_visible(&mut ui, label)?, "{label} is cut off");
+        assert!(
+            window.contains(bounds.position())
+                && window.contains(bounds.position() + Vector::new(bounds.width, bounds.height)),
+            "{label} is outside the window: {bounds:?}"
+        );
+    }
+    assert!(
+        !fully_visible(&mut ui, "Line 59")?,
+        "the end of the body is out of view"
+    );
+
+    ui.click("Save")?;
+    ui.click("Cancel")?;
+    assert_eq!(messages(ui), vec![Message::Save, Message::Dismiss]);
+    Ok(())
+}
+
+#[test]
+fn the_body_of_a_tall_dialog_scrolls_with_the_wheel() -> Result<(), iced_test::Error> {
+    let mut ui = small(tall(60));
+    let first = ui.find("Line 0")?.bounds().center();
+    ui.point_at(first);
+    let _ = ui.simulate([Event::Mouse(mouse::Event::WheelScrolled {
+        delta: mouse::ScrollDelta::Lines { x: 0.0, y: -100.0 },
+    })]);
+
+    assert!(fully_visible(&mut ui, "Line 59")?, "scrolled to the end");
+    assert!(!fully_visible(&mut ui, "Line 0")?);
+    assert!(fully_visible(&mut ui, "Edit event")?, "the title stays");
+    assert!(fully_visible(&mut ui, "Save")?, "the actions stay");
+    assert!(messages(ui).is_empty(), "scrolling dismisses nothing");
+    Ok(())
+}
+
+#[test]
+fn a_short_dialog_shows_its_whole_body_and_does_not_scroll() -> Result<(), iced_test::Error> {
+    let mut ui = small(tall(3));
+    let before = ui.find("Line 0")?.bounds();
+    ui.point_at(before.center());
+    let _ = ui.simulate([Event::Mouse(mouse::Event::WheelScrolled {
+        delta: mouse::ScrollDelta::Lines { x: 0.0, y: -100.0 },
+    })]);
+    for label in ["Line 0", "Line 2", "Save"] {
+        assert!(fully_visible(&mut ui, label)?, "{label}");
+    }
+    let after = ui.find("Line 0")?.visible_bounds().map(|bounds| bounds.y);
+    assert!(
+        after.is_some_and(|y| (y - before.y).abs() < 0.5),
+        "{after:?} moved from {before:?}"
+    );
+    Ok(())
+}
+
+#[test]
+fn max_height_caps_the_dialog_below_the_window() -> Result<(), iced_test::Error> {
+    let mut ui = simulator(tall(60).max_height(300.0));
+    let title = ui.find("Edit event")?.bounds();
+    let save = ui.find("Save")?.bounds();
+    assert!(fully_visible(&mut ui, "Save")?);
+    assert!(
+        save.y + save.height - title.y < 300.0,
+        "title at {title:?}, save at {save:?}"
+    );
+    ui.click("Save")?;
+    assert_eq!(messages(ui), vec![Message::Save]);
+    Ok(())
+}
+
+fn late() -> widget::Id {
+    widget::Id::new("late")
+}
+
+#[test]
+fn tab_scrolls_a_field_below_the_fold_into_view() {
+    let body = column![
+        text_input("Name", "").id(name()).on_input(Message::Name),
+        lines(40),
+        text_input("Notes", "").id(late()).on_input(Message::Email),
+    ]
+    .spacing(8);
+    let element: Element<'_, Message> = dialog(base())
+        .open(true)
+        .title("Edit event")
+        .body(body)
+        .action(button("Save").on_press(Message::Save))
+        .on_dismiss(Message::Dismiss)
+        .into();
+    let mut ui = small(element);
+    nudge(&mut ui);
+    assert_eq!(focused(&mut ui), Some(name()));
+    let hidden = ui
+        .find(late())
+        .ok()
+        .and_then(|field| field.visible_bounds());
+    assert_eq!(hidden, None, "the second field starts out of view");
+
+    press(&mut ui, Named::Tab, Modifiers::empty());
+    assert_eq!(focused(&mut ui), Some(late()));
+    let field = ui.find(late()).expect("the field is rendered");
+    assert!(shows_whole(&field), "Tab scrolled it fully into view");
+
+    press(&mut ui, Named::Tab, Modifiers::SHIFT);
+    assert_eq!(focused(&mut ui), Some(name()));
+    let field = ui.find(name()).expect("the field is rendered");
+    assert!(shows_whole(&field), "and back up");
+}
+
+fn sectioned() -> Element<'static, Message> {
+    dialog(base())
+        .open(true)
+        .title("New event")
+        .size(dialog::Size::Lg)
+        .body(dialog::columns([
+            dialog::section("When", text("Tomorrow")).into(),
+            dialog::section("Who", text("Everyone")).into(),
+        ]))
+        .on_dismiss(Message::Dismiss)
+        .into()
+}
+
+#[test]
+fn sections_sit_side_by_side_and_stack_in_a_narrow_window() -> Result<(), iced_test::Error> {
+    let mut ui = simulator(sectioned());
+    let when = ui.find("When")?.bounds();
+    let who = ui.find("Who")?.bounds();
+    assert_eq!(when.y, who.y, "one row");
+    assert!(who.x > when.x + when.width, "two columns");
+
+    let mut ui = Simulator::with_size(Settings::default(), Size::new(360.0, 640.0), sectioned());
+    let when = ui.find("When")?.bounds();
+    let who = ui.find("Who")?.bounds();
+    assert_eq!(when.x, who.x, "one column");
+    assert!(who.y > when.y + when.height, "stacked");
+    Ok(())
+}
+
+#[test]
+fn one_escape_dismisses_even_while_a_field_has_focus() {
+    let mut ui = simulator(form());
+    nudge(&mut ui);
+    assert_eq!(focused(&mut ui), Some(name()));
+    let _ = ui.tap_key(Named::Escape);
+    assert_eq!(messages(ui), vec![Message::Dismiss]);
+}
+
+#[test]
+fn escape_still_reaches_a_field_when_the_dialog_keeps_it() {
+    let element: Element<'_, Message> = dialog(base())
+        .open(true)
+        .title("Edit profile")
+        .body(text_input("Name", "").id(name()).on_input(Message::Name))
+        .on_dismiss(Message::Dismiss)
+        .dismiss_on_escape(false)
+        .into();
+    let mut ui = simulator(element);
+    nudge(&mut ui);
+    let _ = ui.tap_key(Named::Escape);
+    assert_eq!(focused(&mut ui), None, "the field lets go of focus");
+    assert!(messages(ui).is_empty());
+}
+
+#[cfg(all(feature = "switch", feature = "checkbox", feature = "select"))]
+mod form_keys {
+    use iced::keyboard::{self, Key, Modifiers, key::Named};
+    use iced::widget::{self, column, text, text_input};
+    use iced::{Element, Event, Point, Settings, Size, mouse};
+    use iced_cube::button;
+    use iced_cube::forms::select::select;
+    use iced_cube::overlay::dialog::{CLOSE_BUTTON_ID, dialog};
+    use iced_cube::primitives::button::Variant;
+    use iced_cube::primitives::{checkbox, switch};
+    use iced_test::selector::Candidate;
+    use iced_test::simulator::{Simulator, simulator};
+
+    #[derive(Debug, Clone, PartialEq)]
+    enum Form {
+        Name(String),
+        Notify(bool),
+        Agree(bool),
+        Fruit(&'static str),
+        Pick,
+        Cancel,
+        Save,
+        Dismiss,
+    }
+
+    const FRUITS: &[&str] = &["Apple", "Banana", "Cherry"];
+
+    fn name() -> widget::Id {
+        widget::Id::new("form-name")
+    }
+
+    fn view() -> Element<'static, Form> {
+        let body = column![
+            text_input("Name", "").id(name()).on_input(Form::Name),
+            switch(false).label("Notify me").on_toggle(Form::Notify),
+            checkbox(false).label("I agree").on_toggle(Form::Agree),
+            select(FRUITS, Some("Apple")).on_select(Form::Fruit),
+            button("Pick date")
+                .variant(Variant::Outline)
+                .on_press(Form::Pick),
+        ]
+        .spacing(12);
+        dialog(text("Base"))
+            .open(true)
+            .title("New event")
+            .body(body)
+            .action(
+                button("Cancel")
+                    .variant(Variant::Outline)
+                    .on_press(Form::Cancel),
+            )
+            .action(button("Save").on_press(Form::Save))
+            .on_dismiss(Form::Dismiss)
+            .into()
+    }
+
+    fn nudge(ui: &mut Simulator<'_, Form>) {
+        let position = Point::new(1.0, 1.0);
+        let _ = ui.simulate([Event::Mouse(mouse::Event::CursorMoved { position })]);
+    }
+
+    fn tab(ui: &mut Simulator<'_, Form>, modifiers: Modifiers) {
+        let key = Key::Named(Named::Tab);
+        let _ = ui.simulate([Event::Keyboard(keyboard::Event::KeyPressed {
+            key: key.clone(),
+            modified_key: key,
+            physical_key: keyboard::key::Physical::Unidentified(
+                keyboard::key::NativeCode::Unidentified,
+            ),
+            location: keyboard::Location::Standard,
+            modifiers,
+            repeat: false,
+            text: None,
+        })]);
+    }
+
+    /// The focused widget: its id, or `None` inside when it has none.
+    fn focused(ui: &mut Simulator<'_, Form>) -> Option<Option<widget::Id>> {
+        ui.find(|candidate: Candidate<'_>| match candidate {
+            Candidate::Focusable { id, state, .. } if state.is_focused() => Some(id.cloned()),
+            _ => None,
+        })
+        .ok()
+    }
+
+    #[test]
+    fn tab_reaches_every_control_and_each_works_from_the_keyboard() {
+        let mut ui = simulator(view());
+        nudge(&mut ui);
+        assert_eq!(
+            focused(&mut ui),
+            Some(Some(name())),
+            "opening focuses the field"
+        );
+
+        tab(&mut ui, Modifiers::empty());
+        assert_eq!(focused(&mut ui), Some(None), "the switch");
+        let _ = ui.tap_key(Named::Space);
+
+        tab(&mut ui, Modifiers::empty());
+        let _ = ui.tap_key(Named::Space);
+
+        tab(&mut ui, Modifiers::empty());
+        assert!(ui.find("Banana").is_err());
+        let _ = ui.tap_key(Named::Space);
+        assert!(ui.find("Banana").is_ok(), "Space opens the select");
+        let _ = ui.tap_key(Named::Escape);
+        assert!(ui.find("Banana").is_err(), "Escape closes only the list");
+
+        tab(&mut ui, Modifiers::empty());
+        let _ = ui.tap_key(Named::Enter);
+
+        tab(&mut ui, Modifiers::empty());
+        let _ = ui.tap_key(Named::Enter);
+
+        tab(&mut ui, Modifiers::empty());
+        let _ = ui.tap_key(Named::Space);
+
+        tab(&mut ui, Modifiers::empty());
+        assert_eq!(focused(&mut ui), Some(Some(CLOSE_BUTTON_ID)));
+        tab(&mut ui, Modifiers::empty());
+        assert_eq!(focused(&mut ui), Some(Some(name())), "and round again");
+        tab(&mut ui, Modifiers::SHIFT);
+        assert_eq!(focused(&mut ui), Some(Some(CLOSE_BUTTON_ID)));
+
+        assert_eq!(
+            ui.into_messages().collect::<Vec<_>>(),
+            vec![
+                Form::Notify(true),
+                Form::Agree(true),
+                Form::Pick,
+                Form::Cancel,
+                Form::Save,
+            ]
+        );
+    }
+
+    #[test]
+    fn escape_after_tabbing_to_a_control_dismisses_at_once() {
+        let mut ui = simulator(view());
+        nudge(&mut ui);
+        tab(&mut ui, Modifiers::empty());
+        let _ = ui.tap_key(Named::Escape);
+        assert_eq!(ui.into_messages().collect::<Vec<_>>(), vec![Form::Dismiss]);
+    }
+
+    #[test]
+    fn a_pointer_press_leaves_no_focus_ring_behind() {
+        let mut ui = simulator(view());
+        nudge(&mut ui);
+        tab(&mut ui, Modifiers::empty());
+        assert_eq!(focused(&mut ui), Some(None));
+        ui.click("Pick date").expect("the button is rendered");
+        assert_eq!(focused(&mut ui), None, "a click focuses nothing");
+        let _ = ui.tap_key(Named::Space);
+        assert_eq!(ui.into_messages().collect::<Vec<_>>(), vec![Form::Pick]);
+    }
+
+    #[test]
+    fn tab_scrolls_a_control_below_the_fold_into_view() {
+        let lines = column((0..40).map(|line| text(format!("Line {line}")).into())).spacing(8);
+        let body = column![
+            text_input("Name", "").id(name()).on_input(Form::Name),
+            lines,
+            button("Pick date").on_press(Form::Pick),
+        ]
+        .spacing(8);
+        let element: Element<'_, Form> = dialog(text("Base"))
+            .open(true)
+            .title("Edit event")
+            .body(body)
+            .on_dismiss(Form::Dismiss)
+            .into();
+        let mut ui = Simulator::with_size(Settings::default(), Size::new(480.0, 360.0), element);
+        nudge(&mut ui);
+        let hidden = ui
+            .find("Pick date")
+            .ok()
+            .and_then(|label| label.visible_bounds());
+        assert_eq!(hidden, None, "the button starts out of view");
+
+        tab(&mut ui, Modifiers::empty());
+        let label = ui.find("Pick date").expect("the button is rendered");
+        assert!(
+            label.visible_bounds().is_some(),
+            "Tab scrolled it into view"
+        );
+    }
+}
+
+#[cfg(feature = "combobox")]
+mod combobox_escape {
+    use iced::keyboard::key::Named;
+    use iced::widget::text;
+    use iced::{Element, Event, Point, mouse};
+    use iced_cube::forms::combobox::{self, combobox};
+    use iced_cube::overlay::dialog::dialog;
+
+    use super::support::Harness;
+
+    struct App {
+        fruit: combobox::State<&'static str>,
+        open: bool,
+    }
+
+    #[derive(Debug, Clone)]
+    enum Msg {
+        Fruit(combobox::Event),
+        Dismiss,
+    }
+
+    fn view(app: &App) -> Element<'_, Msg> {
+        dialog(text("Base"))
+            .open(app.open)
+            .title("Pick a fruit")
+            .body(combobox(&app.fruit).on_event(Msg::Fruit))
+            .on_dismiss(Msg::Dismiss)
+            .into()
+    }
+
+    fn update(app: &mut App, message: Msg) {
+        match message {
+            Msg::Fruit(event) => {
+                let _ = app.fruit.update(event);
+            }
+            Msg::Dismiss => app.open = false,
+        }
+    }
+
+    #[test]
+    fn escape_closes_the_open_list_and_the_next_escape_dismisses() {
+        let mut fruit = combobox::State::new(["Apple", "Banana"]);
+        let _ = fruit.update(combobox::Event::Open);
+        let mut ui = Harness::new(App { fruit, open: true }, view, update);
+        ui.batch([Event::Mouse(mouse::Event::CursorMoved {
+            position: Point::new(1.0, 1.0),
+        })]);
+        assert!(ui.state.fruit.is_open());
+
+        ui.tap(Named::Escape);
+        assert!(
+            !ui.state.fruit.is_open(),
+            "the first Escape closes the list"
+        );
+        assert!(ui.state.open, "and leaves the dialog open");
+
+        ui.tap(Named::Escape);
+        assert!(!ui.state.open, "the second dismisses the dialog");
+    }
 }

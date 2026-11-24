@@ -58,9 +58,9 @@ use crate::lucide;
 use crate::overlay::anchored::Align;
 use crate::overlay::popover::popover;
 use crate::primitives::button::{self, Size, button};
+use crate::primitives::checkbox::checkbox;
 use crate::primitives::icon_button::{self, icon_button};
 use crate::primitives::input::{Shortcuts, input};
-use crate::primitives::switch::switch;
 use crate::theme::{self, Tokens, space, text_size};
 
 /// The step between the times offered, in minutes.
@@ -398,6 +398,11 @@ impl State {
         self
     }
 
+    /// The day weeks start on in the date picker.
+    pub fn week_start(&self) -> Weekday {
+        self.week_start
+    }
+
     /// The entry being changed, or `None` for a new one.
     pub fn id(&self) -> Option<EntryId> {
         self.id
@@ -461,6 +466,28 @@ impl State {
     /// The notes as text, without the space around them.
     pub fn notes(&self) -> String {
         self.notes.text().trim().to_owned()
+    }
+
+    /// The notes buffer, for drawing the notes in a text area of the
+    /// app's own.
+    pub fn notes_content(&self) -> &Content {
+        &self.notes
+    }
+
+    /// The month the open date picker shows, as its first day, or `None`
+    /// when no picker is open.
+    pub fn picker_month(&self) -> Option<Date> {
+        self.picker.map(|picker| picker.month)
+    }
+
+    /// The text of the "every" field as typed, which may be blank.
+    pub fn interval_text(&self) -> &str {
+        &self.interval
+    }
+
+    /// The text of the "after" field as typed, which may be blank.
+    pub fn count_text(&self) -> &str {
+        &self.count
     }
 
     /// Whether the date picker for the last date of the repeat is open.
@@ -659,12 +686,41 @@ fn days_between(from: Date, to: Date) -> i32 {
     i32::try_from(to.duration_since(from).as_hours() / 24).unwrap_or(0)
 }
 
-/// An entry form builder. Convert it into an [`Element`] to render.
+/// A part of the form, for leaving it out with [`Editor::without`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Part {
+    Title,
+    AllDay,
+    Starts,
+    Ends,
+    /// The repeat menu, and the "every" and "stops" rows under it.
+    Repeat,
+    Colour,
+    Location,
+    Notes,
+}
+
+impl Part {
+    pub const ALL: [Part; 8] = [
+        Part::Title,
+        Part::AllDay,
+        Part::Starts,
+        Part::Ends,
+        Part::Repeat,
+        Part::Colour,
+        Part::Location,
+        Part::Notes,
+    ];
+}
+
+/// An entry form builder. Convert it into an [`Element`] to render the
+/// whole form, or call [`fields`](Editor::fields) to lay out its parts.
 pub struct Editor<'a, Message> {
     state: &'a State,
     on_event: Option<Box<dyn Fn(Event) -> Message + 'a>>,
     on_submit: Option<Message>,
     shortcuts: Shortcuts,
+    without: Vec<Part>,
 }
 
 /// Renders the form for `state`. Without [`on_event`](Editor::on_event)
@@ -675,6 +731,7 @@ pub fn editor<Message>(state: &State) -> Editor<'_, Message> {
         on_event: None,
         on_submit: None,
         shortcuts: Shortcuts::all(),
+        without: Vec::new(),
     }
 }
 
@@ -685,6 +742,42 @@ impl<Message> std::fmt::Debug for Editor<'_, Message> {
             .field("enabled", &self.on_event.is_some())
             .field("submits", &self.on_submit.is_some())
             .field("shortcuts", &self.shortcuts)
+            .field("without", &self.without)
+            .finish()
+    }
+}
+
+/// The form's parts as separate elements, for an app that lays them out
+/// itself. A part left out with [`Editor::without`] is `None`, and so are
+/// `every` and `stops` while the entry does not repeat.
+pub struct Fields<'a, Message> {
+    pub title: Option<Element<'a, Message>>,
+    pub all_day: Option<Element<'a, Message>>,
+    pub starts: Option<Element<'a, Message>>,
+    pub ends: Option<Element<'a, Message>>,
+    pub repeat: Option<Element<'a, Message>>,
+    /// "Every 2 weeks".
+    pub every: Option<Element<'a, Message>>,
+    /// "Stops on a date" or "after 6 times".
+    pub stops: Option<Element<'a, Message>>,
+    pub colour: Option<Element<'a, Message>>,
+    pub location: Option<Element<'a, Message>>,
+    pub notes: Option<Element<'a, Message>>,
+}
+
+impl<Message> std::fmt::Debug for Fields<'_, Message> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Fields")
+            .field("title", &self.title.is_some())
+            .field("all_day", &self.all_day.is_some())
+            .field("starts", &self.starts.is_some())
+            .field("ends", &self.ends.is_some())
+            .field("repeat", &self.repeat.is_some())
+            .field("every", &self.every.is_some())
+            .field("stops", &self.stops.is_some())
+            .field("colour", &self.colour.is_some())
+            .field("location", &self.location.is_some())
+            .field("notes", &self.notes.is_some())
             .finish()
     }
 }
@@ -708,6 +801,127 @@ impl<'a, Message> Editor<'a, Message> {
         self.shortcuts = shortcuts;
         self
     }
+
+    /// Leaves a part out of the form. What the entry holds for it is kept.
+    pub fn without(mut self, part: Part) -> Self {
+        if !self.without.contains(&part) {
+            self.without.push(part);
+        }
+        self
+    }
+
+    /// Whether the form draws `part`.
+    pub fn shows(&self, part: Part) -> bool {
+        !self.without.contains(&part)
+    }
+}
+
+impl<'a, Message: Clone + 'a> Editor<'a, Message> {
+    /// The form's parts as separate elements.
+    pub fn fields(self) -> Fields<'a, Message> {
+        let shows = |part| !self.without.contains(&part);
+        let Editor {
+            state,
+            on_event,
+            on_submit,
+            shortcuts,
+            ..
+        } = self;
+        let on_event: Handler<'a, Message> = on_event.map(std::rc::Rc::from);
+        let repeating = state.repeats() != Repeats::Never;
+
+        let title = shows(Part::Title).then(|| {
+            input("Add a title", state.title())
+                .shortcuts(shortcuts)
+                .on_input_maybe(
+                    on_event
+                        .clone()
+                        .map(|handler| move |title| handler(Event::Title(title))),
+                )
+                .on_submit_maybe(on_submit.clone())
+                .into()
+        });
+        // A check box, since the form only applies on save.
+        let all_day = shows(Part::AllDay).then(|| {
+            checkbox(state.is_all_day())
+                .label("All day")
+                .on_toggle_maybe(
+                    on_event
+                        .clone()
+                        .map(|handler| move |on| handler(Event::AllDay(on))),
+                )
+                .into()
+        });
+        let repeat = shows(Part::Repeat).then(|| {
+            select(&Repeats::ALL[..], Some(state.repeats()))
+                .width(Length::Fill)
+                .on_select_maybe(
+                    on_event
+                        .clone()
+                        .map(|handler| move |repeats| handler(Event::Repeats(repeats))),
+                )
+                .into()
+        });
+        let colour = shows(Part::Colour).then(|| colour_menu(state, &on_event));
+        let location = shows(Part::Location).then(|| {
+            input("Add a location", state.location())
+                .icon(lucide!(MapPin))
+                .shortcuts(shortcuts)
+                .on_input_maybe(
+                    on_event
+                        .clone()
+                        .map(|handler| move |location| handler(Event::Location(location))),
+                )
+                .on_submit_maybe(on_submit)
+                .into()
+        });
+        let notes = shows(Part::Notes).then(|| {
+            textarea(&state.notes)
+                .id(notes_id())
+                .placeholder("Add notes")
+                .min_height(NOTES_HEIGHT)
+                .shortcuts(shortcuts)
+                .on_action_maybe(
+                    on_event
+                        .clone()
+                        .map(|handler| move |action| handler(Event::Notes(action))),
+                )
+                .into()
+        });
+
+        Fields {
+            title,
+            all_day,
+            starts: shows(Part::Starts).then(|| moment(state, Field::Start, "Starts", &on_event)),
+            ends: shows(Part::Ends).then(|| moment(state, Field::End, "Ends", &on_event)),
+            repeat,
+            every: (shows(Part::Repeat) && repeating).then(|| every(state, shortcuts, &on_event)),
+            stops: (shows(Part::Repeat) && repeating).then(|| stops(state, shortcuts, &on_event)),
+            colour,
+            location,
+            notes,
+        }
+    }
+}
+
+/// The colour menu, each colour with a swatch before its name.
+fn colour_menu<'a, Message: Clone + 'a>(
+    state: &State,
+    on_event: &Handler<'a, Message>,
+) -> Element<'a, Message> {
+    let colours: Vec<Colour> = Tone::ALL.into_iter().map(Colour).collect();
+    select(colours, Some(Colour(state.tone())))
+        .width(Length::Fill)
+        .leading(|colour: &Colour| {
+            let tone = colour.0;
+            Some(theme::swatch(move |theme: &Theme| style::tone(&Tokens::of(theme), tone)).into())
+        })
+        .on_select_maybe(
+            on_event
+                .clone()
+                .map(|handler| move |colour: Colour| handler(Event::Tone(colour.0))),
+        )
+        .into()
 }
 
 type Handler<'a, Message> = Option<std::rc::Rc<dyn Fn(Event) -> Message + 'a>>;
@@ -718,79 +932,39 @@ fn send<Message>(handler: &Handler<'_, Message>, event: Event) -> Option<Message
 
 impl<'a, Message: Clone + 'a> From<Editor<'a, Message>> for Element<'a, Message> {
     fn from(editor: Editor<'a, Message>) -> Self {
-        let Editor {
-            state,
-            on_event,
-            on_submit,
-            shortcuts,
-        } = editor;
-        let on_event: Handler<'a, Message> = on_event.map(std::rc::Rc::from);
-
-        let title = input("Add a title", state.title())
-            .shortcuts(shortcuts)
-            .on_input_maybe(
-                on_event
-                    .clone()
-                    .map(|handler| move |title| handler(Event::Title(title))),
-            )
-            .on_submit_maybe(on_submit.clone());
-        let all_day = switch(state.is_all_day()).label("All day").on_toggle_maybe(
-            on_event
-                .clone()
-                .map(|handler| move |on| handler(Event::AllDay(on))),
-        );
-
-        let repeats = select(&Repeats::ALL[..], Some(state.repeats()))
-            .width(Length::FillPortion(3))
-            .on_select_maybe(
-                on_event
-                    .clone()
-                    .map(|handler| move |repeats| handler(Event::Repeats(repeats))),
-            );
-        let colours: Vec<Colour> = Tone::ALL.into_iter().map(Colour).collect();
-        let colour = select(colours, Some(Colour(state.tone())))
-            .width(Length::FillPortion(2))
-            .on_select_maybe(
-                on_event
-                    .clone()
-                    .map(|handler| move |colour: Colour| handler(Event::Tone(colour.0))),
-            );
-
-        let location = input("Add a location", state.location())
-            .icon(lucide!(MapPin))
-            .shortcuts(shortcuts)
-            .on_input_maybe(
-                on_event
-                    .clone()
-                    .map(|handler| move |location| handler(Event::Location(location))),
-            )
-            .on_submit_maybe(on_submit);
-        let notes = textarea(&state.notes)
-            .id(notes_id())
-            .placeholder("Add notes")
-            .min_height(NOTES_HEIGHT)
-            .shortcuts(shortcuts)
-            .on_action_maybe(
-                on_event
-                    .clone()
-                    .map(|handler| move |action| handler(Event::Notes(action))),
-            );
-
-        let mut form = column![
+        let Fields {
             title,
             all_day,
-            moment(state, Field::Start, "Starts", &on_event),
-            moment(state, Field::End, "Ends", &on_event),
-            row![repeats, colour].spacing(space::SM),
+            starts,
+            ends,
+            repeat,
+            every,
+            stops,
+            colour,
+            location,
+            notes,
+        } = editor.fields();
+
+        let menus: Vec<Element<'a, Message>> = [
+            repeat.map(|menu| container(menu).width(Length::FillPortion(3)).into()),
+            colour.map(|menu| container(menu).width(Length::FillPortion(2)).into()),
         ]
+        .into_iter()
+        .flatten()
+        .collect();
+        let menus =
+            (!menus.is_empty()).then(|| Row::with_children(menus).spacing(space::SM).into());
+
+        Column::with_children(
+            [
+                title, all_day, starts, ends, menus, every, stops, location, notes,
+            ]
+            .into_iter()
+            .flatten(),
+        )
         .spacing(space::MD)
-        .width(Length::Fill);
-        if state.repeats() != Repeats::Never {
-            form = form
-                .push(every(state, shortcuts, &on_event))
-                .push(stops(state, shortcuts, &on_event));
-        }
-        form.push(location).push(notes).into()
+        .width(Length::Fill)
+        .into()
     }
 }
 
@@ -918,6 +1092,8 @@ fn date_field<'a, Message: Clone + 'a>(
     let date = state.target_date(target);
     let trigger = button(date.strftime("%a %-d %b %Y").to_string())
         .variant(button::Variant::Outline)
+        .icon(lucide!(Calendar))
+        .align_x(Alignment::Start)
         .width(Length::Fill)
         .on_press_maybe(send(on_event, toggle));
 
@@ -933,7 +1109,9 @@ fn date_field<'a, Message: Clone + 'a>(
     if let Some(close) = send(on_event, Event::Picker(None)) {
         date = date.on_dismiss(close);
     }
-    container(date).width(Length::Fill).into()
+    // A narrow column cuts the date short rather than letting it run
+    // under the time beside it.
+    container(date).width(Length::Fill).clip(true).into()
 }
 
 /// A month of days to pick from, with arrows to the months either side.
@@ -960,7 +1138,33 @@ fn month_picker<'a, Message: Clone + 'a>(
     ]
     .align_y(Alignment::Center);
 
-    let weeks = month_weeks(picker.month, state.week_start);
+    let chosen = state.target_date(picker.target);
+    let target = picker.target;
+    let pick = on_event.clone().map(|handler| {
+        move |date: Date| match target {
+            Target::Field(field) => handler(Event::Date(field, date)),
+            Target::Until => handler(Event::Until(date)),
+        }
+    });
+    let grid = month_grid(picker.month, state.week_start, Some(chosen), pick);
+    column![header, grid]
+        .spacing(space::SM)
+        .width(Length::Fixed(7.0 * CELL))
+        .into()
+}
+
+/// The days of `month` under their weekday names, as the form's date
+/// picker draws them, with `chosen` marked. Pressing a day sends
+/// `on_pick` with it; without `on_pick` the days are disabled. Days of the
+/// neighbouring months are left blank.
+pub fn month_grid<'a, Message: Clone + 'a>(
+    month: Date,
+    week_start: Weekday,
+    chosen: Option<Date>,
+    on_pick: Option<impl Fn(Date) -> Message + 'a>,
+) -> Element<'a, Message> {
+    let weeks = month_weeks(month, week_start);
+    let on_pick = on_pick.map(std::rc::Rc::new);
     let mut grid = Column::new().spacing(2.0);
     if let Some(week) = weeks.first() {
         grid = grid.push(Row::with_children(week.iter().map(|date| {
@@ -973,14 +1177,9 @@ fn month_picker<'a, Message: Clone + 'a>(
             .into()
         })));
     }
-    let chosen = state.target_date(picker.target);
-    let pick = move |date: Date| match picker.target {
-        Target::Field(field) => Event::Date(field, date),
-        Target::Until => Event::Until(date),
-    };
     for week in &weeks {
         grid = grid.push(Row::with_children(week.iter().map(|date| {
-            if date.month() != picker.month.month() {
+            if date.month() != month.month() {
                 return Space::new()
                     .width(Length::Fixed(CELL))
                     .height(Length::Fixed(CELL))
@@ -988,7 +1187,7 @@ fn month_picker<'a, Message: Clone + 'a>(
             }
             let day = style::Day {
                 today: false,
-                selected: *date == chosen,
+                selected: Some(*date) == chosen,
                 in_month: true,
             };
             let number = text(date.day().to_string())
@@ -998,17 +1197,14 @@ fn month_picker<'a, Message: Clone + 'a>(
                 .width(Length::Fixed(CELL))
                 .height(Length::Fixed(CELL))
                 .padding(0)
-                .on_press_maybe(send(on_event, pick(*date)))
+                .on_press_maybe(on_pick.as_ref().map(|pick| pick(*date)))
                 .style(move |theme, status: Status| {
                     style::year_day(&Tokens::of(theme), day, status)
                 })
                 .into()
         })));
     }
-    column![header, grid]
-        .spacing(space::SM)
-        .width(Length::Fixed(7.0 * CELL))
-        .into()
+    grid.into()
 }
 
 #[cfg(test)]
@@ -1438,5 +1634,60 @@ mod tests {
         assert!(built.on_submit.is_some());
         assert_eq!(built.shortcuts, Shortcuts::none());
         assert!(format!("{built:?}").contains("enabled: true"));
+    }
+
+    #[test]
+    fn parts_can_be_left_out_and_laid_out_by_the_app() {
+        let mut form = timed();
+        {
+            let built: Editor<'_, Event> = editor(&form);
+            assert!(Part::ALL.iter().all(|part| built.shows(*part)));
+            let fields = built.fields();
+            assert!(fields.title.is_some() && fields.notes.is_some() && fields.colour.is_some());
+            assert!(
+                fields.every.is_none() && fields.stops.is_none(),
+                "it does not repeat"
+            );
+        }
+        {
+            let built: Editor<'_, Event> = editor(&form)
+                .without(Part::Colour)
+                .without(Part::Location)
+                .without(Part::Colour);
+            assert!(!built.shows(Part::Colour));
+            assert!(format!("{built:?}").contains("Location"));
+            let fields = built.fields();
+            assert!(fields.colour.is_none() && fields.location.is_none());
+            assert!(fields.title.is_some() && fields.starts.is_some() && fields.ends.is_some());
+        }
+
+        form.update(Event::Repeats(Repeats::Weekly));
+        let fields = editor::<Event>(&form).fields();
+        assert!(fields.every.is_some() && fields.stops.is_some());
+        let fields = editor::<Event>(&form).without(Part::Repeat).fields();
+        assert!(fields.repeat.is_none() && fields.every.is_none() && fields.stops.is_none());
+    }
+
+    #[test]
+    fn the_raw_field_text_the_picker_month_and_the_notes_can_be_read() {
+        let mut form = timed().with_week_start(Weekday::Sunday);
+        assert_eq!(form.week_start(), Weekday::Sunday);
+        form.update(Event::Interval(String::new()));
+        assert_eq!(form.interval_text(), "");
+        assert_eq!(form.interval(), 1, "blank counts as one");
+        form.update(Event::Count(String::from("2a")));
+        assert_eq!(form.count_text(), "2");
+
+        assert_eq!(form.picker_month(), None);
+        form.update(Event::Picker(Some(Field::Start)));
+        let month = form.date(Field::Start).first_of_month();
+        assert_eq!(form.picker_month(), Some(month));
+        form.update(Event::PickerMonth(2));
+        assert_eq!(form.picker_month(), month.checked_add(2.months()).ok());
+
+        form.update(Event::Notes(Action::Edit(
+            iced::widget::text_editor::Edit::Paste(std::sync::Arc::new(String::from("Bring cake"))),
+        )));
+        assert_eq!(form.notes_content().text().trim(), "Bring cake");
     }
 }

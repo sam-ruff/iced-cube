@@ -2,7 +2,7 @@
 title: Rich Text Editor
 description: Formatted text editing, drawn as it will look, with HTML and plain-text output for mail.
 group: Forms
-order: 10
+order: 11
 module: forms::rich_text_editor
 imports: |
   use iced_cube::rich_text_editor::{self, Action, Content, rich_text_editor};

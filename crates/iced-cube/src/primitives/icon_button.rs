@@ -9,6 +9,7 @@ use iced::widget::{self, button::Status, container, text};
 use iced::{Background, Border, Element, Length, Padding, Shadow};
 
 use crate::after_touch::after_touch;
+use crate::focus::{Ring, focusable};
 use crate::icon::{Glyph, opacity, themed};
 use crate::overlay::tooltip::{Position, tooltip};
 use crate::primitives::button::{self, Colours, Size};
@@ -58,6 +59,10 @@ impl From<Variant> for button::Variant {
 /// An icon button builder. Convert it into an [`Element`] to render.
 ///
 /// An icon button without a message is rendered disabled.
+///
+/// Like [`button`](fn@crate::primitives::button), an enabled icon button
+/// takes keyboard focus from iced's focus operations, rings while focused
+/// and is pressed with Enter or Space. Focus also shows its tooltip.
 #[derive(Debug)]
 pub struct IconButton<'a, Message> {
     glyph: Glyph,
@@ -117,7 +122,8 @@ impl<'a, Message> IconButton<'a, Message> {
         self
     }
 
-    /// Sets a widget id, for clicking the button in tests.
+    /// Sets a widget id, for clicking the button in tests or focusing it
+    /// with iced's `focus` operation.
     pub fn id(mut self, id: impl Into<widget::Id>) -> Self {
         self.id = Some(id.into());
         self
@@ -171,16 +177,21 @@ impl<'a, Message: Clone + 'a> From<IconButton<'a, Message>> for Element<'a, Mess
             colours(&Tokens::of(theme), variant, pressed, resting).foreground
         });
 
+        let on_activate = on_press
+            .clone()
+            .map(|message| Box::new(move || message.clone()) as Box<dyn Fn() -> Message + 'a>);
         let button = widget::button(glyph)
             .width(Length::Fixed(metrics.height))
             .height(Length::Fixed(metrics.height))
             .padding(Padding::from((metrics.height - metrics.icon) / 2.0))
             .on_press_maybe(on_press)
             .style(move |theme, status| style(&Tokens::of(theme), variant, pressed, status));
+        let mut button = focusable(after_touch(button), on_activate, Ring::around(radius::MD));
+        button.id = id.clone();
 
         let mut element: Element<'a, Message> = match id {
-            Some(id) => container(after_touch(button)).id(id).into(),
-            None => after_touch(button),
+            Some(id) => container(button).id(id).into(),
+            None => button.into(),
         };
         if let (Some(label), Some(position)) = (label, position) {
             element = tooltip(element, label).position(position).into();

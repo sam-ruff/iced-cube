@@ -1,11 +1,14 @@
 pub mod agenda;
+pub mod confirm;
 pub mod create;
+pub mod form;
 pub mod keyboard;
 pub mod missed;
 pub mod month;
 pub mod read_only;
 pub mod reminders;
 pub mod repeating;
+pub mod status;
 pub mod themed;
 pub mod triggers;
 pub mod week;

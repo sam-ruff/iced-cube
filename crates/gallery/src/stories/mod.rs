@@ -14,6 +14,7 @@ pub mod button;
 pub mod calendar;
 pub mod card;
 pub mod checkbox;
+pub mod chip;
 pub mod combobox;
 pub mod command;
 pub mod command_palette;
@@ -30,6 +31,7 @@ pub mod json_viewer;
 pub mod label;
 pub mod log_viewer;
 pub mod menubar;
+pub mod multi_combobox;
 pub mod pagination;
 pub mod popover;
 pub mod progress;
@@ -83,6 +85,11 @@ crate::stories! {
         description: "A button without a message renders disabled.",
         file: "button/counter.rs", height: 200,
     }
+    ButtonList => button::list {
+        id: "button/list", component: "button", title: "Category list",
+        description: "Full-width ghost buttons with their labels on the left, as in a settings sidebar.",
+        file: "button/list.rs", height: 220,
+    }
     IconButtonToolbar => icon_button::toolbar {
         id: "icon-button/toolbar", component: "icon-button", title: "Formatting toolbar",
         description: "Toggles that stay pressed while a format is on, with labels shown as tooltips.",
@@ -122,6 +129,11 @@ crate::stories! {
         id: "input/states", component: "input", title: "Invalid and disabled",
         description: "An invalid value draws a destructive border. An input without on_input is disabled.",
         file: "input/states.rs", height: 200,
+    }
+    InputClearable => input::clearable {
+        id: "input/clearable", component: "input", title: "Clearable with a limit",
+        description: "An x button empties the field, and the value stops at 24 characters, pasted text included.",
+        file: "input/clearable.rs", height: 160,
     }
     TextareaDefault => textarea::default {
         id: "textarea/default", component: "textarea", title: "Default",
@@ -293,6 +305,11 @@ crate::stories! {
         description: "Enum options, with enabled and disabled selects.",
         file: "select/states.rs",
     }
+    SelectSwatches => select::swatches {
+        id: "select/swatches", component: "select", title: "Colour swatches",
+        description: "Options lead with a swatch whose colour comes from the theme, in the field and in the list.",
+        file: "select/swatches.rs",
+    }
     ComboboxDefault => combobox::default {
         id: "combobox/default", component: "combobox", title: "Default",
         description: "Suggestions filter as you type. The list starts open here so you can see it.",
@@ -312,6 +329,21 @@ crate::stories! {
         id: "combobox/keyboard", component: "combobox", title: "Keyboard shortcuts",
         description: "The default keymap with Ctrl+N and Ctrl+P added. The combobox handles its keys itself while it has focus.",
         file: "combobox/keyboard.rs", height: 420,
+    }
+    MultiComboboxDefault => multi_combobox::default {
+        id: "multi-combobox/default", component: "multi-combobox", title: "Default",
+        description: "Guests for a meeting. Choices become chips above the field and the list stays open, with a tick on each guest already added. The list starts open here so you can see it.",
+        file: "multi_combobox/default.rs", height: 440,
+    }
+    MultiComboboxField => multi_combobox::field {
+        id: "multi-combobox/field", component: "multi-combobox", title: "In a field",
+        description: "Group members marked invalid until someone is added, small labels with small chips, and a disabled field whose chips cannot be removed.",
+        file: "multi_combobox/field.rs", height: 440,
+    }
+    MultiComboboxKeyboard => multi_combobox::keyboard {
+        id: "multi-combobox/keyboard", component: "multi-combobox", title: "Keyboard shortcuts",
+        description: "The default keymap with Ctrl+N and Ctrl+P added. Backspace in the empty field removes the last chip.",
+        file: "multi_combobox/keyboard.rs", height: 420,
     }
     SliderDefault => slider::default {
         id: "slider/default", component: "slider", title: "Default",
@@ -347,6 +379,21 @@ crate::stories! {
         id: "badge/in-a-list", component: "badge", title: "In a list",
         description: "Status badges aligned against list rows.",
         file: "badge/in_a_list.rs",
+    }
+    ChipVariants => chip::variants {
+        id: "chip/variants", component: "chip", title: "Variants and sizes",
+        description: "Every variant at the medium and small sizes. Small chips match badges.",
+        file: "chip/variants.rs", height: 200,
+    }
+    ChipRemovable => chip::removable {
+        id: "chip/removable", component: "chip", title: "Removable",
+        description: "Tags with an x that removes them, wrapping onto new lines when the row is full.",
+        file: "chip/removable.rs", height: 200,
+    }
+    ChipLeading => chip::leading {
+        id: "chip/leading", component: "chip", title: "Avatars and icons",
+        description: "People with a small avatar before their name, and chips with a leading icon.",
+        file: "chip/leading.rs", height: 200,
     }
     AvatarFallbacks => avatar::fallbacks {
         id: "avatar/fallbacks", component: "avatar", title: "Image, initials and icon",
@@ -452,6 +499,11 @@ crate::stories! {
         id: "tooltip/toolbar", component: "tooltip", title: "Icon toolbar",
         description: "Labels for icon-only buttons.",
         file: "tooltip/toolbar.rs", height: 180,
+    }
+    TooltipHints => tooltip::hints {
+        id: "tooltip/hints", component: "tooltip", title: "Sentences and focus",
+        description: "Longer hints that wrap at a maximum width and read a size up. The field's hint also shows while it has keyboard focus; Tab focuses it here.",
+        file: "tooltip/hints.rs", height: 200, subscription: true, task: true,
     }
     TabsUnderline => tabs::underline {
         id: "tabs/underline", component: "tabs", title: "Underline",
@@ -642,6 +694,16 @@ crate::stories! {
         id: "dialog/destructive", component: "dialog", title: "Destructive confirmation",
         description: "An alert dialog with Cancel and a destructive action. Enter confirms, Escape cancels and clicking the scrim does nothing.",
         file: "dialog/destructive.rs", height: 320, edge: true,
+    }
+    DialogLong => dialog::long {
+        id: "dialog/long", component: "dialog", title: "Long content",
+        description: "More content than the window can show. The title and the actions stay in view and the body scrolls.",
+        file: "dialog/long.rs", height: 360, edge: true,
+    }
+    DialogSections => dialog::sections {
+        id: "dialog/sections", component: "dialog", title: "Sections in two columns",
+        description: "A large dialog with headed sections, two of them side by side. Below the breakpoint they stack in one column, and the body scrolls when they no longer fit.",
+        file: "dialog/sections.rs", height: 480, edge: true,
     }
     PopoverSettings => popover::settings {
         id: "popover/settings", component: "popover", title: "Settings form",
@@ -912,6 +974,21 @@ crate::stories! {
         id: "calendar/create", component: "calendar", title: "Creating and editing",
         description: "Drag across empty space, or press a time twice, and the calendar asks for an entry there. The app opens the entry form in a dialog: title, all day, start and end date and time, how often it repeats and when that stops, colour, location and notes. Press an entry twice to change or delete it.",
         file: "calendar/create.rs", height: 480, edge: true,
+    }
+    CalendarStatus => calendar::status {
+        id: "calendar/status", component: "calendar", title: "Status at a glance",
+        description: "Entries marked by how they stand: an unanswered invitation outlined with a mail icon, a declined one struck through, private time hatched and locked, a cancelled one faded. Hover an icon for what it means. Locked entries open but never move.",
+        file: "calendar/status.rs", height: 480,
+    }
+    CalendarConfirm => calendar::confirm {
+        id: "calendar/confirm", component: "calendar", title: "Confirm before changing",
+        description: "Drag an entry to another day, in the month or the strip of whole-day entries, and the calendar proposes the move: it is drawn where it would go while the app asks. Cancel, Escape or a click outside puts it back. A single click selects and a double click opens. The new entry button sits in the calendar's own header.",
+        file: "calendar/confirm.rs", height: 480, edge: true,
+    }
+    CalendarForm => calendar::form {
+        id: "calendar/form", component: "calendar", title: "Laying out the form",
+        description: "The entry form's parts placed by the app in two headed columns, with the location left out and a field of the app's own among them. Below the breakpoint the columns stack.",
+        file: "calendar/form.rs", height: 480, edge: true,
     }
     CalendarReadOnly => calendar::read_only {
         id: "calendar/read-only", component: "calendar", title: "Read-only, with your own controls",

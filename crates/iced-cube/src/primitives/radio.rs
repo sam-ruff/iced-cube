@@ -1,8 +1,13 @@
 //! Radio buttons for picking one option from a small set.
+//!
+//! Each enabled radio takes keyboard focus from iced's focus operations,
+//! such as a dialog's Tab order. While focused its circle rings and Space
+//! or Enter selects it.
 
 use iced::widget::{self, button::Status, column, container, mouse_area, row, space, text};
 use iced::{Alignment, Background, Border, Color, Element, Length, Shadow, Theme, mouse};
 
+use crate::focus::{Ring, focusable};
 use crate::theme::{Tokens, fade, mix, radius, space as spacing, text_size};
 
 /// Diameter of the radio circle in logical pixels.
@@ -97,6 +102,11 @@ impl<'a, V, Message: Clone + 'a> From<Radio<'a, V, Message>> for Element<'a, Mes
             .padding(0)
             .on_press_maybe(radio.on_select.clone())
             .style(move |theme, status| style(&Tokens::of(theme), selected, status));
+        let on_activate = radio
+            .on_select
+            .clone()
+            .map(|message| Box::new(move || message.clone()) as Box<dyn Fn() -> Message + 'a>);
+        let circle = focusable(circle, on_activate, Ring::around(radius::FULL));
 
         let label = text(radio.label)
             .size(text_size::SM)

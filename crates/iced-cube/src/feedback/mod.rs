@@ -1,4 +1,4 @@
-//! Status and identity: alerts, avatars, badges, progress bars and
+//! Status and identity: alerts, avatars, badges, chips, progress bars and
 //! spinners.
 
 #[cfg(feature = "alert")]
@@ -7,6 +7,8 @@ pub mod alert;
 pub mod avatar;
 #[cfg(feature = "badge")]
 pub mod badge;
+#[cfg(feature = "chip")]
+pub mod chip;
 #[cfg(feature = "progress")]
 pub mod progress;
 #[cfg(feature = "spinner")]
@@ -18,6 +20,8 @@ pub use alert::{Alert, alert};
 pub use avatar::{Avatar, AvatarGroup, avatar, avatar_group};
 #[cfg(feature = "badge")]
 pub use badge::{Badge, badge};
+#[cfg(feature = "chip")]
+pub use chip::{Chip, chip};
 #[cfg(feature = "progress")]
 pub use progress::{Progress, progress};
 #[cfg(feature = "spinner")]

@@ -2162,7 +2162,7 @@ where
             (Some(error), _) => {
                 content = content.push(widget::text(error.to_owned()).size(text_size::XS).style(
                     |theme: &Theme| widget::text::Style {
-                        color: Some(Tokens::of(theme).destructive),
+                        color: Some(Tokens::of(theme).destructive_text),
                     },
                 ));
             }

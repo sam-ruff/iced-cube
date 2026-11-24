@@ -3,7 +3,7 @@
 use iced::widget::{column, container, text};
 use iced::{Background, Border, Color, Element, Length, Shadow, Vector};
 
-use crate::theme::{Tokens, fade, mix, space, text_size};
+use crate::theme::{Tokens, fade, heading, mix, space, supporting, text_size};
 
 /// Headings break inside a word only when the word alone is wider than the
 /// card, so they never run past the border.
@@ -85,22 +85,10 @@ impl<'a, Message: 'a> From<Card<'a, Message>> for Element<'a, Message> {
         if has_header {
             let mut header = column![].spacing(space::XS);
             if let Some(title) = card.title {
-                header = header.push(
-                    text(title)
-                        .size(text_size::LG)
-                        .font(crate::theme::semibold())
-                        .wrapping(HEADER_WRAPPING),
-                );
+                header = header.push(heading(title, text_size::LG).wrapping(HEADER_WRAPPING));
             }
             if let Some(description) = card.description {
-                header = header.push(
-                    text(description)
-                        .size(text_size::SM)
-                        .wrapping(HEADER_WRAPPING)
-                        .style(|theme: &iced::Theme| text::Style {
-                            color: Some(Tokens::of(theme).muted_foreground),
-                        }),
-                );
+                header = header.push(supporting(description).wrapping(HEADER_WRAPPING));
             }
             sections = sections.push(header);
         }

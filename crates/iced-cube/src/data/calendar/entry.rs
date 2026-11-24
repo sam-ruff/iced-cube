@@ -1,10 +1,11 @@
 //! Calendar entries and the collection that holds them.
 
-use jiff::civil::{Date, Time};
+use jiff::civil::Date;
 use jiff::tz::TimeZone;
-use jiff::{SignedDuration, Span, Timestamp};
+use jiff::{SignedDuration, Timestamp};
 
 use super::repeat::{self, Repeat};
+use crate::icon::Glyph;
 
 /// Identifies an entry. The app chooses the number, usually its own
 /// record id, or takes a free one from [`Entries::next_id`].
@@ -32,107 +33,40 @@ impl Tone {
     ];
 }
 
-/// When an entry happens.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum When {
-    /// From one instant to another. `end` is not part of the entry, so an
-    /// entry ending at 10:00 does not overlap one starting at 10:00.
-    Timed { start: Timestamp, end: Timestamp },
-    /// Whole days, from `first` to `last` inclusive, in whatever time zone
-    /// the calendar shows.
-    AllDay { first: Date, last: Date },
+pub use super::rules::{When, add_days, date_of, instant, midnight, next_day};
+
+/// How strongly an entry is drawn, to show its status at a glance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum Emphasis {
+    /// A wash of its tone with a solid stripe.
+    #[default]
+    Solid,
+    /// A border in its tone on no fill, such as for a tentative or
+    /// unanswered invitation.
+    Outlined,
+    /// Its title struck through, such as for a declined invitation.
+    Struck,
+    /// Drawn faintly, such as for something cancelled.
+    Faded,
+    /// Diagonal stripes in its tone, such as for private or busy time.
+    Hatched,
 }
 
-impl When {
-    /// A timed span. The two instants are put in order.
-    pub fn timed(start: Timestamp, end: Timestamp) -> Self {
-        When::Timed {
-            start: start.min(end),
-            end: start.max(end),
-        }
-    }
-
-    /// Whole days. The two dates are put in order.
-    pub fn all_day(first: Date, last: Date) -> Self {
-        When::AllDay {
-            first: first.min(last),
-            last: first.max(last),
-        }
-    }
-
-    /// A single whole day.
-    pub fn day(date: Date) -> Self {
-        When::AllDay {
-            first: date,
-            last: date,
-        }
-    }
-
-    pub fn is_all_day(&self) -> bool {
-        matches!(self, When::AllDay { .. })
-    }
-
-    /// The first instant of the span in `time_zone`.
-    pub fn start(&self, time_zone: &TimeZone) -> Timestamp {
-        match *self {
-            When::Timed { start, .. } => start,
-            When::AllDay { first, .. } => midnight(first, time_zone),
-        }
-    }
-
-    /// The instant the span stops at in `time_zone`. For whole days this
-    /// is midnight after the last day.
-    pub fn end(&self, time_zone: &TimeZone) -> Timestamp {
-        match *self {
-            When::Timed { end, .. } => end,
-            When::AllDay { last, .. } => midnight(next_day(last), time_zone),
-        }
-    }
+impl Emphasis {
+    pub const ALL: [Emphasis; 5] = [
+        Emphasis::Solid,
+        Emphasis::Outlined,
+        Emphasis::Struck,
+        Emphasis::Faded,
+        Emphasis::Hatched,
+    ];
 }
 
-/// Midnight at the start of `date` in `time_zone`, or the first instant of
-/// the day when a clock change skips midnight.
-pub fn midnight(date: Date, time_zone: &TimeZone) -> Timestamp {
-    date.to_zoned_datetime(time_zone.clone())
-        .map(|zoned| zoned.timestamp())
-        .unwrap_or(Timestamp::MAX)
-}
-
-/// The instant it is `time` on `date` in `time_zone`. A time a clock
-/// change skips moves forward by the gap, and one that happens twice
-/// takes the first.
-///
-/// ```
-/// use iced_cube::data::calendar::instant;
-/// use jiff::civil::{date, time};
-/// use jiff::tz::TimeZone;
-///
-/// let nine = instant(date(2026, 11, 19), time(9, 0, 0, 0), &TimeZone::UTC);
-/// assert_eq!(nine.to_string(), "2026-11-19T09:00:00Z");
-/// ```
-pub fn instant(date: Date, time: Time, time_zone: &TimeZone) -> Timestamp {
-    date.to_datetime(time)
-        .to_zoned_datetime(time_zone.clone())
-        .map(|zoned| zoned.timestamp())
-        .unwrap_or_else(|_| midnight(date, time_zone))
-}
-
-/// The calendar date of `instant` in `time_zone`.
-pub fn date_of(instant: Timestamp, time_zone: &TimeZone) -> Date {
-    instant.to_zoned_datetime(time_zone.clone()).date()
-}
-
-/// `date` moved by `days`, stopping at the first or last date there is.
-pub fn add_days(date: Date, days: i32) -> Date {
-    match Span::new().try_days(i64::from(days)) {
-        Ok(span) => date.saturating_add(span),
-        Err(_) if days < 0 => Date::MIN,
-        Err(_) => Date::MAX,
-    }
-}
-
-pub(super) fn next_day(date: Date) -> Date {
-    add_days(date, 1)
+/// An entry's icon and what it means.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+struct Marker {
+    glyph: Option<Glyph>,
+    label: Option<String>,
 }
 
 /// Something on the calendar: a meeting, a deadline, a holiday.
@@ -146,6 +80,10 @@ pub struct Entry {
     repeat: Option<Repeat>,
     location: Option<String>,
     notes: Option<String>,
+    /// Boxed, as most entries have none and events carry entries by value.
+    marker: Option<Box<Marker>>,
+    emphasis: Emphasis,
+    locked: bool,
 }
 
 /// `text` without the space around it, or `None` when nothing is left.
@@ -179,7 +117,42 @@ impl Entry {
             repeat: None,
             location: None,
             notes: None,
+            marker: None,
+            emphasis: Emphasis::Solid,
+            locked: false,
         }
+    }
+
+    /// A small glyph in the muted text colour, drawn before the time or
+    /// title in every view and never cut off, such as a mail icon for an
+    /// unanswered invitation.
+    pub fn icon(mut self, glyph: Glyph) -> Self {
+        self.marker.get_or_insert_default().glyph = Some(glyph);
+        self
+    }
+
+    /// What the icon means, shown as a tooltip on it, such as "Team
+    /// entry". Blank text clears it.
+    pub fn icon_label(mut self, label: impl Into<String>) -> Self {
+        self.marker.get_or_insert_default().label = filled(label.into());
+        self
+    }
+
+    pub fn icon_label_of(&self) -> Option<&str> {
+        self.marker.as_ref()?.label.as_deref()
+    }
+
+    pub fn emphasis(mut self, emphasis: Emphasis) -> Self {
+        self.emphasis = emphasis;
+        self
+    }
+
+    /// A locked entry can be selected and opened, but the calendar's own
+    /// gestures and shortcuts never move, resize or remove it. The app
+    /// can still change it with [`Event::Insert`](super::Event::Insert).
+    pub fn locked(mut self, locked: bool) -> Self {
+        self.locked = locked;
+        self
     }
 
     /// Where the entry takes place. Blank text clears it.
@@ -263,6 +236,18 @@ impl Entry {
     pub fn is_all_day(&self) -> bool {
         self.when.is_all_day()
     }
+
+    pub fn icon_of(&self) -> Option<Glyph> {
+        self.marker.as_ref()?.glyph
+    }
+
+    pub fn emphasis_of(&self) -> Emphasis {
+        self.emphasis
+    }
+
+    pub fn is_locked(&self) -> bool {
+        self.locked
+    }
 }
 
 /// One time an entry happens. An entry that does not repeat has a single
@@ -327,11 +312,24 @@ pub struct Changed {
 }
 
 /// The entries of a calendar and the time zone they are shown in.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Two collections are equal when they hold the same entries in the same
+/// time zone, whatever ids they have handed out.
+#[derive(Debug, Clone)]
 pub struct Entries {
     items: Vec<Entry>,
     time_zone: TimeZone,
+    /// One more than the highest id ever held, kept after removals.
+    next: u64,
 }
+
+impl PartialEq for Entries {
+    fn eq(&self, other: &Self) -> bool {
+        self.items == other.items && self.time_zone == other.time_zone
+    }
+}
+
+impl Eq for Entries {}
 
 impl Default for Entries {
     fn default() -> Self {
@@ -345,6 +343,7 @@ impl Entries {
         Self {
             items: Vec::new(),
             time_zone,
+            next: 0,
         }
     }
 
@@ -388,15 +387,17 @@ impl Entries {
         self.items.iter().find(|entry| entry.id == id)
     }
 
-    /// An id no entry uses yet.
+    /// An id no entry in this collection has ever used, including entries
+    /// since removed, so ids kept outside the calendar never point at a
+    /// different entry. Ids only go up.
     pub fn next_id(&self) -> EntryId {
-        let highest = self.items.iter().map(|entry| entry.id.0).max();
-        EntryId(highest.map_or(0, |id| id.saturating_add(1)))
+        EntryId(self.next)
     }
 
     /// Adds `entry`, or replaces the entry with the same id. Returns what
     /// changed, or `None` when an identical entry was already there.
     pub fn insert(&mut self, entry: Entry) -> Option<Changed> {
+        self.next = self.next.max(entry.id.0.saturating_add(1));
         let Some(existing) = self.items.iter_mut().find(|item| item.id == entry.id) else {
             self.items.push(entry.clone());
             return Some(Changed {
@@ -608,6 +609,38 @@ mod tests {
         assert_eq!(entries.next_id(), EntryId(8));
         let _ = entries.insert(meeting(u64::MAX, 3, 9));
         assert_eq!(entries.next_id(), EntryId(u64::MAX));
+    }
+
+    #[test]
+    fn a_removed_entry_never_gives_its_id_back() {
+        let mut entries = Entries::utc().with([meeting(1, 3, 9), meeting(2, 3, 10)]);
+        assert_eq!(entries.next_id(), EntryId(3));
+        let _ = entries.remove(EntryId(2));
+        assert_eq!(entries.next_id(), EntryId(3), "2 was used");
+        let _ = entries.remove(EntryId(1));
+        assert_eq!(entries.next_id(), EntryId(3));
+        // Collections holding the same entries are equal whatever they handed out.
+        assert_eq!(entries, Entries::utc());
+    }
+
+    #[test]
+    fn icon_emphasis_and_lock_default_off_and_can_be_set() {
+        let entry = meeting(1, 3, 9);
+        assert_eq!(entry.icon_of(), None);
+        assert_eq!(entry.icon_label_of(), None);
+        assert_eq!(entry.emphasis_of(), Emphasis::Solid);
+        assert!(!entry.is_locked());
+        let entry = entry
+            .icon(crate::lucide!(Users))
+            .icon_label("  Team entry ")
+            .emphasis(Emphasis::Outlined)
+            .locked(true);
+        assert_eq!(entry.icon_of().map(Glyph::name), Some("users"));
+        assert_eq!(entry.icon_label_of(), Some("Team entry"));
+        assert_eq!(entry.emphasis_of(), Emphasis::Outlined);
+        assert!(entry.is_locked());
+        assert_eq!(entry.icon_label("").icon_label_of(), None);
+        assert_eq!(Emphasis::ALL.len(), 5);
     }
 
     #[test]

@@ -5,12 +5,14 @@
 //! and [`Config`] builds a theme with your own colours on top of either.
 
 use std::borrow::Cow;
+use std::fmt;
 use std::sync::OnceLock;
 
 use iced::font::Weight;
 use iced::theme::Palette;
 use iced::theme::palette::{Extended, Pair, Secondary, deviate};
-use iced::{Color, Font, Theme, color};
+use iced::widget::container;
+use iced::{Background, Border, Color, Element, Font, Theme, color};
 
 static BASE_FONT: OnceLock<Font> = OnceLock::new();
 
@@ -35,6 +37,28 @@ pub fn semibold() -> Font {
         weight: Weight::Semibold,
         ..font()
     }
+}
+
+/// A heading in the semibold base font, as cards, dialogs and dialog
+/// sections title their content.
+#[cfg(any(feature = "card", feature = "dialog"))]
+pub(crate) fn heading<'a>(
+    content: impl iced::widget::text::IntoFragment<'a>,
+    size: f32,
+) -> iced::widget::Text<'a> {
+    iced::widget::text(content).size(size).font(semibold())
+}
+
+/// The small muted line under a heading.
+#[cfg(any(feature = "card", feature = "dialog"))]
+pub(crate) fn supporting<'a>(
+    content: impl iced::widget::text::IntoFragment<'a>,
+) -> iced::widget::Text<'a> {
+    iced::widget::text(content)
+        .size(text_size::SM)
+        .style(|theme: &Theme| iced::widget::text::Style {
+            color: Some(Tokens::of(theme).muted_foreground),
+        })
 }
 
 /// Corner radii in logical pixels.
@@ -87,6 +111,10 @@ pub struct Tokens {
     pub secondary_foreground: Color,
     pub destructive: Color,
     pub destructive_foreground: Color,
+    /// The destructive colour for text and icons on the page, such as an
+    /// error message: lightened on dark backgrounds until it reads, while
+    /// fills keep [`destructive`](Tokens::destructive).
+    pub destructive_text: Color,
     pub success: Color,
     pub warning: Color,
     pub is_dark: bool,
@@ -124,6 +152,7 @@ impl Tokens {
             secondary_foreground: on(ext.secondary.base.color),
             destructive: ext.danger.base.color,
             destructive_foreground: on(ext.danger.base.color),
+            destructive_text: readable(ext.danger.base.color, background),
             success: ext.success.base.color,
             warning: ext.warning.base.color,
             is_dark: ext.is_dark,
@@ -310,6 +339,79 @@ impl Config {
     }
 }
 
+/// Default diameter of a [`Swatch`] in logical pixels.
+pub const SWATCH_SIZE: f32 = 12.0;
+
+/// A small filled circle of colour, for colour pickers, legends and the
+/// options of a select. Convert it into an [`Element`] to render.
+pub struct Swatch<'a> {
+    colour: Box<dyn Fn(&Theme) -> Color + 'a>,
+    size: f32,
+}
+
+impl fmt::Debug for Swatch<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Swatch").field("size", &self.size).finish()
+    }
+}
+
+/// Creates a swatch whose colour is resolved from the theme each time it
+/// is drawn, so it follows theme changes.
+///
+/// ```
+/// use iced_cube::theme::{self, Tokens};
+///
+/// let danger: iced::Element<'_, ()> =
+///     theme::swatch(|theme| Tokens::of(theme).destructive).into();
+/// ```
+pub fn swatch<'a>(colour: impl Fn(&Theme) -> Color + 'a) -> Swatch<'a> {
+    Swatch {
+        colour: Box::new(colour),
+        size: SWATCH_SIZE,
+    }
+}
+
+/// Creates a swatch of one fixed colour, whatever the theme.
+pub fn swatch_color<'a>(colour: Color) -> Swatch<'a> {
+    swatch(move |_| colour)
+}
+
+impl Swatch<'_> {
+    /// Sets the diameter in logical pixels.
+    pub fn size(mut self, size: f32) -> Self {
+        self.size = size;
+        self
+    }
+
+    /// The diameter in logical pixels.
+    pub fn diameter(&self) -> f32 {
+        self.size
+    }
+
+    /// The colour the swatch draws in `theme`.
+    pub fn colour(&self, theme: &Theme) -> Color {
+        (self.colour)(theme)
+    }
+}
+
+impl<'a, Message: 'a> From<Swatch<'a>> for Element<'a, Message> {
+    fn from(swatch: Swatch<'a>) -> Self {
+        let Swatch { colour, size } = swatch;
+        container(iced::widget::space())
+            .width(size)
+            .height(size)
+            .style(move |theme| container::Style {
+                background: Some(Background::Color(colour(theme))),
+                border: Border {
+                    radius: radius::FULL.into(),
+                    ..Border::default()
+                },
+                ..container::Style::default()
+            })
+            .into()
+    }
+}
+
 /// Linearly blends `a` towards `b` by `t` (0.0 is `a`, 1.0 is `b`).
 pub fn mix(a: Color, b: Color, t: f32) -> Color {
     let t = t.clamp(0.0, 1.0);
@@ -321,14 +423,48 @@ pub fn mix(a: Color, b: Color, t: f32) -> Color {
     }
 }
 
-/// Near-black or near-white, whichever reads better on `background`.
+/// Near-black or near-white, whichever has the higher contrast ratio on
+/// `background`.
 pub fn on(background: Color) -> Color {
-    let luminance = 0.2126 * background.r + 0.7152 * background.g + 0.0722 * background.b;
-    if luminance > 0.55 {
-        color!(0x09090b)
+    let (dark, light) = (color!(0x09090b), color!(0xfafafa));
+    if contrast(dark, background) >= contrast(light, background) {
+        dark
     } else {
-        color!(0xfafafa)
+        light
     }
+}
+
+/// The relative luminance of `colour`, from 0 for black to 1 for white,
+/// as the WCAG contrast formula uses it.
+pub fn luminance(colour: Color) -> f32 {
+    let linear = |channel: f32| {
+        if channel <= 0.040_45 {
+            channel / 12.92
+        } else {
+            ((channel + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    0.2126 * linear(colour.r) + 0.7152 * linear(colour.g) + 0.0722 * linear(colour.b)
+}
+
+/// The WCAG contrast ratio between two colours, from 1 to 21.
+pub fn contrast(a: Color, b: Color) -> f32 {
+    let (a, b) = (luminance(a), luminance(b));
+    (a.max(b) + 0.05) / (a.min(b) + 0.05)
+}
+
+/// The contrast ratio body text needs against its background.
+pub const TEXT_CONTRAST: f32 = 4.5;
+
+/// `colour`, moved just far enough towards near-white or near-black,
+/// whichever stands out from `background`, for text in it to reach
+/// [`TEXT_CONTRAST`]. A colour that already reads is left as it is.
+pub fn readable(colour: Color, background: Color) -> Color {
+    let towards = on(background);
+    (0..=20)
+        .map(|step| mix(colour, towards, step as f32 / 20.0))
+        .find(|candidate| contrast(*candidate, background) >= TEXT_CONTRAST)
+        .unwrap_or(towards)
 }
 
 /// Returns `color` with its alpha multiplied by `alpha`.
@@ -348,6 +484,50 @@ mod tests {
         let font = semibold();
         assert_eq!(font.weight, Weight::Semibold);
         assert_eq!(font.family, super::font().family);
+    }
+
+    #[test]
+    fn contrast_follows_the_wcag_formula() {
+        assert!((contrast(Color::BLACK, Color::WHITE) - 21.0).abs() < 0.01);
+        assert!((contrast(Color::WHITE, Color::WHITE) - 1.0).abs() < 1e-6);
+        assert_eq!(
+            contrast(Color::BLACK, Color::WHITE),
+            contrast(Color::WHITE, Color::BLACK)
+        );
+    }
+
+    #[test]
+    fn text_on_a_colour_takes_whichever_reads_better() {
+        // Mid green reads better with dark text than with white.
+        let green = color!(0x16a34a);
+        assert_eq!(on(green), color!(0x09090b));
+        assert!(contrast(on(green), green) >= TEXT_CONTRAST);
+        assert_eq!(on(Color::BLACK), color!(0xfafafa));
+        assert_eq!(on(Color::WHITE), color!(0x09090b));
+    }
+
+    #[test]
+    fn destructive_text_reads_on_the_page_in_both_themes() {
+        for theme in [light(), dark()] {
+            let tokens = Tokens::of(&theme);
+            assert!(contrast(tokens.destructive_text, tokens.background) >= TEXT_CONTRAST);
+            // Fills keep the red they were given.
+            assert_eq!(
+                tokens.destructive,
+                theme.extended_palette().danger.base.color
+            );
+        }
+        let tokens = Tokens::of(&dark());
+        assert_ne!(
+            tokens.destructive_text, tokens.destructive,
+            "lightened on dark"
+        );
+    }
+
+    #[test]
+    fn a_colour_that_already_reads_is_left_alone() {
+        let ink = color!(0x1d4ed8);
+        assert_eq!(readable(ink, Color::WHITE), ink);
     }
 
     #[test]
@@ -505,5 +685,28 @@ mod tests {
             let tokens = Tokens::of(theme);
             assert_ne!(tokens.background, tokens.foreground, "{theme}");
         }
+    }
+
+    #[test]
+    fn a_swatch_is_twelve_pixels_unless_sized() {
+        let swatch = swatch(|theme| Tokens::of(theme).primary);
+        assert_eq!(swatch.diameter(), SWATCH_SIZE);
+        assert_eq!(swatch.size(20.0).diameter(), 20.0);
+    }
+
+    #[test]
+    fn a_swatch_resolves_its_colour_from_each_theme() {
+        let swatch = swatch(|theme| Tokens::of(theme).primary);
+        assert_eq!(swatch.colour(&light()), Tokens::of(&light()).primary);
+        assert_eq!(swatch.colour(&dark()), Tokens::of(&dark()).primary);
+        assert_ne!(swatch.colour(&light()), swatch.colour(&dark()));
+    }
+
+    #[test]
+    fn a_fixed_swatch_ignores_the_theme() {
+        let teal = color!(0x14b8a6);
+        let swatch = swatch_color(teal);
+        assert_eq!(swatch.colour(&light()), teal);
+        assert_eq!(swatch.colour(&dark()), teal);
     }
 }

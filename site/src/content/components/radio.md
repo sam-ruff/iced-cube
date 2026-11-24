@@ -21,6 +21,11 @@ api:
     description: "Creates a single radio for building custom layouts. It is selected when selected holds its value."
   - name: "radio(...).on_select(f)"
     description: "Sets the message for a click, built from the radio's value. Without it the radio is disabled."
+keyboard:
+  - keys: "Tab, Shift + Tab"
+    action: "Moves keyboard focus from one radio to the next inside a dialog, or wherever the app runs iced's focus_next and focus_previous."
+  - keys: "Space, Enter"
+    action: "Selects the focused radio."
 ---
 
 Use radios when there are only a handful of options and seeing them all at once helps the choice. For longer lists, a select takes less room.

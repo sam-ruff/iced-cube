@@ -11,7 +11,7 @@ imports: |
 keywords: [events, schedule, scheduler, reminders, alarm, agenda, month, week, date, appointment]
 related: [toast, data-table, dialog, scroll-area]
 hero: calendar/month
-stories: [calendar/month, calendar/week, calendar/agenda, calendar/year, calendar/create, calendar/read-only, calendar/repeating, calendar/themed, calendar/keyboard, calendar/reminders, calendar/missed, calendar/triggers]
+stories: [calendar/month, calendar/week, calendar/agenda, calendar/year, calendar/create, calendar/confirm, calendar/status, calendar/form, calendar/read-only, calendar/repeating, calendar/themed, calendar/keyboard, calendar/reminders, calendar/missed, calendar/triggers]
 api:
   - name: "State::new(today) / State::at(now, entries)"
     description: "A calendar showing the month of today. The calendar never reads the clock, so today's date, or the current time for the now line, is passed in."
@@ -23,6 +23,18 @@ api:
     description: "An empty collection shown in UTC, the system's time zone or one you name. Add to it with .with([...]) or .insert(entry)."
   - name: "Entry::new(id, title, start, end) / Entry::all_day(id, title, first, last)"
     description: "A timed entry between two instants, or one covering whole days. Chain .tone(Tone), .tag(\"work\"), .repeat(Repeat), .location(\"Room 4\") and .notes(text), and read them back with location_of() and notes_of()."
+  - name: ".icon(glyph) / .icon_label(text) / .emphasis(Emphasis) / .locked(bool)"
+    description: "Marks an entry's status in every view: a small muted icon before its time or title, never cut off, with a tooltip; Solid, Outlined, Struck, Faded or Hatched; and a lock that stops the calendar's own drags and Delete key."
+  - name: ".with_proposals(bool) / Output::Proposed / Event::Confirm / Event::Discard / state.pending()"
+    description: "Makes drags and the Delete key ask first: the change comes back as Output::Proposed with before and after, is drawn where it would go, and applies only on Confirm (or Event::Insert of the proposed entry). Off by default."
+  - name: ".with_activate_on_second_press(bool) / .with_double_click(duration) / Event::DoublePress(Selection)"
+    description: "A double click or double tap selects and activates. A second press on the selection also activates unless turned off, which suits touch screens and is the default."
+  - name: "Event::MoveDays { entry, start, days } / Event::Delete(id)"
+    description: "Sent by a drag by whole days in the month or the strip of whole-day entries, and by the Delete key. Both follow Allow and locked entries."
+  - name: "calendar::entry_id(id, start) / calendar::day_id(date) / hours_id() / point_at(bounds, days, day, minute, first_hour, hour_height)"
+    description: "Ids on every chip, bar, block, schedule row and day, and the point of a time in the hours, for finding exactly one thing in tests and driving drags."
+  - name: "calendar::today_button_id() / previous_button_id() / next_button_id() / view_menu_id()"
+    description: "Ids on the header's controls."
   - name: "instant(date, time, &time_zone)"
     description: "The instant it is a time on a date in a time zone, for building entries without handling errors."
   - name: "Repeat::daily() / weekly() / monthly() / yearly()"
@@ -53,6 +65,10 @@ api:
     description: "The hours the week and day views show, and the least height of each. Fewer hours stretch to fill the space; the whole day scrolls."
   - name: ".header(bool) / .width(length) / .height(length)"
     description: "Hides the Today button, the arrows, the title and the menu of views, or sets the size. The calendar fills the space it is given."
+  - name: ".header_leading(element) / .header_trailing(element)"
+    description: "Something of the app's at the start of the header, before Today, or at its end, after the menu of views."
+  - name: ".start_at_hour(hour)"
+    description: "Scrolls a whole-day week or day view to an hour whenever a timed view comes on show and when Today is pressed."
   - name: "calendar::scroll_to_hour(hour, hour_height) / calendar::scroll_id()"
     description: "A task that scrolls the week or day view so an hour is at the top, such as 8 when the calendar opens, and the id of the scrollable for anything else."
   - name: "editor::State::new(&draft, &time_zone) / editor::State::edit(&entry, &time_zone)"
@@ -63,6 +79,14 @@ api:
     description: "Applies a change, and gives the entry, span or repeat rule the form describes. A changed entry keeps its id; a blank title is saved as \"(No title)\"."
   - name: "editor::notes_id()"
     description: "The id of the notes field, for focusing it."
+  - name: "editor(&form).without(Part) / editor(&form).fields()"
+    description: "Leaves parts of the form out, or gives each part as its own element (title, all_day, starts, ends, repeat, every, stops, colour, location, notes) for the app to lay out."
+  - name: "form.notes_content() / form.picker_month() / form.interval_text() / form.count_text() / form.week_start()"
+    description: "What an app needs to draw the form itself: the notes buffer, the month the open date picker shows, and the number fields as typed."
+  - name: "editor::month_grid(month, week_start, chosen, on_pick)"
+    description: "The month of days the form's date picker draws, for a picker of the app's own."
+  - name: "calendar::rules::occurrences(when, repeat, &time_zone, from, to)"
+    description: "When, Repeat and occurrence expansion in a module that uses no iced types, so the same rules can expand spans outside the calendar's entries."
   - name: "Scheduler::new().with(trigger)"
     description: "Collects triggers. Chain .resume_from(watermark) to receive what was missed since a saved time, and .grace(duration) to change what counts as late."
   - name: "Trigger::new(key).at(anchor) / .before(anchor, lead) / .after(anchor, delay) / .on(change)"
@@ -102,15 +126,25 @@ Timed entries are stored as instants and shown in the time zone of the `Entries`
 
 ## Selecting, opening and creating
 
-The first press on a day, a time or an entry selects it. A press on what is already selected activates it: an entry returns `Output::Opened`, and a day or a time returns `Output::Requested` with the span to create. Two quick presses therefore open or create, and so do two taps on a touch screen.
+The first press on a day, a time or an entry selects it. A double click or a double tap activates it: an entry returns `Output::Opened`, and a day or a time returns `Output::Requested` with the span to create.
 
-In the week and day views a mouse can also drag: across empty space to ask for an entry of that length, on an entry to move it, and on its lower edge to change when it ends. Drags snap to 15 minutes. A finger scrolls the hours instead, so on a touch screen entries are created with two taps and edited in whatever the app opens.
+By default a press on what is already selected activates it too, however long after the first, which is what a touch screen wants. Where a double click should be the only way to open things, turn that off with `with_activate_on_second_press(false)`: a single click then only selects.
+
+In the week and day views a mouse can also drag: across empty space to ask for an entry of that length, on an entry to move it, and on its lower edge to change when it ends. Drags snap to 15 minutes. In the month, and in the strip of whole-day entries above the hours, an entry is dragged by whole days: a timed one keeps its time of day and a whole-day one its length. A finger scrolls instead, so on a touch screen entries are created with two taps and edited in whatever the app opens.
 
 `Requested` and `Opened` are where the app shows its dialog or side panel, as the "Creating and editing" example does.
 
+## Asking before a change
+
+Normally a drag or the Delete key changes the entries at once and reports `Output::Changed`. With `with_proposals(true)` it proposes instead: `Output::Proposed` carries the entry before and after, the entries stay as they were, and the calendar draws the entry faintly where it would go (or struck through, for a removal) while the app asks. `Event::Confirm` applies it and `Event::Discard` puts it back; sending `Event::Insert` with the proposed entry also confirms it. The "Confirm before changing" example asks with an alert dialog that a click outside cancels.
+
+## Status at a glance
+
+An entry can say how it stands without words in its title. `.emphasis(...)` draws it `Outlined` (tentative or unanswered), `Struck` (declined), `Faded` (cancelled) or `Hatched` (private or busy), and `.icon(glyph)` puts a small muted glyph before its time or title, which is never cut off, with `.icon_label(...)` as its tooltip. `.locked(true)` lets an entry be selected and opened while the calendar's own drags and Delete key leave it alone; the app can still change it.
+
 ## The entry form
 
-`calendar::editor` is a ready-made form for that dialog: a title, an "All day" switch, a start and an end each with a date and a time, how the entry repeats, its colour, where it is and notes. It has no buttons, so it fits a dialog, a popover or a side panel with whatever actions the app wants.
+`calendar::editor` is a ready-made form for that dialog: a title, an "All day" check box, a start and an end each with a date and a time, how the entry repeats, its colour (each with a swatch), where it is and notes. It has no buttons, so it fits a dialog, a popover or a side panel with whatever actions the app wants.
 
 ```rust
 use iced_cube::data::calendar::editor::{self, editor};
@@ -133,7 +167,9 @@ Choosing a repeat adds two rows. "Every" takes a number, so "Weekly" with 2 is e
 
 The location is a line of text, and the notes run over as many lines as are typed. Both are kept on the entry and read back with `location_of()` and `notes_of()`; the calendar itself does not draw them, so show them wherever suits the app. Enter in the title or the location sends `on_submit`, and in the notes it starts a new line.
 
-The form is as tall as its fields and grows when a repeat is chosen, so in a small window put it in a [scroll area](../scroll-area/), as the example does. A dialog puts focus in the title, which takes the first Escape to give it up; the second closes the dialog.
+The form is as tall as its fields and grows when a repeat is chosen. A [dialog](../dialog/) keeps its title and buttons in view and scrolls the form when the window is short. Tab reaches every field, menu, check box and button in it, and one Escape closes the dialog once any open list has closed.
+
+To lay the form out differently, `.without(Part::Location)` leaves a part out, and `.fields()` gives every part as its own element, so an app can put them in headed columns among fields of its own, as the "Laying out the form" example does. An app can also draw the whole form itself from `editor::State` and send its `editor::Event`s: `notes_content()`, `picker_month()`, `interval_text()` and `count_text()` give what such a view needs, and `editor::month_grid` draws the month to pick from.
 
 The form is optional. An app that wants different fields builds its own and sends `Event::Insert`.
 
@@ -147,7 +183,9 @@ A calendar with no `.on_event` at all is a picture: it shows the entries and res
 
 ## Repeating entries
 
-A repeating entry is one entry with a rule. Occurrences are counted from the first, so an entry on the 31st that repeats monthly uses the last day of shorter months and returns to the 31st afterwards, and a timed entry keeps its local time when the clocks change. Dragging one occurrence moves the whole series by the same amount. Rules are simple: there is no "last Friday of the month" and no way to skip a single occurrence.
+A repeating entry is one entry with a rule. Occurrences are counted from the first, so an entry on the 31st that repeats monthly uses the last day of shorter months and returns to the 31st afterwards, and a timed entry keeps its local time when the clocks change. Dragging one occurrence moves the whole series by the same amount. Rules are simple: there is no "last Friday of the month" and no way to skip or move a single occurrence.
+
+The rules live in `calendar::rules`, which uses only `jiff` and works on a `When` and a `Repeat` rather than an entry, so other code in the app can list the same occurrences the window shows.
 
 ## Triggers
 
@@ -167,6 +205,10 @@ Below 480 pixels the month shows a dot for each entry and lists the selected day
 
 - Day and month names are in English, and times use the 24-hour clock.
 - One time zone per calendar.
-- Entries cannot be dragged in the month view.
-- A calendar showing the whole day opens at midnight. Run `calendar::scroll_to_hour(8, hour_height)` once it is on screen to start at the working day, or limit it with `.hours(...)`.
-- Removing an entry from the keyboard does not ask first. `Output::Changed` carries the removed entry, so an app can offer to undo it, or unbind `Action::Remove`.
+- A calendar showing the whole day opens at midnight unless given `.start_at_hour(...)` or limited with `.hours(...)`.
+- Removing an entry from the keyboard does not ask first unless `with_proposals(true)` is on.
+- Moving one occurrence of a repeating entry moves the whole series.
+
+## Testing an app's calendar
+
+Every chip, bar, block and schedule row has the id `calendar::entry_id(entry, start)`, every day `calendar::day_id(date)`, and the header's buttons have ids of their own, so an `iced_test` simulator can press exactly one thing whatever its title. `calendar::point_at` gives the point of a time in the hours found by `hours_id()`, for driving drags without working out the layout by hand. Set `with_double_click` to a long interval in tests, so two presses always make a double click however busy the machine is.

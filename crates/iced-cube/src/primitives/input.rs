@@ -28,12 +28,12 @@ use std::rc::Rc;
 
 use iced::widget::text::LineHeight;
 use iced::widget::text_input::{Status, Style};
-use iced::widget::{Id, container, stack, text_input};
+use iced::widget::{self, Id, container, stack, text_input};
 use iced::{Alignment, Background, Border, Color, Element, Length, Padding};
 
 pub use crate::editing::{Shortcut, Shortcuts, default_keymap};
 
-use crate::editing::{self, Editing};
+use crate::editing::{self, Editing, Limit};
 use crate::icon::{Glyph, opacity, themed};
 use crate::keys::Keymap;
 use crate::theme::{Tokens, fade, mix, radius, space, text_size};
@@ -121,6 +121,8 @@ pub struct Input<'a, Message> {
     width: Length,
     shortcuts: Shortcuts,
     keymap: Keymap<Shortcut>,
+    on_clear: Option<Message>,
+    max_length: Option<usize>,
 }
 
 /// Creates a text input showing `value`, with `placeholder` while empty.
@@ -138,7 +140,15 @@ pub fn input<'a, Message>(placeholder: &str, value: &str) -> Input<'a, Message> 
         width: Length::Fill,
         shortcuts: Shortcuts::all(),
         keymap: default_keymap(),
+        on_clear: None,
+        max_length: None,
     }
+}
+
+/// The id of the clear button of a [clearable](Input::clearable) input,
+/// to find or press it in tests. Every clearable input shares it.
+pub fn clear_id() -> Id {
+    Id::new("iced-cube-input-clear")
 }
 
 impl<'a, Message> Input<'a, Message> {
@@ -213,13 +223,35 @@ impl<'a, Message> Input<'a, Message> {
         self
     }
 
+    /// Draws an x button at the end of the field while it holds text and is
+    /// enabled. Pressing it emits `message`; the app empties the value.
+    pub fn clearable(mut self, message: Message) -> Self {
+        self.on_clear = Some(message);
+        self
+    }
+
+    /// Stops edits from growing the value past `max_length` characters.
+    /// Typed text that does not fit is dropped and pasted text is cut short.
+    /// A longer value set by the app is shown as it is and can only shrink.
+    pub fn max_length(mut self, max_length: usize) -> Self {
+        self.max_length = Some(max_length);
+        self
+    }
+
     pub fn is_enabled(&self) -> bool {
         self.on_input.is_some()
+    }
+
+    /// Whether the clear button shows: the input is clearable, enabled and
+    /// not empty.
+    pub fn shows_clear(&self) -> bool {
+        self.on_clear.is_some() && self.is_enabled() && !self.value.is_empty()
     }
 }
 
 /// Builds an iced text input from `field` with `on_input` wired up and the
 /// editing shortcuts around it.
+#[cfg(any(feature = "combobox", feature = "command"))]
 pub(crate) fn with_shortcuts<'a, Message: Clone + 'a>(
     field: text_input::TextInput<'a, Message>,
     value: &str,
@@ -228,21 +260,39 @@ pub(crate) fn with_shortcuts<'a, Message: Clone + 'a>(
     keymap: Keymap<Shortcut>,
     shortcuts: Shortcuts,
 ) -> Element<'a, Message> {
+    limited(field, value, secure, on_input, keymap, shortcuts, None)
+}
+
+/// Builds the field with its editing shortcuts, keeping the value within
+/// `max_length` characters when it is set.
+fn limited<'a, Message: Clone + 'a>(
+    field: text_input::TextInput<'a, Message>,
+    value: &str,
+    secure: bool,
+    on_input: Option<Box<dyn Fn(String) -> Message + 'a>>,
+    keymap: Keymap<Shortcut>,
+    shortcuts: Shortcuts,
+    max_length: Option<usize>,
+) -> Element<'a, Message> {
     let Some(on_input) = on_input else {
         return field.into();
     };
     let on_input: Rc<dyn Fn(String) -> Message + 'a> = Rc::from(on_input);
     let edited = Rc::new(Cell::new(false));
+    let limit = max_length.map(|max| Rc::new(Limit::new(max, value)));
     let field = field.on_input({
-        let (on_input, edited) = (Rc::clone(&on_input), Rc::clone(&edited));
+        let (on_input, edited, limit) = (Rc::clone(&on_input), Rc::clone(&edited), limit.clone());
         move |value| {
             edited.set(true);
-            on_input(value)
+            match &limit {
+                Some(limit) => on_input(limit.apply(value)),
+                None => on_input(value),
+            }
         }
     });
     Editing::new(
         field,
-        editing::Input::new(value, secure, on_input),
+        editing::Input::new(value, secure, on_input).limit(limit),
         keymap,
         shortcuts,
         edited,
@@ -265,6 +315,8 @@ impl<Message: fmt::Debug> fmt::Debug for Input<'_, Message> {
             .field("width", &self.width)
             .field("shortcuts", &self.shortcuts)
             .field("keymap", &self.keymap)
+            .field("on_clear", &self.on_clear)
+            .field("max_length", &self.max_length)
             .finish()
     }
 }
@@ -274,45 +326,107 @@ impl<'a, Message: Clone + 'a> From<Input<'a, Message>> for Element<'a, Message> 
         let metrics = input.size.metrics();
         let invalid = input.invalid;
         let enabled = input.is_enabled();
+        let clearable = input.on_clear.is_some() && enabled;
+        let clear = input
+            .shows_clear()
+            .then_some(input.on_clear.clone())
+            .flatten();
 
+        let mut padding = metrics.padding(input.icon.is_some());
+        // The room stays while the field is empty, so the text does not
+        // reflow when the button appears.
+        if clearable {
+            padding.right = metrics.padding_x + metrics.icon + space::SM;
+        }
         let mut field = text_input(&input.placeholder, &input.value)
             .secure(input.secure)
             .size(metrics.text)
             .line_height(LineHeight::Relative(LINE_HEIGHT))
-            .padding(metrics.padding(input.icon.is_some()))
+            .padding(padding)
             .width(Length::Fill)
             .on_submit_maybe(input.on_submit.filter(|_| enabled))
             .style(move |theme, status| style(&Tokens::of(theme), status, invalid));
         if let Some(id) = input.id {
             field = field.id(id);
         }
-        let field = with_shortcuts(
+        let field = limited(
             field,
             &input.value,
             input.secure,
             input.on_input,
             input.keymap,
             input.shortcuts,
+            input.max_length,
         );
 
-        let Some(glyph) = input.icon else {
+        // A clearable field keeps the same widget tree whether or not the
+        // button shows, so it stays focused as the first character is typed.
+        if input.icon.is_none() && !clearable {
             return container(field).width(input.width).into();
-        };
+        }
 
         let status = if enabled {
             Status::Active
         } else {
             Status::Disabled
         };
-        let icon = themed(glyph, metrics.icon, opacity(enabled), move |theme| {
-            style(&Tokens::of(theme), status, invalid).icon
+        let icon = input.icon.map(|glyph| {
+            let icon = themed(glyph, metrics.icon, opacity(enabled), move |theme| {
+                style(&Tokens::of(theme), status, invalid).icon
+            });
+            container(icon)
+                .padding(Padding::ZERO.left(metrics.padding_x))
+                .height(Length::Fill)
+                .align_y(Alignment::Center)
         });
-        let icon = container(icon)
-            .padding(Padding::ZERO.left(metrics.padding_x))
-            .height(Length::Fill)
-            .align_y(Alignment::Center);
+        let clear = clear.map(|message| clear_button(metrics, message));
 
-        stack![field, icon].width(input.width).into()
+        stack![field]
+            .push(icon)
+            .push(clear)
+            .width(input.width)
+            .into()
+    }
+}
+
+/// Padding around the clear button's icon.
+const CLEAR_PADDING: f32 = 2.0;
+
+/// The x button at the end of a clearable input, lined up with the text
+/// padding.
+fn clear_button<'a, Message: Clone + 'a>(
+    metrics: Metrics,
+    message: Message,
+) -> Element<'a, Message> {
+    let icon = themed(crate::lucide!(X), metrics.icon, 1.0, |theme| {
+        Tokens::of(theme).muted_foreground
+    });
+    let button = widget::button(icon)
+        .padding(CLEAR_PADDING)
+        .on_press(message)
+        .style(|theme, status| clear_style(&Tokens::of(theme), status));
+    container(container(button).id(clear_id()))
+        .padding(Padding::ZERO.right(metrics.padding_x - CLEAR_PADDING))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .align_x(Alignment::End)
+        .align_y(Alignment::Center)
+        .into()
+}
+
+/// The clear button: bare at rest, on the accent surface under the pointer.
+pub fn clear_style(tokens: &Tokens, status: widget::button::Status) -> widget::button::Style {
+    use widget::button::Status as Button;
+    let background = matches!(status, Button::Hovered | Button::Pressed)
+        .then_some(Background::Color(tokens.accent));
+    widget::button::Style {
+        background,
+        text_color: tokens.muted_foreground,
+        border: Border {
+            radius: radius::SM.into(),
+            ..Border::default()
+        },
+        ..widget::button::Style::default()
     }
 }
 
@@ -383,6 +497,47 @@ mod tests {
         assert!(!i.is_enabled());
         assert_eq!(i.shortcuts, Shortcuts::all());
         assert_eq!(i.keymap, default_keymap());
+        assert!(i.on_clear.is_none() && i.max_length.is_none());
+        assert!(!i.shows_clear());
+    }
+
+    #[test]
+    fn the_clear_button_shows_only_for_an_enabled_field_with_text() {
+        let shows = |value: &str, enabled: bool| {
+            input::<String>("", value)
+                .clearable(String::new())
+                .on_input_maybe(enabled.then_some(|s| s))
+                .shows_clear()
+        };
+        assert!(shows("text", true));
+        assert!(!shows("", true));
+        assert!(!shows("text", false));
+        assert!(!input::<String>("", "text").on_input(|s| s).shows_clear());
+    }
+
+    #[test]
+    fn max_length_is_kept() {
+        let i: Input<'_, ()> = input("", "").max_length(8);
+        assert_eq!(i.max_length, Some(8));
+    }
+
+    #[test]
+    fn the_clear_button_highlights_under_the_pointer() {
+        use widget::button::Status as Button;
+        for theme in [light(), dark()] {
+            let tokens = Tokens::of(&theme);
+            assert_eq!(clear_style(&tokens, Button::Active).background, None);
+            for status in [Button::Hovered, Button::Pressed] {
+                assert_eq!(
+                    clear_style(&tokens, status).background,
+                    Some(Background::Color(tokens.accent))
+                );
+            }
+            assert_eq!(
+                clear_style(&tokens, Button::Active).text_color,
+                tokens.muted_foreground
+            );
+        }
     }
 
     #[test]

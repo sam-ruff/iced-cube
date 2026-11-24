@@ -5,6 +5,8 @@
 pub mod combobox;
 #[cfg(feature = "field")]
 pub mod label;
+#[cfg(feature = "multi-combobox")]
+pub mod multi_combobox;
 #[cfg(feature = "rich-text-editor")]
 pub mod rich_text_editor;
 #[cfg(feature = "select")]
@@ -16,6 +18,8 @@ pub mod textarea;
 pub use combobox::{Combobox, combobox};
 #[cfg(feature = "field")]
 pub use label::{Field, Label, field, label};
+#[cfg(feature = "multi-combobox")]
+pub use multi_combobox::{MultiCombobox, multi_combobox};
 #[cfg(feature = "rich-text-editor")]
 pub use rich_text_editor::{RichTextEditor, rich_text_editor};
 #[cfg(feature = "select")]

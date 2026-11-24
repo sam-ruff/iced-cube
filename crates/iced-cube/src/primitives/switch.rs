@@ -1,11 +1,18 @@
 //! On/off switches for settings that apply immediately.
+//!
+//! An enabled switch takes keyboard focus from iced's focus operations,
+//! such as a dialog's Tab order. While focused its track rings and Space
+//! or Enter turns it on or off.
+
+use std::rc::Rc;
 
 use iced::keyboard::key::Named;
 use iced::widget::{self, toggler::Status};
 use iced::{Background, Color, Element};
 
+use crate::focus::{Ring, focusable};
 use crate::keys::{self, Chord, Keymap};
-use crate::theme::{Tokens, fade, mix, space as spacing, text_size};
+use crate::theme::{Tokens, fade, mix, radius, space as spacing, text_size};
 
 /// Height of the switch track in logical pixels. The track is twice as wide.
 pub const TRACK_HEIGHT: f32 = 20.0;
@@ -67,7 +74,8 @@ impl<'a, Message> Switch<'a, Message> {
 
 impl<'a, Message: 'a> From<Switch<'a, Message>> for Element<'a, Message> {
     fn from(switch: Switch<'a, Message>) -> Self {
-        let mut toggler = widget::toggler(switch.is_on)
+        let is_on = switch.is_on;
+        let mut toggler = widget::toggler(is_on)
             .size(TRACK_HEIGHT)
             .text_size(text_size::SM)
             .spacing(spacing::SM)
@@ -75,10 +83,23 @@ impl<'a, Message: 'a> From<Switch<'a, Message>> for Element<'a, Message> {
         if let Some(label) = switch.label {
             toggler = toggler.label(label);
         }
-        if let Some(on_toggle) = switch.on_toggle {
-            toggler = toggler.on_toggle(on_toggle);
+        let on_toggle: Option<Rc<dyn Fn(bool) -> Message + 'a>> = switch.on_toggle.map(Rc::from);
+        let on_activate = on_toggle.clone().map(|on_toggle| {
+            Box::new(move || on_toggle(Action::Toggle.apply(is_on)))
+                as Box<dyn Fn() -> Message + 'a>
+        });
+        if let Some(on_toggle) = on_toggle {
+            toggler = toggler.on_toggle(move |value| on_toggle(value));
         }
-        toggler.into()
+        focusable(
+            toggler,
+            on_activate,
+            Ring {
+                first_child: true,
+                ..Ring::around(radius::FULL)
+            },
+        )
+        .into()
     }
 }
 
@@ -105,9 +126,16 @@ pub fn colours(tokens: &Tokens, status: Status) -> Colours {
         (false, false) => off_track,
         (false, true) => mix(off_track, tokens.foreground, 0.15),
     };
+    // A dark thumb disappears into a dark off track, so dark themes draw
+    // the off thumb in the foreground colour.
+    let thumb = if tokens.is_dark && !is_on {
+        tokens.foreground
+    } else {
+        tokens.background
+    };
     let colours = Colours {
         track,
-        thumb: tokens.background,
+        thumb,
         label: tokens.foreground,
     };
 
@@ -116,7 +144,7 @@ pub fn colours(tokens: &Tokens, status: Status) -> Colours {
     }
     Colours {
         track: fade(colours.track, 0.5),
-        thumb: colours.thumb,
+        thumb: mix(colours.thumb, tokens.background, 0.5),
         label: fade(colours.label, 0.5),
     }
 }
@@ -268,6 +296,61 @@ mod tests {
                 assert!((disabled.label.a - active.label.a * 0.5).abs() < 1e-6);
             }
         }
+    }
+
+    fn luminance(colour: Color) -> f32 {
+        let channel = |c: f32| {
+            if c <= 0.04045 {
+                c / 12.92
+            } else {
+                ((c + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * channel(colour.r) + 0.7152 * channel(colour.g) + 0.0722 * channel(colour.b)
+    }
+
+    /// The contrast ratio of two opaque colours, from 1 to 21.
+    fn contrast(a: Color, b: Color) -> f32 {
+        let (a, b) = (luminance(a), luminance(b));
+        (a.max(b) + 0.05) / (a.min(b) + 0.05)
+    }
+
+    #[test]
+    fn the_off_thumb_stands_out_from_the_off_track_in_dark_themes() {
+        let tokens = Tokens::of(&dark());
+        for status in [
+            Status::Active { is_toggled: false },
+            Status::Hovered { is_toggled: false },
+        ] {
+            let off = colours(&tokens, status);
+            assert_eq!(off.thumb, tokens.foreground);
+            let ratio = contrast(off.thumb, off.track);
+            assert!(ratio >= 4.5, "{status:?}: {ratio}");
+        }
+        let on = colours(&tokens, Status::Active { is_toggled: true });
+        assert!(contrast(on.thumb, on.track) >= 4.5);
+    }
+
+    #[test]
+    fn the_light_theme_keeps_a_background_thumb_in_both_states() {
+        let tokens = Tokens::of(&light());
+        for is_toggled in [false, true] {
+            for status in statuses(is_toggled) {
+                assert_eq!(colours(&tokens, status).thumb, tokens.background);
+            }
+            let active = colours(&tokens, Status::Active { is_toggled });
+            assert!(contrast(active.thumb, active.track) > 1.2, "{is_toggled}");
+        }
+    }
+
+    #[test]
+    fn a_disabled_dark_off_thumb_is_dimmed_towards_the_background() {
+        let tokens = Tokens::of(&dark());
+        let active = colours(&tokens, Status::Active { is_toggled: false });
+        let disabled = colours(&tokens, Status::Disabled { is_toggled: false });
+        assert_eq!(disabled.thumb, mix(active.thumb, tokens.background, 0.5));
+        assert!(luminance(disabled.thumb) < luminance(active.thumb));
+        assert!(luminance(disabled.thumb) > luminance(tokens.background));
     }
 
     #[test]

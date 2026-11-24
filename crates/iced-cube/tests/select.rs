@@ -96,12 +96,90 @@ fn an_open_list_keeps_keys_from_what_is_behind_it() {
     }
 
     open(&mut ui);
-    for key in [Named::ArrowDown, Named::Enter, Named::Backspace] {
+    for key in [
+        Named::ArrowDown,
+        Named::ArrowUp,
+        Named::Backspace,
+        Named::Tab,
+    ] {
         let status = ui.tap_key(key);
         assert_eq!(status, iced::event::Status::Captured, "open: {key:?}");
     }
     assert!(ui.find("Banana").is_ok(), "the list stays open");
     assert_eq!(ui.into_messages().count(), 0);
+}
+
+#[cfg(feature = "dialog")]
+mod keyboard {
+    use super::*;
+
+    /// Tabs to the select, the only focusable widget in the dialog.
+    fn focus_select(ui: &mut Simulator<'_, Message>) {
+        let _ = ui.simulate([Event::Mouse(mouse::Event::CursorMoved {
+            position: Point::new(600.0, 150.0),
+        })]);
+        let _ = ui.tap_key(Named::Tab);
+    }
+
+    /// Puts `content` in a dialog, whose Tab moves focus as an app's
+    /// `focus_next` task would.
+    fn tab_focuses<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
+        iced_cube::overlay::dialog::dialog(text("Base"))
+            .open(true)
+            .body(content)
+            .close_button(false)
+            .into()
+    }
+
+    #[test]
+    fn a_focused_select_opens_on_space_enter_or_arrow_down() {
+        for key in [Named::Space, Named::Enter, Named::ArrowDown] {
+            let mut ui = simulator(tab_focuses(view(Some("Apple"), true)));
+            focus_select(&mut ui);
+            assert!(ui.find("Banana").is_err(), "{key:?}: closed until the key");
+            assert_eq!(ui.tap_key(key), iced::event::Status::Captured);
+            assert!(ui.find("Banana").is_ok(), "{key:?} opens the list");
+            assert_eq!(ui.into_messages().count(), 0);
+        }
+    }
+
+    #[test]
+    fn arrows_move_the_highlight_and_enter_chooses_it() {
+        let mut ui = simulator(tab_focuses(view(Some("Apple"), true)));
+        focus_select(&mut ui);
+        let _ = ui.tap_key(Named::Space);
+        let _ = ui.tap_key(Named::ArrowDown);
+        let _ = ui.tap_key(Named::ArrowDown);
+        let _ = ui.tap_key(Named::ArrowDown);
+        let _ = ui.tap_key(Named::ArrowUp);
+        let _ = ui.tap_key(Named::Enter);
+        assert!(ui.find("Cherry").is_err(), "choosing closes the list");
+
+        let _ = ui.tap_key(Named::Space);
+        let _ = ui.tap_key(Named::End);
+        let _ = ui.tap_key(Named::Space);
+        assert_eq!(
+            ui.into_messages().collect::<Vec<_>>(),
+            vec![Message::Fruit("Banana"), Message::Fruit("Cherry")]
+        );
+    }
+
+    #[test]
+    fn a_pointer_press_takes_focus_off_the_select() {
+        let mut ui = simulator(tab_focuses(view(Some("Apple"), true)));
+        focus_select(&mut ui);
+        click_at(&mut ui, Point::new(600.0, 150.0));
+        let _ = ui.tap_key(Named::Space);
+        assert!(ui.find("Banana").is_err());
+    }
+
+    #[test]
+    fn a_disabled_select_is_never_focused() {
+        let mut ui = simulator(tab_focuses(view(Some("Apple"), false)));
+        focus_select(&mut ui);
+        let _ = ui.tap_key(Named::Space);
+        assert!(ui.find("Banana").is_err());
+    }
 }
 
 #[test]
@@ -128,6 +206,54 @@ fn a_long_value_stays_clear_of_the_chevron_in_a_narrow_field() {
         "label ends at {}",
         label.x + label.width
     );
+}
+
+/// A select whose options lead with a marker, except Cherry.
+fn with_leading(selected: Option<&'static str>) -> Element<'static, Message> {
+    select(FRUITS, selected)
+        .placeholder("Pick a fruit")
+        .leading(|fruit| (*fruit != "Cherry").then(|| text(format!("dot-{fruit}")).into()))
+        .on_select(Message::Fruit)
+        .into()
+}
+
+#[test]
+fn the_field_draws_the_selected_options_leading_element_before_its_label() {
+    let mut ui = simulator(with_leading(Some("Apple")));
+    let dot = ui.find("dot-Apple").expect("leading is drawn").bounds();
+    let label = ui.find("Apple").expect("label is drawn").bounds();
+    assert!(dot.x + dot.width <= label.x, "leading comes first");
+    assert!(dot.y < HEIGHT && label.y < HEIGHT, "both sit in the field");
+
+    let mut ui = simulator(with_leading(None));
+    assert!(ui.find("Pick a fruit").is_ok());
+    assert!(ui.find("dot-Apple").is_err(), "the placeholder has none");
+
+    let mut ui = simulator(with_leading(Some("Cherry")));
+    let label = ui.find("Cherry").expect("label is drawn").bounds();
+    assert!(
+        label.x < 16.0,
+        "an option without one starts at the padding"
+    );
+}
+
+#[test]
+fn each_open_option_draws_its_leading_element_and_choosing_still_works() {
+    let mut ui = simulator(with_leading(Some("Apple")));
+    open(&mut ui);
+    let banana_dot = ui.find("dot-Banana").expect("leading in list").bounds();
+    let banana = ui.find("Banana").expect("label in list").bounds();
+    assert!(banana_dot.y > HEIGHT, "drawn in the list");
+    assert!(banana_dot.x + banana_dot.width <= banana.x);
+    assert!((banana_dot.y - banana.y).abs() < 4.0, "on the same row");
+    assert!(ui.find("dot-Cherry").is_err());
+
+    let status = ui.tap_key(Named::ArrowDown);
+    assert_eq!(status, iced::event::Status::Captured);
+    ui.click("Banana").expect("option is rendered");
+    assert!(ui.find("dot-Banana").is_err(), "the list closes");
+    let messages: Vec<_> = ui.into_messages().collect();
+    assert_eq!(messages, vec![Message::Fruit("Banana")]);
 }
 
 #[test]

@@ -30,6 +30,11 @@ api:
     description: "The pressed state a click would send. Pass it to your on_toggle message."
   - name: "colours(tokens, pressed, status) / style(tokens, variant, pressed, status)"
     description: "The resolved colours and iced style, for reuse in custom widgets."
+keyboard:
+  - keys: "Tab, Shift + Tab"
+    action: "Moves keyboard focus to or from the toggle inside a dialog, or wherever the app runs iced's focus_next and focus_previous."
+  - keys: "Space, Enter"
+    action: "Flips the focused toggle."
 ---
 
 A toggle is a button with an on state, for options that sit among other controls rather than in a form: showing a grid, pinning a panel, bold text. The app holds the bool, passes it to `.pressed`, and flips it in the `on_toggle` message, as with a switch.
