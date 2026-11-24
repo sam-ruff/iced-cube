@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/iced-cube", "crates/iced-cube-rules", "crates/gallery"]
+members = ["crates/iced-cube", "crates/gallery"]
 
 [workspace.package]
 edition = "2024"

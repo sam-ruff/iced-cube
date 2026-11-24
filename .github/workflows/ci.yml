@@ -51,7 +51,7 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
       - name: Package
-        run: cargo package --locked -p iced-cube-rules -p iced-cube
+        run: cargo package --locked -p iced-cube
       - name: Release script tests
         run: node --test scripts/set-version.test.mjs
 

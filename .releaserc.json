@@ -20,13 +20,13 @@
       "@semantic-release/exec",
       {
         "prepareCmd": "node scripts/set-version.mjs ${nextRelease.version}",
-        "publishCmd": "cargo publish --locked -p iced-cube-rules -p iced-cube --allow-dirty"
+        "publishCmd": "cargo publish --locked -p iced-cube --allow-dirty"
       }
     ],
     [
       "@semantic-release/git",
       {
-        "assets": ["CHANGELOG.md", "crates/iced-cube/Cargo.toml", "crates/iced-cube-rules/Cargo.toml", "Cargo.lock"],
+        "assets": ["CHANGELOG.md", "crates/iced-cube/Cargo.toml", "Cargo.lock"],
         "message": "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}"
       }
     ],

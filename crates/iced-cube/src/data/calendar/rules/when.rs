@@ -75,7 +75,7 @@ pub fn midnight(date: Date, time_zone: &TimeZone) -> Timestamp {
 /// takes the first.
 ///
 /// ```
-/// use iced_cube_rules::instant;
+/// use iced_cube::data::calendar::instant;
 /// use jiff::civil::{date, time};
 /// use jiff::tz::TimeZone;
 ///

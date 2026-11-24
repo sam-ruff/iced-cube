@@ -1,15 +1,15 @@
 //! Repeating entries: how often, and expanding them into occurrences.
 //!
-//! The rules live in the `iced-cube-rules` crate, which has no GUI
-//! dependency, so tools outside the window can expand entries the same
-//! way. This module applies them to an [`Entry`].
+//! The rules live in [`rules`], which has no GUI
+//! dependency. This module applies them to an [`Entry`].
 
 use jiff::Timestamp;
 use jiff::tz::TimeZone;
 
-pub use iced_cube_rules::{Ends, Frequency, Instance, MAX_OCCURRENCES, Repeat};
+pub use super::rules::{Ends, Frequency, Instance, MAX_OCCURRENCES, Repeat};
 
 use super::entry::{Entry, Occurrence};
+use super::rules;
 
 fn occurrence(entry: &Entry, instance: Instance) -> Occurrence {
     Occurrence {
@@ -24,7 +24,7 @@ fn occurrence(entry: &Entry, instance: Instance) -> Occurrence {
 /// Occurrence `index` of `entry`, or `None` once the entry has stopped
 /// repeating or the date is out of range.
 pub fn nth(entry: &Entry, time_zone: &TimeZone, index: u32) -> Option<Occurrence> {
-    iced_cube_rules::nth(entry.when(), entry.repeat_of(), time_zone, index)
+    rules::nth(entry.when(), entry.repeat_of(), time_zone, index)
         .map(|instance| occurrence(entry, instance))
 }
 
@@ -36,7 +36,7 @@ pub fn occurrences(
     from: Timestamp,
     to: Timestamp,
 ) -> Vec<Occurrence> {
-    iced_cube_rules::occurrences(entry.when(), entry.repeat_of(), time_zone, from, to)
+    rules::occurrences(entry.when(), entry.repeat_of(), time_zone, from, to)
         .into_iter()
         .map(|instance| occurrence(entry, instance))
         .collect()

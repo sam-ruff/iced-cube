@@ -1118,7 +1118,6 @@ version = "0.0.15"
 dependencies = [
  "futures",
  "iced",
- "iced-cube-rules",
  "iced_test",
  "jiff",
  "lucide-static-svg",
@@ -1126,13 +1125,6 @@ dependencies = [
  "png 0.18.1",
  "serde_json",
  "unicode-segmentation",
-]
-
-[[package]]
-name = "iced-cube-rules"
-version = "0.0.15"
-dependencies = [
- "jiff",
 ]
 
 [[package]]

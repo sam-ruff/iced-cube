@@ -178,12 +178,10 @@ calendar = [
     "tooltip",
     "checkbox",
     "dep:jiff",
-    "dep:iced-cube-rules",
 ]
 
 [dependencies]
 iced = { version = "0.14.0", default-features = false, features = ["svg", "advanced"] }
-iced-cube-rules = { version = "0.0.15", path = "../iced-cube-rules", optional = true }
 jiff = { version = "1.0.1", features = ["js"], optional = true }
 lucide-static-svg = "=1.48.0"
 num-traits = { version = "0.2.19", optional = true }

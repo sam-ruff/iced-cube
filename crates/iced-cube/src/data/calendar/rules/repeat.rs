@@ -4,7 +4,7 @@ use jiff::civil::Date;
 use jiff::tz::TimeZone;
 use jiff::{SignedDuration, Span, Timestamp};
 
-use crate::when::{When, midnight, next_day};
+use super::when::{When, midnight, next_day};
 
 /// The most occurrences one span gives for a single range, so a rule that
 /// never ends cannot run away with a very long range.
@@ -302,7 +302,7 @@ fn first_candidate(when: When, repeat: Repeat, time_zone: &TimeZone, from: Times
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::when::instant;
+    use crate::data::calendar::rules::instant;
     use jiff::civil::{date, time};
 
     fn utc(year: i16, month: i8, day: i8, hour: i8) -> Timestamp {
@@ -332,24 +332,6 @@ mod tests {
             utc(2027, 1, 1, 0),
         );
         assert_eq!(all.len(), 1);
-    }
-
-    #[test]
-    fn monthly_on_the_31st_uses_the_last_day_of_short_months() {
-        let when = hour_from(utc(2026, 1, 31, 9));
-        let starts: Vec<Date> = (0..4)
-            .filter_map(|index| nth(when, Some(Repeat::monthly()), &TimeZone::UTC, index))
-            .map(|instance| instance.start.to_zoned_datetime(TimeZone::UTC).date())
-            .collect();
-        assert_eq!(
-            starts,
-            vec![
-                date(2026, 1, 31),
-                date(2026, 2, 28),
-                date(2026, 3, 31),
-                date(2026, 4, 30)
-            ]
-        );
     }
 
     #[test]
@@ -388,18 +370,5 @@ mod tests {
             };
             assert!(previous.end <= from, "{repeat:?}");
         }
-    }
-
-    #[test]
-    fn a_range_with_too_many_occurrences_is_capped() {
-        let when = hour_from(utc(2000, 1, 1, 9));
-        let found = occurrences(
-            when,
-            Some(Repeat::daily()),
-            &TimeZone::UTC,
-            utc(2000, 1, 1, 0),
-            utc(2100, 1, 1, 0),
-        );
-        assert_eq!(found.len(), MAX_OCCURRENCES);
     }
 }

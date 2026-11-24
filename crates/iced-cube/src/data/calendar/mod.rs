@@ -97,6 +97,7 @@ pub mod layout;
 mod month;
 mod parts;
 pub mod repeat;
+pub mod rules;
 pub mod schedule;
 mod state;
 pub mod style;

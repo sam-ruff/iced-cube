@@ -1,13 +1,12 @@
-//! The date rules behind the iced-cube calendar, with no GUI dependency:
-//! when something happens ([`When`]), how it repeats ([`Repeat`]), and
-//! the occurrences of a repeating span in a range of time
-//! ([`occurrences`]).
+//! The calendar's date rules, with no GUI dependency: when something
+//! happens ([`When`]), how it repeats ([`Repeat`]), and the occurrences of
+//! a repeating span in a range of time ([`occurrences`]).
 //!
-//! The calendar re-exports all of this, so a window, a command line tool
-//! and a server can share one set of rules.
+//! Nothing here uses iced, only `jiff`, so the module can be split into a
+//! crate of its own for tools that list occurrences without a window.
 //!
 //! ```
-//! use iced_cube_rules::{Repeat, When, instant, occurrences};
+//! use iced_cube::data::calendar::rules::{Repeat, When, instant, occurrences};
 //! use jiff::civil::{date, time};
 //! use jiff::tz::TimeZone;
 //!
@@ -25,7 +24,5 @@
 mod repeat;
 mod when;
 
-/// The date and time library the rules are written in.
-pub use jiff;
 pub use repeat::{Ends, Frequency, Instance, MAX_OCCURRENCES, Repeat, nth, occurrences};
 pub use when::{When, add_days, date_of, instant, midnight, next_day};

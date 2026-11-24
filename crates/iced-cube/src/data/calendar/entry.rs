@@ -33,7 +33,7 @@ impl Tone {
     ];
 }
 
-pub use iced_cube_rules::{When, add_days, date_of, instant, midnight, next_day};
+pub use super::rules::{When, add_days, date_of, instant, midnight, next_day};
 
 /// How strongly an entry is drawn, to show its status at a glance.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]

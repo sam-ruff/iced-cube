@@ -85,8 +85,8 @@ api:
     description: "What an app needs to draw the form itself: the notes buffer, the month the open date picker shows, and the number fields as typed."
   - name: "editor::month_grid(month, week_start, chosen, on_pick)"
     description: "The month of days the form's date picker draws, for a picker of the app's own."
-  - name: "iced-cube-rules"
-    description: "When, Repeat and occurrence expansion in a crate with no GUI dependency, re-exported here, so a command line tool or a server uses the same rules."
+  - name: "calendar::rules::occurrences(when, repeat, &time_zone, from, to)"
+    description: "When, Repeat and occurrence expansion in a module that uses no iced types, so the same rules can expand spans outside the calendar's entries."
   - name: "Scheduler::new().with(trigger)"
     description: "Collects triggers. Chain .resume_from(watermark) to receive what was missed since a saved time, and .grace(duration) to change what counts as late."
   - name: "Trigger::new(key).at(anchor) / .before(anchor, lead) / .after(anchor, delay) / .on(change)"
@@ -185,7 +185,7 @@ A calendar with no `.on_event` at all is a picture: it shows the entries and res
 
 A repeating entry is one entry with a rule. Occurrences are counted from the first, so an entry on the 31st that repeats monthly uses the last day of shorter months and returns to the 31st afterwards, and a timed entry keeps its local time when the clocks change. Dragging one occurrence moves the whole series by the same amount. Rules are simple: there is no "last Friday of the month" and no way to skip or move a single occurrence.
 
-The rules live in the `iced-cube-rules` crate, which depends only on `jiff`. The calendar re-exports it, and a command line tool or a server can depend on it alone to list the same occurrences the window shows.
+The rules live in `calendar::rules`, which uses only `jiff` and works on a `When` and a `Repeat` rather than an entry, so other code in the app can list the same occurrences the window shows.
 
 ## Triggers
 
