@@ -1,3 +1,9 @@
+## [0.0.17](https://github.com/sam-ruff/iced-cube/compare/v0.0.16...v0.0.17) (2026-11-27)
+
+### Features
+
+* **select:** scroll long lists, with optional search, custom values and type-ahead ([#13](https://github.com/sam-ruff/iced-cube/issues/13)) ([d86e93f](https://github.com/sam-ruff/iced-cube/commit/d86e93f4d04406e4213bca47eb1b87a13701ce85)), closes [#12](https://github.com/sam-ruff/iced-cube/issues/12)
+
 ## [0.0.16](https://github.com/sam-ruff/iced-cube/compare/v0.0.15...v0.0.16) (2026-11-24)
 
 ### Features
