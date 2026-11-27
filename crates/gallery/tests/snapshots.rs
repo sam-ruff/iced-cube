@@ -80,55 +80,197 @@ fn differs(expected: &Image, actual: &Image) -> bool {
     changed as f64 > pixels as f64 * CHANGED_SHARE
 }
 
-/// Renders a story and returns the path of the written PNG.
-fn render(meta: &Meta, choice: ThemeChoice, out: &Path) -> PathBuf {
-    let gallery = Gallery::new(Mode::Single, Some(meta.id), choice);
+type Ui<'a> = Simulator<'a, gallery::Message>;
+
+fn simulate<'a>(gallery: &'a Gallery, meta: &Meta) -> Ui<'a> {
     let settings = iced::Settings {
         default_font: FONT,
         fonts: FONT_FILES.iter().map(|font| (*font).into()).collect(),
         ..iced::Settings::default()
     };
-    let mut ui = Simulator::with_size(settings, snapshot_size(meta), gallery.view());
+    Simulator::with_size(settings, snapshot_size(meta), gallery.view())
+}
+
+/// Snapshots what `ui` shows and returns the path of the written PNG.
+fn capture(ui: &mut Ui<'_>, gallery: &Gallery, stem: &str, out: &Path) -> PathBuf {
     let snapshot = ui
         .snapshot(&gallery.theme())
-        .unwrap_or_else(|error| panic!("{}: {error}", meta.id));
-
+        .unwrap_or_else(|error| panic!("{stem}: {error}"));
     // iced appends the renderer name, so the file lands at `<stem>-tiny-skia.png`.
-    let stem = file_stem(meta.id, choice);
     let written = out.join(format!("{stem}-tiny-skia.png"));
     let _ = fs::remove_file(&written);
     snapshot
         .matches_image(out.join(format!("{stem}.png")))
-        .unwrap_or_else(|error| panic!("{}: {error}", meta.id));
+        .unwrap_or_else(|error| panic!("{stem}: {error}"));
     written
+}
+
+/// Renders a story and returns the path of the written PNG.
+fn render(meta: &Meta, choice: ThemeChoice, out: &Path) -> PathBuf {
+    let gallery = Gallery::new(Mode::Single, Some(meta.id), choice);
+    let mut ui = simulate(&gallery, meta);
+    capture(&mut ui, &gallery, &file_stem(meta.id, choice), out)
+}
+
+struct Folders {
+    committed: PathBuf,
+    rendered: PathBuf,
+    failed: PathBuf,
+}
+
+impl Folders {
+    fn new() -> Self {
+        iced_cube::theme::set_font(FONT);
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let folders = Self {
+            committed: root.join("snapshots"),
+            rendered: root.join("../../target/snapshots-rendered"),
+            failed: root.join("../../target/snapshots-failed"),
+        };
+        fs::create_dir_all(&folders.rendered).unwrap_or_else(|error| panic!("{error}"));
+        folders
+    }
+
+    /// Compares a render with its committed PNG, writing the PNG when
+    /// there is none yet. Returns whether they differ.
+    fn differs(&self, actual_path: &Path) -> bool {
+        let Some(name) = actual_path.file_name() else {
+            return false;
+        };
+        let expected_path = self.committed.join(name);
+        if !expected_path.exists() {
+            fs::copy(actual_path, &expected_path).unwrap_or_else(|error| panic!("{error}"));
+            return false;
+        }
+        if !differs(&read_png(&expected_path), &read_png(actual_path)) {
+            return false;
+        }
+        fs::create_dir_all(&self.failed).unwrap_or_else(|error| panic!("{error}"));
+        let _ = fs::copy(actual_path, self.failed.join(name));
+        true
+    }
 }
 
 #[test]
 fn every_story_matches_its_snapshot() {
-    iced_cube::theme::set_font(FONT);
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let committed = root.join("snapshots");
-    let rendered = root.join("../../target/snapshots-rendered");
-    let failed = root.join("../../target/snapshots-failed");
-    fs::create_dir_all(&rendered).unwrap_or_else(|error| panic!("{error}"));
+    let folders = Folders::new();
     let mut mismatches = Vec::new();
 
     for meta in ALL {
         for choice in [ThemeChoice::Light, ThemeChoice::Dark] {
-            let actual_path = render(meta, choice, &rendered);
-            let Some(name) = actual_path.file_name() else {
-                continue;
-            };
-            let expected_path = committed.join(name);
-
-            if !expected_path.exists() {
-                fs::copy(&actual_path, &expected_path).unwrap_or_else(|error| panic!("{error}"));
-                continue;
-            }
-            if differs(&read_png(&expected_path), &read_png(&actual_path)) {
-                fs::create_dir_all(&failed).unwrap_or_else(|error| panic!("{error}"));
-                let _ = fs::copy(&actual_path, failed.join(name));
+            let actual_path = render(meta, choice, &folders.rendered);
+            if folders.differs(&actual_path) {
                 mismatches.push(format!("{} ({choice:?})", meta.id));
+            }
+        }
+    }
+
+    assert!(
+        mismatches.is_empty(),
+        "snapshots changed: {mismatches:?}; see target/snapshots-failed/"
+    );
+}
+
+/// A story caught after some input, such as an open select.
+struct Scene {
+    story: &'static str,
+    name: &'static str,
+    actions: fn(&mut Ui<'_>),
+    /// Hands what the actions sent to the story before the snapshot.
+    apply: bool,
+}
+
+fn open_select(ui: &mut Ui<'_>, showing: &str) {
+    if let Err(error) = ui.click(showing) {
+        panic!("{showing} cannot be clicked: {error:?}");
+    }
+}
+
+const SCENES: &[Scene] = &[
+    Scene {
+        story: "select/long-list",
+        name: "open",
+        actions: |ui| open_select(ui, "14:00"),
+        apply: false,
+    },
+    Scene {
+        story: "select/near-bottom",
+        name: "open",
+        actions: |ui| open_select(ui, "Norway"),
+        apply: false,
+    },
+    Scene {
+        story: "select/searchable",
+        name: "filtered",
+        actions: |ui| {
+            open_select(ui, "Select a timezone");
+            let _ = ui.typewrite("cet");
+        },
+        apply: false,
+    },
+    Scene {
+        story: "select/custom-value",
+        name: "typed",
+        actions: |ui| {
+            open_select(ui, "09:00");
+            let _ = ui.typewrite("9:40");
+        },
+        apply: false,
+    },
+    Scene {
+        story: "select/custom-value",
+        name: "accepted",
+        actions: |ui| {
+            open_select(ui, "09:00");
+            let _ = ui.typewrite("9:40");
+            let _ = ui.tap_key(iced::keyboard::key::Named::Enter);
+        },
+        apply: true,
+    },
+    Scene {
+        story: "select/custom-value",
+        name: "rejected",
+        actions: |ui| {
+            open_select(ui, "09:00");
+            let _ = ui.typewrite("25:00");
+            let _ = ui.tap_key(iced::keyboard::key::Named::Enter);
+        },
+        apply: false,
+    },
+];
+
+#[test]
+fn stories_after_input_match_their_snapshots() {
+    let folders = Folders::new();
+    let mut mismatches = Vec::new();
+
+    for scene in SCENES {
+        let Some(meta) = ALL.iter().find(|meta| meta.id == scene.story) else {
+            panic!("{} is not a story", scene.story);
+        };
+        for choice in [ThemeChoice::Light, ThemeChoice::Dark] {
+            let mut gallery = Gallery::new(Mode::Single, Some(meta.id), choice);
+            let stem = file_stem(&format!("{}-{}", meta.id, scene.name), choice);
+            let messages: Vec<gallery::Message> = {
+                let mut ui = simulate(&gallery, meta);
+                (scene.actions)(&mut ui);
+                if !scene.apply {
+                    let actual_path = capture(&mut ui, &gallery, &stem, &folders.rendered);
+                    if folders.differs(&actual_path) {
+                        mismatches.push(format!("{stem} ({choice:?})"));
+                    }
+                    continue;
+                }
+                ui.into_messages().collect()
+            };
+            assert!(!messages.is_empty(), "{stem}: the input sent nothing");
+            for message in messages {
+                let _ = gallery.update(message);
+            }
+            let mut ui = simulate(&gallery, meta);
+            let actual_path = capture(&mut ui, &gallery, &stem, &folders.rendered);
+            if folders.differs(&actual_path) {
+                mismatches.push(format!("{stem} ({choice:?})"));
             }
         }
     }

@@ -310,6 +310,26 @@ crate::stories! {
         description: "Options lead with a swatch whose colour comes from the theme, in the field and in the list.",
         file: "select/swatches.rs",
     }
+    SelectLongList => select::long_list {
+        id: "select/long-list", component: "select", title: "Long lists",
+        description: "96 times of day. The list shows eight rows, scrolls, and opens around the selected time.",
+        file: "select/long_list.rs", height: 360,
+    }
+    SelectNearBottom => select::near_bottom {
+        id: "select/near-bottom", component: "select", title: "Near the bottom",
+        description: "With no room below the field, the list opens above it and stays inside the window.",
+        file: "select/near_bottom.rs", height: 360,
+    }
+    SelectSearchable => select::searchable {
+        id: "select/searchable", component: "select", title: "Searchable",
+        description: "Typing in the open list filters the options.",
+        file: "select/searchable.rs", height: 360,
+    }
+    SelectCustomValue => select::custom_value {
+        id: "select/custom-value", component: "select", title: "Custom values",
+        description: "Type a time that is not in the list and press Enter. The app decides whether it is valid.",
+        file: "select/custom_value.rs", height: 360,
+    }
     ComboboxDefault => combobox::default {
         id: "combobox/default", component: "combobox", title: "Default",
         description: "Suggestions filter as you type. The list starts open here so you can see it.",

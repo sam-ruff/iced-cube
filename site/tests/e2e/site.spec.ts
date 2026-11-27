@@ -160,14 +160,19 @@ test("component keyboard table comes from the Rust keymap and links to the guide
   await noHorizontalScroll(page);
 });
 
+// A live preview whose rows wrap on a phone may grow its frame, whenever it
+// boots, so the frame is never shorter than the story's height.
 test("preview frames use each story's height", async ({ page }) => {
-  await page.goto("docs/components/button/");
-  const short = page.locator('[data-story="button/variants"]').first();
-  await expect(short).toHaveCSS("height", "160px");
-
-  await page.goto("docs/components/toast/");
-  const tall = page.locator('[data-story="toast/variants"]').first();
-  await expect(tall).toHaveCSS("height", "340px");
+  for (const [slug, id, height] of [
+    ["button", "button/variants", 160],
+    ["toast", "toast/variants", 340],
+  ] as const) {
+    await page.goto(`docs/components/${slug}/`);
+    const frame = page.locator(`[data-story="${id}"]`).first();
+    await expect(frame).toHaveAttribute("data-height", String(height));
+    const shown = await frame.evaluate((element) => element.getBoundingClientRect().height);
+    expect(shown).toBeGreaterThanOrEqual(height);
+  }
 });
 
 test("long inline code in usage notes wraps instead of widening the page", async ({ page }) => {
@@ -200,6 +205,9 @@ test("long lists take the wheel and touch inside their previews", async ({ page 
   await expect(page.locator('[data-story="document-tabs/overflow"]').first()).toHaveAttribute("data-wheel", "true");
   await page.goto("docs/components/tappable/");
   await expect(page.locator('[data-story="tappable/list"]').first()).toHaveAttribute("data-wheel", "true");
+  await page.goto("docs/components/select/");
+  await expect(page.locator('[data-story="select/long-list"]').first()).toHaveAttribute("data-wheel", "true");
+  await expect(page.locator('[data-story="select/default"]').first()).not.toHaveAttribute("data-wheel");
   await page.goto("docs/components/button/");
   await expect(page.locator('[data-story="button/variants"]').first()).not.toHaveAttribute("data-wheel");
 });

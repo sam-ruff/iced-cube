@@ -128,6 +128,44 @@ fn a_time_is_chosen_from_its_menu_and_the_end_follows_the_start() {
 }
 
 #[test]
+fn a_time_off_the_quarter_hours_is_typed_into_its_menu() {
+    let mut state = form();
+    let messages = drive(&mut state, DIALOG, |ui| {
+        let _ = ui.click("11:00");
+        let _ = ui.typewrite("9:40");
+        let _ = ui.tap_key(iced::keyboard::key::Named::Enter);
+    });
+    assert_eq!(
+        messages,
+        vec![Message::Form(Event::Time(Field::Start, 9 * 60 + 40))]
+    );
+    let mut ui = Simulator::with_size(Settings::default(), DIALOG, view(&state));
+    assert!(shows(&mut ui, "09:40"), "the field shows the typed time");
+}
+
+#[test]
+fn a_time_that_cannot_be_read_is_not_sent() {
+    let mut state = form();
+    let messages = drive(&mut state, DIALOG, |ui| {
+        let _ = ui.click("11:00");
+        let _ = ui.typewrite("25:00");
+        let _ = ui.tap_key(iced::keyboard::key::Named::Enter);
+    });
+    assert!(messages.is_empty());
+    assert_eq!(state.time(Field::Start), 11 * 60);
+}
+
+#[test]
+fn typing_filters_a_time_menu() {
+    let state = form();
+    let mut ui = Simulator::with_size(Settings::default(), DIALOG, view(&state));
+    let _ = ui.click("11:00");
+    let _ = ui.typewrite("14:4");
+    assert!(shows(&mut ui, "14:45"));
+    assert!(!shows(&mut ui, "11:15"), "other times are filtered out");
+}
+
+#[test]
 fn a_date_is_picked_from_a_month_that_can_be_turned() {
     let mut state = form();
     let messages = drive(&mut state, DIALOG, |ui| {

@@ -121,6 +121,25 @@ impl TimeOfDay {
         times.rotate_left(split);
         times
     }
+
+    /// Reads a time typed as "9:40", "09:40", "940" or "0940". `None`
+    /// for anything else or a time outside the day.
+    pub fn parse(text: &str) -> Option<TimeOfDay> {
+        let text = text.trim();
+        if text.is_empty() || !text.chars().all(|c| c.is_ascii_digit() || c == ':') {
+            return None;
+        }
+        let (hours, minutes) = match text.split_once(':') {
+            Some(parts) => parts,
+            None if (3..=4).contains(&text.len()) => text.split_at(text.len() - 2),
+            None => return None,
+        };
+        if !(1..=2).contains(&hours.len()) || minutes.len() != 2 {
+            return None;
+        }
+        let (hours, minutes) = (hours.parse::<u16>().ok()?, minutes.parse::<u16>().ok()?);
+        (hours < 24 && minutes < 60).then_some(TimeOfDay(hours * 60 + minutes))
+    }
 }
 
 impl std::fmt::Display for TimeOfDay {
@@ -506,15 +525,19 @@ impl State {
         self.at(field).1
     }
 
-    /// The times a field's menu lists. The start's begins an hour before
-    /// the time chosen; the end's begins just after the start when both
-    /// are on the same day, since nothing earlier would be on that day.
+    /// The times a field's menu lists. The start's is the whole day in
+    /// order. The end's begins just after the start when both are on the
+    /// same day and carries on round midnight, so the times before the
+    /// start, which would end the entry the next day, come last. The menu
+    /// opens with the field's time in the middle, filters as you type and
+    /// takes a typed time off the [`TIME_STEP`] grid.
     pub fn times(&self, field: Field) -> Vec<TimeOfDay> {
-        let first = match field {
-            Field::End if self.end.0 == self.start.0 => self.start.1 + TIME_STEP,
-            _ => self.time(field).saturating_sub(60),
-        };
-        TimeOfDay::from(first % DAY_MINUTES)
+        match field {
+            Field::End if self.end.0 == self.start.0 => {
+                TimeOfDay::from((self.start.1 + TIME_STEP) % DAY_MINUTES)
+            }
+            _ => TimeOfDay::all(),
+        }
     }
 
     /// The start or end whose date picker is open.
@@ -1069,6 +1092,16 @@ fn moment<'a, Message: Clone + 'a>(
         controls = controls.push(
             select(state.times(field), Some(TimeOfDay(state.time(field))))
                 .width(TIME_WIDTH)
+                .searchable(true)
+                .search_placeholder("hh:mm")
+                .on_custom({
+                    let handler = handler.clone();
+                    move |text| {
+                        let handler = handler.as_ref()?;
+                        let time = TimeOfDay::parse(&text)?;
+                        Some(handler(Event::Time(field, time.0)))
+                    }
+                })
                 .on_select_maybe(
                     handler
                         .map(|handler| move |time: TimeOfDay| handler(Event::Time(field, time.0))),
@@ -1562,6 +1595,20 @@ mod tests {
     }
 
     #[test]
+    fn typed_times_are_read_with_or_without_a_colon() {
+        assert_eq!(TimeOfDay::parse("09:40"), Some(TimeOfDay(580)));
+        assert_eq!(TimeOfDay::parse(" 9:40 "), Some(TimeOfDay(580)));
+        assert_eq!(TimeOfDay::parse("940"), Some(TimeOfDay(580)));
+        assert_eq!(TimeOfDay::parse("2359"), Some(TimeOfDay(1439)));
+        assert_eq!(TimeOfDay::parse("0:00"), Some(TimeOfDay(0)));
+        for bad in [
+            "", "9", "24:00", "12:60", "9:4", "123:00", "ab:cd", "€12", "12:3x", ":30",
+        ] {
+            assert_eq!(TimeOfDay::parse(bad), None, "{bad:?}");
+        }
+    }
+
+    #[test]
     fn times_and_colours_have_names() {
         assert_eq!(TimeOfDay(0).to_string(), "00:00");
         assert_eq!(TimeOfDay(570).to_string(), "09:30");
@@ -1577,16 +1624,15 @@ mod tests {
         assert_eq!(TimeOfDay::from(0), all);
         assert_eq!(TimeOfDay::from(9999).first(), Some(&TimeOfDay(1425)));
 
-        // The start's menu opens an hour early, the end's after the start.
+        // The start's menu lists the day in order; the end's begins after
+        // the start on the same day, and lists the day on another.
         let form = timed();
-        assert_eq!(form.times(Field::Start).first(), Some(&TimeOfDay(600)));
+        assert_eq!(form.times(Field::Start), all);
         assert_eq!(form.times(Field::End).first(), Some(&TimeOfDay(675)));
+        assert_eq!(form.times(Field::End).len(), 96);
         let mut overnight = timed();
         overnight.update(Event::Date(Field::End, date(2026, 6, 20)));
-        assert_eq!(
-            overnight.times(Field::End).first(),
-            Some(&TimeOfDay(750 - 60))
-        );
+        assert_eq!(overnight.times(Field::End), all);
         let names: Vec<_> = Tone::ALL
             .iter()
             .map(|tone| Colour(*tone).to_string())

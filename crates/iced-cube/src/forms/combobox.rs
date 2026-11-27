@@ -220,10 +220,7 @@ pub(crate) struct Suggestions<T> {
 impl<T: Display> Suggestions<T> {
     pub(crate) fn new(options: impl IntoIterator<Item = T>) -> Self {
         let options: Vec<T> = options.into_iter().collect();
-        let labels = options
-            .iter()
-            .map(|option| option.to_string().to_lowercase())
-            .collect();
+        let labels = crate::forms::matching::lowercase(&options);
         let matches = (0..options.len()).collect();
         Self {
             options,
@@ -330,14 +327,7 @@ impl<T> Suggestions<T> {
     }
 
     fn filter(&mut self) {
-        let query = self.query.trim().to_lowercase();
-        self.matches = self
-            .labels
-            .iter()
-            .enumerate()
-            .filter(|(_, label)| label.contains(&query))
-            .map(|(index, _)| index)
-            .collect();
+        self.matches = crate::forms::matching::filter(&self.labels, &self.query);
     }
 
     /// Opens the list with every option showing, highlighting `preferred`

@@ -6,20 +6,32 @@
 //! [menu look](crate::overlay::menu), with a check mark on the selected
 //! option. Escape or a click outside closes it.
 //!
+//! A long list shows [`MAX_VISIBLE_ROWS`] rows and scrolls, with a
+//! scrollbar, and is never taller than the room the window has. It opens
+//! with the selected option in the middle, and the highlight stays in view
+//! as the keys move it. A list that fits looks as it always has.
+//!
 //! An enabled select takes keyboard focus from iced's focus operations,
 //! such as a dialog's Tab order, and rings while focused. Space, Enter or
 //! ArrowDown then opens the list with the selected option highlighted.
-//! In the open list the arrow keys, Home and End move the highlight, and
-//! Space or Enter chooses it and closes the list.
+//! In the open list the arrow keys, Page Up, Page Down, Home and End move
+//! the highlight, Space or Enter chooses it and closes the list, and Tab
+//! closes it and moves on. Typing letters moves the highlight to the
+//! first option starting with them.
+//!
+//! [`searchable`](Select::searchable) adds a search field that filters the
+//! options as you type, and [`on_custom`](Select::on_custom) lets the user
+//! enter a value that is not in the list.
 
 use std::borrow::Cow;
 
-use iced::advanced::layout::{self, Layout};
+use iced::advanced::layout;
 use iced::advanced::widget::{Operation, Tree, Widget, tree};
-use iced::advanced::{Clipboard, Shell, overlay, renderer};
+use iced::advanced::{Clipboard, Layout, Shell, overlay, renderer};
 use iced::keyboard::{self, key::Named};
+use iced::time::Duration;
 use iced::widget::pick_list::{self, Status};
-use iced::widget::{self, Column, row};
+use iced::widget::{container, row};
 use iced::{
     Alignment, Background, Border, Color, Element, Event, Length, Rectangle, Renderer, Size, Theme,
     Vector, mouse, touch,
@@ -27,14 +39,37 @@ use iced::{
 
 use crate::data::ellipsis::ellipsis;
 use crate::focus;
+use crate::forms::matching;
 use crate::icon::{opacity, themed};
 use crate::keys::{self, Chord, Keymap};
 use crate::overlay::anchored::{self, Align, Behaviour, Placement, Side};
 use crate::overlay::menu::{self, Parts, ROW_PADDING, RowStatus, Trailing};
+pub use crate::primitives::input::{Shortcut, Shortcuts};
 use crate::theme::{Tokens, fade, mix, radius, space};
+
+mod list;
+mod navigate;
+
+use list::{List, Search};
 
 /// Height of the closed select in logical pixels.
 pub const HEIGHT: f32 = 36.0;
+
+/// Rows the open list shows before it scrolls, unless
+/// [`max_visible_rows`](Select::max_visible_rows) says otherwise.
+pub const MAX_VISIBLE_ROWS: usize = 8;
+
+/// How long a pause in typing starts a new type-ahead search.
+pub const TYPE_AHEAD_PAUSE: Duration = Duration::from_secs(1);
+
+/// Shown in the open list of a select with no options.
+pub const NO_OPTIONS: &str = "No options";
+
+/// Shown when the search matches no option.
+pub const DEFAULT_EMPTY: &str = "No results found.";
+
+/// Shown when the app turns a typed value down.
+pub const DEFAULT_NOT_VALID: &str = "Not valid";
 
 const CHEVRON_SIZE: f32 = 16.0;
 const LINE_HEIGHT: f32 = 20.0;
@@ -49,9 +84,19 @@ pub struct Select<'a, T: Clone, Message> {
     width: Length,
     on_select: Option<Box<dyn Fn(T) -> Message + 'a>>,
     leading: Option<Leading<'a, T, Message>>,
+    max_rows: usize,
+    scrollable: bool,
+    searchable: bool,
+    on_custom: Option<OnCustom<'a, Message>>,
+    search_placeholder: Option<String>,
+    shortcuts: Shortcuts,
+    empty: String,
+    not_valid: String,
+    type_ahead_pause: Duration,
 }
 
 type Leading<'a, T, Message> = Box<dyn Fn(&T) -> Option<Element<'a, Message>> + 'a>;
+type OnCustom<'a, Message> = Box<dyn Fn(String) -> Option<Message> + 'a>;
 
 impl<T: Clone + std::fmt::Debug, Message> std::fmt::Debug for Select<'_, T, Message> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -61,7 +106,12 @@ impl<T: Clone + std::fmt::Debug, Message> std::fmt::Debug for Select<'_, T, Mess
             .field("placeholder", &self.placeholder)
             .field("enabled", &self.on_select.is_some())
             .field("leading", &self.leading.is_some())
-            .finish()
+            .field("max_rows", &self.max_rows)
+            .field("scrollable", &self.scrollable)
+            .field("searchable", &self.searchable)
+            .field("shortcuts", &self.shortcuts)
+            .field("custom", &self.on_custom.is_some())
+            .finish_non_exhaustive()
     }
 }
 
@@ -81,6 +131,15 @@ where
         width: Length::Fixed(200.0),
         on_select: None,
         leading: None,
+        max_rows: MAX_VISIBLE_ROWS,
+        scrollable: true,
+        searchable: false,
+        on_custom: None,
+        search_placeholder: None,
+        shortcuts: Shortcuts::all(),
+        empty: DEFAULT_EMPTY.to_owned(),
+        not_valid: DEFAULT_NOT_VALID.to_owned(),
+        type_ahead_pause: TYPE_AHEAD_PAUSE,
     }
 }
 
@@ -118,6 +177,80 @@ impl<'a, T: Clone, Message> Select<'a, T, Message> {
         self
     }
 
+    /// The most rows the open list shows before it scrolls. Defaults to
+    /// [`MAX_VISIBLE_ROWS`]; at least one row always shows.
+    pub fn max_visible_rows(mut self, rows: usize) -> Self {
+        self.max_rows = rows.max(1);
+        self
+    }
+
+    /// Whether a long list scrolls. On by default. Turned off, the list is
+    /// as tall as its options, however many there are.
+    pub fn scrollable(mut self, scrollable: bool) -> Self {
+        self.scrollable = scrollable;
+        self
+    }
+
+    /// Adds a search field to the open list: typing filters the options by
+    /// their labels, ignoring case, and highlights the first match. The
+    /// query is cleared when the list closes. Off by default.
+    pub fn searchable(mut self, searchable: bool) -> Self {
+        self.searchable = searchable;
+        self
+    }
+
+    /// Lets the user type a value that is not in the list. Enter with text
+    /// that matches no option sends the text, trimmed, to `on_custom`,
+    /// which returns the message for a valid value or `None` to turn it
+    /// down. A value turned down stays in the search field, in red with
+    /// the [`not_valid`](Self::not_valid) text below, until it is edited.
+    ///
+    /// With [`searchable`](Self::searchable) on as well, Enter chooses the
+    /// highlighted match and only sends the text when nothing matches.
+    /// Without it, the list is not filtered and the text only chooses an
+    /// option whose whole label it is.
+    pub fn on_custom(mut self, on_custom: impl Fn(String) -> Option<Message> + 'a) -> Self {
+        self.on_custom = Some(Box::new(on_custom));
+        self
+    }
+
+    /// Text in the empty search field. Defaults to "Search", or "Type a
+    /// value" when the list only takes custom values.
+    pub fn search_placeholder(mut self, placeholder: impl Into<String>) -> Self {
+        self.search_placeholder = Some(placeholder.into());
+        self
+    }
+
+    /// The editing shortcuts of the search field. Defaults to
+    /// [`Shortcuts::all`]; Escape always closes the list instead of
+    /// leaving the field.
+    pub fn shortcuts(mut self, shortcuts: Shortcuts) -> Self {
+        self.shortcuts = shortcuts;
+        self
+    }
+
+    /// Shown in place of rows when the search matches nothing. Defaults
+    /// to [`DEFAULT_EMPTY`].
+    pub fn empty(mut self, empty: impl Into<String>) -> Self {
+        self.empty = empty.into();
+        self
+    }
+
+    /// Shown in place of rows when [`on_custom`](Self::on_custom) turns the
+    /// typed value down, such as the format expected. Defaults to
+    /// [`DEFAULT_NOT_VALID`].
+    pub fn not_valid(mut self, text: impl Into<String>) -> Self {
+        self.not_valid = text.into();
+        self
+    }
+
+    /// How long a pause in typing starts a new type-ahead search. Defaults
+    /// to [`TYPE_AHEAD_PAUSE`].
+    pub fn type_ahead_pause(mut self, pause: Duration) -> Self {
+        self.type_ahead_pause = pause;
+        self
+    }
+
     pub fn is_enabled(&self) -> bool {
         self.on_select.is_some()
     }
@@ -136,6 +269,15 @@ where
             width,
             on_select,
             leading,
+            max_rows,
+            scrollable,
+            searchable,
+            on_custom,
+            search_placeholder,
+            shortcuts,
+            empty,
+            not_valid,
+            type_ahead_pause,
         } = select;
         let enabled = on_select.is_some();
         let leading_of = |option: &T| leading.as_ref().and_then(|leading| leading(option));
@@ -168,15 +310,13 @@ where
             .width(width)
             .height(HEIGHT);
 
-        let rows = options.iter().map(|option| {
-            let is_selected = selected.as_ref() == Some(option);
-            option_row(
-                option,
-                leading_of(option),
-                is_selected,
-                on_select.as_deref(),
-            )
-        });
+        let rows = options
+            .iter()
+            .map(|option| {
+                let is_selected = selected.as_ref() == Some(option);
+                option_row(&option.to_string(), leading_of(option), is_selected)
+            })
+            .collect();
         let choices = options
             .iter()
             .map(|option| {
@@ -185,14 +325,32 @@ where
                     .map(|on_select| on_select(option.clone()))
             })
             .collect();
-        let rows = Rows {
-            column: Column::with_children(rows).width(Length::Fill).into(),
+        let search = (searchable || on_custom.is_some()).then(|| {
+            let placeholder = search_placeholder
+                .unwrap_or_else(|| if searchable { "Search" } else { "Type a value" }.to_owned());
+            Search {
+                filters: searchable,
+                on_custom,
+                placeholder,
+                shortcuts,
+            }
+        });
+        let max_rows = scrollable.then_some(max_rows);
+        let list = List {
+            rows,
+            labels: matching::lowercase(&options),
             choices,
             selected: selected
                 .as_ref()
                 .and_then(|value| options.iter().position(|option| option == value)),
+            max_rows,
+            search,
+            pause: type_ahead_pause,
+            empty: NO_OPTIONS.to_owned(),
+            no_results: empty,
+            not_valid,
         };
-        let list = menu::surface(Element::new(rows)).width(Length::Fill).into();
+        let list = menu::surface(Element::new(list)).width(Length::Fill).into();
 
         Element::new(Picker {
             field: field.into(),
@@ -201,6 +359,7 @@ where
             behaviour: Behaviour {
                 placement: Placement::new(Side::Bottom, Align::Start),
                 match_width: true,
+                fit_height: max_rows.is_some(),
                 closes_itself: true,
                 ..Behaviour::default()
             },
@@ -208,14 +367,13 @@ where
     }
 }
 
-/// One option in the open list, highlighted under the pointer.
-fn option_row<'a, T: ToString + Clone, Message: Clone + 'a>(
-    option: &T,
+/// One option in the open list. The list draws the highlight behind it
+/// and sets the text colour.
+fn option_row<'a, Message: 'a>(
+    label: &str,
     leading: Option<Element<'a, Message>>,
     selected: bool,
-    on_select: Option<&(dyn Fn(T) -> Message + 'a)>,
 ) -> Element<'a, Message> {
-    let label = option.to_string();
     let trailing = if selected {
         Trailing::Check
     } else {
@@ -223,7 +381,7 @@ fn option_row<'a, T: ToString + Clone, Message: Clone + 'a>(
     };
     let parts = Parts {
         trailing,
-        ..Parts::label(&label)
+        ..Parts::label(label)
     };
     let content = menu::content(parts, RowStatus::Idle, false);
     let content = match leading {
@@ -232,32 +390,7 @@ fn option_row<'a, T: ToString + Clone, Message: Clone + 'a>(
             .align_y(Alignment::Center),
         None => content,
     };
-    let row = widget::button(content)
-        .padding(ROW_PADDING)
-        .width(Length::Fill)
-        .on_press_maybe(on_select.map(|on_select| on_select(option.clone())))
-        .style(|theme, status| option_style(&Tokens::of(theme), status));
-    menu::inset(row)
-}
-
-/// An option row: the shared menu row, highlighted while hovered or pressed.
-pub fn option_style(tokens: &Tokens, status: widget::button::Status) -> widget::button::Style {
-    use widget::button::Status as Button;
-    let status = match status {
-        Button::Hovered | Button::Pressed => RowStatus::Highlighted,
-        Button::Active => RowStatus::Idle,
-        Button::Disabled => RowStatus::Disabled,
-    };
-    let row = menu::row_style(tokens, status, false);
-    widget::button::Style {
-        background: row.background.map(Background::Color),
-        text_color: row.text,
-        border: Border {
-            radius: radius::SM.into(),
-            ..Border::default()
-        },
-        ..widget::button::Style::default()
-    }
+    menu::inset(container(content).padding(ROW_PADDING).width(Length::Fill))
 }
 
 /// The select widget: draws the field and floats the list while open.
@@ -291,7 +424,9 @@ impl<Message> Picker<'_, Message> {
         if let Some(list) = tree.children.get_mut(1) {
             *list = Tree::new(&self.list);
         }
-        tree.state.downcast_mut::<PickerState>().panel.open = true;
+        let panel = &mut tree.state.downcast_mut::<PickerState>().panel;
+        panel.open = true;
+        panel.side = None;
     }
 }
 
@@ -402,9 +537,15 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for Picker<'_, Message> {
         // An open list keeps every key press its panel leaves, so keymaps
         // behind it do not act while it is open. The list sends the
         // highlighted option on Space or Enter and leaves the key here,
-        // where it closes the list.
-        if state.panel.open && matches!(event, Event::Keyboard(keyboard::Event::KeyPressed { .. }))
+        // where it closes the list. Tab closes it and goes on to move focus.
+        if let Event::Keyboard(keyboard::Event::KeyPressed { key, .. }) = event
+            && state.panel.open
         {
+            if *key == keyboard::Key::Named(Named::Tab) {
+                state.panel.open = false;
+                shell.request_redraw();
+                return;
+            }
             if focus::named_press(event).is_some_and(chooses) {
                 state.panel.open = false;
                 shell.request_redraw();
@@ -478,216 +619,6 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for Picker<'_, Message> {
             &self.behaviour,
             layout.bounds() + translation,
         ))
-    }
-}
-
-/// The option highlighted after `key` in a list of `count` options, from
-/// `current`. Arrows stop at the ends; Home and End jump to them.
-fn step(current: Option<usize>, count: usize, key: Named) -> Option<usize> {
-    let last = count.checked_sub(1)?;
-    match (key, current) {
-        (Named::ArrowDown, None) | (Named::Home, _) => Some(0),
-        (Named::ArrowUp, None) | (Named::End, _) => Some(last),
-        (Named::ArrowDown, Some(index)) => Some((index + 1).min(last)),
-        (Named::ArrowUp, Some(index)) => Some(index.saturating_sub(1).min(last)),
-        _ => current,
-    }
-}
-
-/// The open list's rows, with a highlight the arrow keys and the pointer
-/// move. Space or Enter sends the highlighted option's message; the
-/// [`Picker`] then closes the list.
-struct Rows<'a, Message> {
-    column: Element<'a, Message>,
-    choices: Vec<Option<Message>>,
-    selected: Option<usize>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct RowsState {
-    highlight: Option<usize>,
-}
-
-/// The bounds of each option button, inside the row's inset.
-fn row_bounds(layout: Layout<'_>) -> impl Iterator<Item = Rectangle> + '_ {
-    layout
-        .children()
-        .next()
-        .into_iter()
-        .flat_map(|column| column.children())
-        .map(|row| row.children().next().map_or(row.bounds(), |b| b.bounds()))
-}
-
-impl<Message: Clone> Widget<Message, Theme, Renderer> for Rows<'_, Message> {
-    fn tag(&self) -> tree::Tag {
-        tree::Tag::of::<RowsState>()
-    }
-
-    fn state(&self) -> tree::State {
-        tree::State::new(RowsState {
-            highlight: self.selected,
-        })
-    }
-
-    fn children(&self) -> Vec<Tree> {
-        vec![Tree::new(&self.column)]
-    }
-
-    fn diff(&self, tree: &mut Tree) {
-        tree.diff_children(std::slice::from_ref(&self.column));
-    }
-
-    fn size(&self) -> Size<Length> {
-        self.column.as_widget().size()
-    }
-
-    fn layout(
-        &mut self,
-        tree: &mut Tree,
-        renderer: &Renderer,
-        limits: &layout::Limits,
-    ) -> layout::Node {
-        let node = self
-            .column
-            .as_widget_mut()
-            .layout(&mut tree.children[0], renderer, limits);
-        layout::Node::with_children(node.size(), vec![node])
-    }
-
-    fn draw(
-        &self,
-        tree: &Tree,
-        renderer: &mut Renderer,
-        theme: &Theme,
-        style: &renderer::Style,
-        layout: Layout<'_>,
-        cursor: mouse::Cursor,
-        viewport: &Rectangle,
-    ) {
-        let state = tree.state.downcast_ref::<RowsState>();
-        let highlighted = state
-            .highlight
-            .and_then(|index| row_bounds(layout).nth(index));
-        let background =
-            menu::row_style(&Tokens::of(theme), RowStatus::Highlighted, false).background;
-        if let (Some(bounds), Some(colour)) = (highlighted, background) {
-            <Renderer as renderer::Renderer>::fill_quad(
-                renderer,
-                renderer::Quad {
-                    bounds,
-                    border: Border {
-                        radius: radius::SM.into(),
-                        ..Border::default()
-                    },
-                    ..renderer::Quad::default()
-                },
-                Background::Color(colour),
-            );
-        }
-        let Some(column) = layout.children().next() else {
-            return;
-        };
-        self.column.as_widget().draw(
-            &tree.children[0],
-            renderer,
-            theme,
-            style,
-            column,
-            cursor,
-            viewport,
-        );
-    }
-
-    fn operate(
-        &mut self,
-        tree: &mut Tree,
-        layout: Layout<'_>,
-        renderer: &Renderer,
-        operation: &mut dyn Operation,
-    ) {
-        let Some(column) = layout.children().next() else {
-            return;
-        };
-        self.column
-            .as_widget_mut()
-            .operate(&mut tree.children[0], column, renderer, operation);
-    }
-
-    fn update(
-        &mut self,
-        tree: &mut Tree,
-        event: &Event,
-        layout: Layout<'_>,
-        cursor: mouse::Cursor,
-        renderer: &Renderer,
-        clipboard: &mut dyn Clipboard,
-        shell: &mut Shell<'_, Message>,
-        viewport: &Rectangle,
-    ) {
-        let state = tree.state.downcast_mut::<RowsState>();
-        if let Event::Mouse(mouse::Event::CursorMoved { .. }) = event
-            && let Some(index) = row_bounds(layout).position(|bounds| cursor.is_over(bounds))
-            && state.highlight != Some(index)
-        {
-            state.highlight = Some(index);
-            shell.request_redraw();
-        }
-        if let Some(key) = focus::named_press(event) {
-            if chooses(key) {
-                let chosen = state
-                    .highlight
-                    .and_then(|index| self.choices.get(index).cloned().flatten());
-                if let Some(message) = chosen {
-                    shell.publish(message);
-                }
-                return;
-            }
-            let next = step(state.highlight, self.choices.len(), key);
-            if next != state.highlight {
-                state.highlight = next;
-                shell.request_redraw();
-            }
-            if matches!(
-                key,
-                Named::ArrowDown | Named::ArrowUp | Named::Home | Named::End
-            ) {
-                shell.capture_event();
-                return;
-            }
-        }
-        let Some(column) = layout.children().next() else {
-            return;
-        };
-        self.column.as_widget_mut().update(
-            &mut tree.children[0],
-            event,
-            column,
-            cursor,
-            renderer,
-            clipboard,
-            shell,
-            viewport,
-        );
-    }
-
-    fn mouse_interaction(
-        &self,
-        tree: &Tree,
-        layout: Layout<'_>,
-        cursor: mouse::Cursor,
-        viewport: &Rectangle,
-        renderer: &Renderer,
-    ) -> mouse::Interaction {
-        let Some(column) = layout.children().next() else {
-            return mouse::Interaction::default();
-        };
-        self.column.as_widget().mouse_interaction(
-            &tree.children[0],
-            column,
-            cursor,
-            viewport,
-            renderer,
-        )
     }
 }
 
@@ -940,25 +871,55 @@ mod tests {
     }
 
     #[test]
-    fn options_highlight_with_the_menu_row_style() {
-        use widget::button::Status as Button;
-        for theme in [light(), dark()] {
-            let tokens = Tokens::of(&theme);
-            let idle = option_style(&tokens, Button::Active);
-            assert_eq!(idle.background, None);
-            assert_eq!(idle.text_color, tokens.foreground);
-            for status in [Button::Hovered, Button::Pressed] {
-                let highlighted = option_style(&tokens, status);
-                assert_eq!(
-                    highlighted.background,
-                    Some(Background::Color(tokens.accent))
-                );
-                assert_eq!(highlighted.text_color, tokens.accent_foreground);
-                assert_eq!(highlighted.border.radius, radius::SM.into());
-            }
-            let disabled = option_style(&tokens, Button::Disabled);
-            assert_eq!(disabled.text_color, tokens.muted_foreground);
-        }
+    fn long_lists_scroll_by_default_and_search_and_custom_values_are_off() {
+        let s: Select<'_, &str, ()> = select(vec!["a", "b"], None);
+        assert_eq!(s.max_rows, MAX_VISIBLE_ROWS);
+        assert!(s.scrollable);
+        assert!(!s.searchable);
+        assert!(s.on_custom.is_none());
+        assert_eq!(s.shortcuts, Shortcuts::all());
+        assert_eq!(s.empty, DEFAULT_EMPTY);
+        assert_eq!(s.not_valid, DEFAULT_NOT_VALID);
+        assert_eq!(s.type_ahead_pause, TYPE_AHEAD_PAUSE);
+    }
+
+    #[test]
+    fn the_row_limit_and_scrolling_are_set_in_any_order() {
+        let s: Select<'_, &str, ()> = select(vec!["a"], None).max_visible_rows(0);
+        assert_eq!(s.max_rows, 1, "at least one row");
+        let s: Select<'_, &str, ()> = select(vec!["a"], None)
+            .scrollable(false)
+            .max_visible_rows(5);
+        assert!(!s.scrollable, "a row limit does not turn scrolling back on");
+        let s: Select<'_, &str, ()> = select(vec!["a"], None)
+            .max_visible_rows(5)
+            .scrollable(false)
+            .scrollable(true);
+        assert_eq!(s.max_rows, 5, "the limit is kept");
+        assert!(s.scrollable);
+    }
+
+    #[test]
+    fn search_and_custom_values_are_set_by_the_builder() {
+        let s: Select<'_, &str, String> = select(vec!["a"], None)
+            .searchable(true)
+            .on_custom(|text| (!text.is_empty()).then_some(text))
+            .search_placeholder("Find a time")
+            .empty("Nothing")
+            .not_valid("Use hh:mm")
+            .shortcuts(Shortcuts::none())
+            .type_ahead_pause(Duration::from_millis(500));
+        assert!(s.searchable);
+        assert_eq!(s.search_placeholder.as_deref(), Some("Find a time"));
+        assert_eq!(s.empty, "Nothing");
+        assert_eq!(s.not_valid, "Use hh:mm");
+        assert_eq!(s.shortcuts, Shortcuts::none());
+        assert_eq!(s.type_ahead_pause, Duration::from_millis(500));
+        let Some(on_custom) = s.on_custom.as_ref() else {
+            panic!("on_custom is set");
+        };
+        assert_eq!(on_custom("x".to_owned()), Some("x".to_owned()));
+        assert_eq!(on_custom(String::new()), None);
     }
 
     #[test]
@@ -970,19 +931,6 @@ mod tests {
         assert!(!opens_list(Named::Escape));
         assert!(chooses(Named::Space) && chooses(Named::Enter));
         assert!(!chooses(Named::ArrowDown));
-    }
-
-    #[test]
-    fn the_highlight_steps_and_stops_at_the_ends() {
-        assert_eq!(step(None, 3, Named::ArrowDown), Some(0));
-        assert_eq!(step(None, 3, Named::ArrowUp), Some(2));
-        assert_eq!(step(Some(0), 3, Named::ArrowDown), Some(1));
-        assert_eq!(step(Some(2), 3, Named::ArrowDown), Some(2));
-        assert_eq!(step(Some(0), 3, Named::ArrowUp), Some(0));
-        assert_eq!(step(Some(1), 3, Named::Home), Some(0));
-        assert_eq!(step(Some(1), 3, Named::End), Some(2));
-        assert_eq!(step(Some(1), 3, Named::Tab), Some(1));
-        assert_eq!(step(None, 0, Named::ArrowDown), None);
     }
 
     #[test]

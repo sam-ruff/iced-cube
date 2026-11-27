@@ -152,8 +152,29 @@ pub fn place(
     viewport: Rectangle,
     placement: Placement,
 ) -> Rectangle {
+    let side = choose_side(anchor, size, viewport.shrink(MARGIN), placement);
+    place_on(anchor, size, viewport, placement, side)
+}
+
+/// The side [`place`] would put a panel of `size` on.
+pub(crate) fn side_for(
+    anchor: Rectangle,
+    size: Size,
+    viewport: Rectangle,
+    placement: Placement,
+) -> Side {
+    choose_side(anchor, size, viewport.shrink(MARGIN), placement)
+}
+
+/// Positions a panel as [`place`] does, on a side already chosen.
+fn place_on(
+    anchor: Rectangle,
+    size: Size,
+    viewport: Rectangle,
+    placement: Placement,
+    side: Side,
+) -> Rectangle {
     let area = viewport.shrink(MARGIN);
-    let side = choose_side(anchor, size, area, placement);
     // The offset runs along the requested side, so it does not carry over
     // to a side across it.
     let offset = if side.is_vertical() == placement.side.is_vertical() {
@@ -392,6 +413,9 @@ pub(crate) struct State {
     unfocus: bool,
     /// Whether a panel that [closes itself](Behaviour::closes_itself) is open.
     pub(crate) open: bool,
+    /// The side such a panel opened on. It stays there while open, so a
+    /// list that shrinks as it is filtered does not jump across the anchor.
+    pub(crate) side: Option<Side>,
 }
 
 /// An anchor with a panel floating next to it. Convert it into an
@@ -886,7 +910,15 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, Renderer> for Floating<'_,
                 .as_widget_mut()
                 .layout(self.tree, renderer, &limits(height));
         }
-        let panel = place(self.target, node.size(), viewport, placement);
+        let size = node.size();
+        let side = match self.state.side {
+            Some(side) if self.behaviour.closes_itself => side,
+            _ => side_for(self.target, size, viewport, placement),
+        };
+        if self.behaviour.closes_itself {
+            self.state.side = Some(side);
+        }
+        let panel = place_on(self.target, size, viewport, placement, side);
         layout::Node::with_children(bounds, vec![node.move_to(panel.position())])
     }
 

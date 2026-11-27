@@ -251,7 +251,7 @@ impl<'a, Message> Input<'a, Message> {
 
 /// Builds an iced text input from `field` with `on_input` wired up and the
 /// editing shortcuts around it.
-#[cfg(any(feature = "combobox", feature = "command"))]
+#[cfg(any(feature = "combobox", feature = "command", feature = "select"))]
 pub(crate) fn with_shortcuts<'a, Message: Clone + 'a>(
     field: text_input::TextInput<'a, Message>,
     value: &str,

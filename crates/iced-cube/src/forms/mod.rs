@@ -5,6 +5,8 @@
 pub mod combobox;
 #[cfg(feature = "field")]
 pub mod label;
+#[cfg(any(feature = "combobox", feature = "select"))]
+pub(crate) mod matching;
 #[cfg(feature = "multi-combobox")]
 pub mod multi_combobox;
 #[cfg(feature = "rich-text-editor")]
