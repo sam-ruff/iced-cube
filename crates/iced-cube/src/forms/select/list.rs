@@ -18,7 +18,7 @@ use iced::alignment::Vertical;
 use iced::keyboard::{self, Key, Modifiers, key::Named};
 use iced::time::{Duration, Instant};
 use iced::widget::text::{LineHeight, Shaping, Wrapping};
-use iced::widget::text_input::{self, Status};
+use iced::widget::text_input;
 use iced::widget::{container, stack};
 use iced::{
     Alignment, Background, Border, Color, Element, Event, Length, Padding, Pixels, Point,
@@ -41,6 +41,8 @@ pub(super) const SEARCH_HEIGHT: f32 = ROW_HEIGHT + 1.0 + space::XS;
 const ROW_HEIGHT: f32 = 32.0;
 /// Height of the line shown in place of rows when none are shown.
 const MESSAGE_HEIGHT: f32 = 40.0;
+/// Height of the not-valid line above the rows.
+const NOTICE_HEIGHT: f32 = 28.0;
 /// Space between the scrollbar and the surface's edges.
 const BAR_MARGIN: f32 = 2.0;
 /// Width the rows give up to the scrollbar while the list scrolls.
@@ -59,6 +61,40 @@ pub(super) struct Search<'a, Message> {
     pub(super) on_custom: Option<Box<dyn Fn(String) -> Option<Message> + 'a>>,
     pub(super) placeholder: String,
     pub(super) shortcuts: Shortcuts,
+    /// The field is the closed control itself rather than a line in the
+    /// list, so the list draws no field of its own.
+    pub(super) on_anchor: bool,
+    /// Enter asks `on_custom` before taking the highlighted match.
+    pub(super) prefer_custom: bool,
+    /// Tab or a press outside enters the typed text as Enter would.
+    pub(super) commit_on_leave: bool,
+}
+
+/// The id of the open list of a select, reported to operations so tests
+/// can find it. Only one list is open at a time.
+pub fn list_id() -> Id {
+    Id::new("iced-cube-select-list")
+}
+
+/// The id of the search field in the open list of a select.
+pub fn search_id() -> Id {
+    Id::new("iced-cube-select-search")
+}
+
+/// The list's state in `tree` or anywhere below it.
+pub(super) fn state_mut(tree: &mut Tree) -> Option<&mut ListState> {
+    if tree.tag == tree::Tag::of::<ListState>() {
+        return Some(tree.state.downcast_mut::<ListState>());
+    }
+    tree.children.iter_mut().find_map(state_mut)
+}
+
+/// The list's state in `tree` or anywhere below it.
+pub(super) fn state_ref(tree: &Tree) -> Option<&ListState> {
+    if tree.tag == tree::Tag::of::<ListState>() {
+        return Some(tree.state.downcast_ref::<ListState>());
+    }
+    tree.children.iter().find_map(state_ref)
 }
 
 /// The rows of a select's open list.
@@ -82,6 +118,15 @@ pub(super) struct List<'a, Message> {
 #[derive(Debug, Default)]
 pub(super) struct ListState {
     query: String,
+    /// The query was typed since the list opened.
+    edited: bool,
+    /// The query changed outside the list and is filtered on the next
+    /// layout.
+    refilter: bool,
+    /// The keys moved the highlight since the query last changed.
+    steered: bool,
+    /// The closed control's bounds on screen.
+    anchor: Option<Rectangle>,
     /// The app turned down the typed value.
     rejected: bool,
     /// Indices of the options shown, in order.
@@ -126,6 +171,29 @@ struct Finger {
 }
 
 impl ListState {
+    /// Takes new text for the query. The list filters it on its next
+    /// layout.
+    pub(super) fn edit(&mut self, query: String) {
+        self.query = query;
+        self.edited = true;
+        self.rejected = false;
+        self.steered = false;
+        self.refilter = true;
+    }
+
+    /// The text typed since the list opened, if any was.
+    pub(super) fn edited_query(&self) -> Option<&str> {
+        self.edited.then_some(self.query.as_str())
+    }
+
+    pub(super) fn is_rejected(&self) -> bool {
+        self.rejected
+    }
+
+    pub(super) fn set_anchor(&mut self, anchor: Rectangle) {
+        self.anchor = Some(anchor);
+    }
+
     fn page_rows(&self) -> usize {
         (self.viewport / ROW_HEIGHT).floor().max(1.0) as usize
     }
@@ -181,6 +249,7 @@ fn field(
 ) -> Element<'static, String> {
     let vertical = (ROW_HEIGHT - menu::LINE_HEIGHT) / 2.0;
     let text = iced::widget::text_input(search_placeholder, query)
+        .id(search_id())
         .size(text_size::SM)
         .line_height(LineHeight::Absolute(Pixels(menu::LINE_HEIGHT)))
         .padding(Padding {
@@ -190,7 +259,7 @@ fn field(
             right: TEXT_X,
         })
         .width(Length::Fill)
-        .style(move |theme, status| field_style(&Tokens::of(theme), status, rejected));
+        .style(move |theme, _status| field_style(&Tokens::of(theme), rejected, true));
     // Escape closes the list, so the field never keeps it.
     let shortcuts = shortcuts.without(Shortcut::EscapeUnfocus);
     let input = input::with_shortcuts(
@@ -218,18 +287,26 @@ fn field(
 }
 
 /// The search field's look: no box of its own, red text once the app has
-/// turned the typed value down.
-pub(super) fn field_style(tokens: &Tokens, _status: Status, rejected: bool) -> text_input::Style {
+/// turned the typed value down, faded while disabled. The field is built
+/// afresh for every draw, so iced reports no status worth reading and
+/// `enabled` says whether it takes input.
+pub(super) fn field_style(tokens: &Tokens, rejected: bool, enabled: bool) -> text_input::Style {
+    let value = match (rejected, enabled) {
+        (true, _) => tokens.destructive_text,
+        (false, false) => fade(tokens.foreground, 0.5),
+        (false, true) => tokens.foreground,
+    };
+    let placeholder = if enabled {
+        tokens.muted_foreground
+    } else {
+        fade(tokens.muted_foreground, 0.5)
+    };
     text_input::Style {
         background: Background::Color(Color::TRANSPARENT),
         border: Border::default(),
         icon: tokens.muted_foreground,
-        placeholder: tokens.muted_foreground,
-        value: if rejected {
-            tokens.destructive_text
-        } else {
-            tokens.foreground
-        },
+        placeholder,
+        value,
         selection: fade(tokens.primary, 0.25),
     }
 }
@@ -251,7 +328,7 @@ impl Operation for FocusField {
 }
 
 /// Passes on everything a nested shell asked for except its messages.
-fn relay<Message, Inner>(shell: &mut Shell<'_, Message>, inner: &Shell<'_, Inner>) {
+pub(super) fn relay<Message, Inner>(shell: &mut Shell<'_, Message>, inner: &Shell<'_, Inner>) {
     if inner.is_event_captured() {
         shell.capture_event();
     }
@@ -263,6 +340,15 @@ fn relay<Message, Inner>(shell: &mut Shell<'_, Message>, inner: &Shell<'_, Inner
         shell.invalidate_widgets();
     }
     shell.input_method_mut().merge(inner.input_method());
+}
+
+/// Where a mouse or touch press landed, if the event is one.
+fn press_position(event: &Event, cursor: mouse::Cursor) -> Option<Point> {
+    match event {
+        Event::Mouse(mouse::Event::ButtonPressed(_)) => cursor.position(),
+        Event::Touch(touch::Event::FingerPressed { position, .. }) => Some(*position),
+        _ => None,
+    }
 }
 
 /// Whether an event goes on to the search field.
@@ -277,16 +363,37 @@ fn for_field(event: &Event, on_field: bool) -> bool {
 }
 
 impl<Message: Clone> List<'_, Message> {
+    /// Whether the list draws a search field of its own.
+    fn has_field(&self) -> bool {
+        self.search.as_ref().is_some_and(|search| !search.on_anchor)
+    }
+
+    fn field_on_anchor(&self) -> bool {
+        self.search.as_ref().is_some_and(|search| search.on_anchor)
+    }
+
     fn first_row(&self) -> usize {
-        usize::from(self.search.is_some())
+        usize::from(self.has_field())
     }
 
     fn search_height(&self) -> f32 {
-        if self.search.is_some() {
-            SEARCH_HEIGHT
+        if self.has_field() { SEARCH_HEIGHT } else { 0.0 }
+    }
+
+    /// Whether the not-valid line shows above the rows. With no rows it
+    /// shows in their place instead.
+    fn shows_notice(&self, state: &ListState) -> bool {
+        state.rejected && !state.shown.is_empty()
+    }
+
+    /// The top of the rows: below the search field and the not-valid line.
+    fn top(&self, state: &ListState) -> f32 {
+        let notice = if self.shows_notice(state) {
+            NOTICE_HEIGHT
         } else {
             0.0
-        }
+        };
+        self.search_height() + notice
     }
 
     fn filters(&self) -> bool {
@@ -299,6 +406,18 @@ impl<Message: Clone> List<'_, Message> {
             .is_some_and(|search| search.on_custom.is_some())
     }
 
+    fn prefers_custom(&self) -> bool {
+        self.search
+            .as_ref()
+            .is_some_and(|search| search.prefer_custom)
+    }
+
+    fn commits_on_leave(&self) -> bool {
+        self.search
+            .as_ref()
+            .is_some_and(|search| search.commit_on_leave)
+    }
+
     fn shown_for(&self, query: &str) -> Vec<usize> {
         if self.filters() {
             matching::filter(&self.labels, query)
@@ -309,7 +428,7 @@ impl<Message: Clone> List<'_, Message> {
 
     /// The search field for the current query.
     fn field(&self, state: &ListState) -> Option<Element<'static, String>> {
-        let search = self.search.as_ref()?;
+        let search = self.search.as_ref().filter(|search| !search.on_anchor)?;
         Some(field(
             &search.placeholder,
             &state.query,
@@ -330,16 +449,18 @@ impl<Message: Clone> List<'_, Message> {
         option.and_then(|option| self.choices.get(option).cloned().flatten())
     }
 
+    /// The message the app gives the typed value, trimmed, if it takes it.
+    fn custom_message(&self, state: &ListState) -> Option<Message> {
+        let on_custom = self.search.as_ref()?.on_custom.as_ref()?;
+        on_custom(state.query.trim().to_owned())
+    }
+
     /// The typed value, sent through the custom value handler.
     fn custom(&self, state: &mut ListState) -> Outcome<Message> {
-        let Some(on_custom) = self
-            .search
-            .as_ref()
-            .and_then(|search| search.on_custom.as_ref())
-        else {
+        if !self.offers_custom() {
             return Outcome::Used;
-        };
-        match on_custom(state.query.trim().to_owned()) {
+        }
+        match self.custom_message(state) {
             Some(message) => Outcome::Chosen(message),
             None => {
                 state.rejected = true;
@@ -349,35 +470,95 @@ impl<Message: Clone> List<'_, Message> {
     }
 
     /// Enter: the highlighted option, or the typed value when it matches
-    /// no option.
+    /// no option. With custom values preferred, a whole label is still
+    /// that option, then the app is asked, and only a value it turns down
+    /// falls back to the highlighted match. A highlight the keys moved
+    /// always wins.
     fn submit(&self, state: &mut ListState) -> Outcome<Message> {
         let typed = !state.query.trim().is_empty();
-        if typed && self.offers_custom() {
-            let option = if self.filters() {
-                state.highlight.filter(|_| !state.shown.is_empty())
-            } else {
-                matching::exact(&self.labels, &state.query)
-            };
-            return match self.choice(option) {
-                Some(message) => Outcome::Chosen(message),
-                None => self.custom(state),
-            };
+        if !typed || !self.offers_custom() {
+            return self
+                .choice(state.highlight)
+                .map_or(Outcome::Used, Outcome::Chosen);
         }
-        self.choice(state.highlight)
-            .map_or(Outcome::Used, Outcome::Chosen)
+        let matched = if self.filters() {
+            state.highlight.filter(|_| !state.shown.is_empty())
+        } else {
+            None
+        };
+        let exact = matching::exact(&self.labels, &state.query);
+        if self.prefers_custom() && !state.steered {
+            if let Some(message) = self
+                .choice(exact)
+                .or_else(|| self.custom_message(state))
+                .or_else(|| self.choice(matched))
+            {
+                return Outcome::Chosen(message);
+            }
+            state.rejected = true;
+            return Outcome::Used;
+        }
+        let option = if self.filters() { matched } else { exact };
+        match self.choice(option) {
+            Some(message) => Outcome::Chosen(message),
+            None => self.custom(state),
+        }
     }
 
-    /// Takes the search field's new text. While filtering, the first match
-    /// is highlighted and the list goes back to its top.
+    /// Leaving the list by Tab or a press elsewhere. When the select
+    /// commits on leaving, typed text is entered as Enter would: a value
+    /// the app turns down keeps the list open (`Used`), and text that
+    /// chooses nothing is dropped (`Ignored`).
+    fn leave(&self, state: &mut ListState) -> Outcome<Message> {
+        if !self.commits_on_leave() || state.query.trim().is_empty() {
+            return Outcome::Ignored;
+        }
+        match self.submit(state) {
+            Outcome::Chosen(message) => Outcome::Chosen(message),
+            _ if state.rejected => Outcome::Used,
+            _ => Outcome::Ignored,
+        }
+    }
+
+    /// Takes the search field's new text and filters by it.
     fn set_query(&self, state: &mut ListState, query: String) {
-        state.query = query;
-        state.rejected = false;
+        state.edit(query);
+        self.refilter(state);
+    }
+
+    /// Shows the options matching the query. While filtering, the first
+    /// match is highlighted and the list goes back to its top.
+    fn refilter(&self, state: &mut ListState) {
+        state.refilter = false;
         state.shown = self.shown_for(&state.query);
         if self.filters() {
             state.highlight = state.shown.first().copied();
             state.offset = 0.0;
         }
         state.reveal = Some(Reveal::Nearest);
+    }
+
+    /// The line drawn in place of rows when none show.
+    fn message(&self, state: &ListState) -> String {
+        if self.offers_typed(state) {
+            return format!("Use \u{201c}{}\u{201d}", state.query.trim());
+        }
+        if state.rejected {
+            self.not_valid.clone()
+        } else if self.rows.is_empty() {
+            self.empty.clone()
+        } else {
+            self.no_results.clone()
+        }
+    }
+
+    /// Where the not-valid line above the rows shows.
+    fn notice_bounds(&self, layout: Layout<'_>) -> Rectangle {
+        let bounds = layout.bounds();
+        Rectangle::new(
+            Point::new(bounds.x + TEXT_X, bounds.y + self.search_height()),
+            Size::new((bounds.width - 2.0 * TEXT_X).max(0.0), NOTICE_HEIGHT),
+        )
     }
 
     fn key(
@@ -400,12 +581,14 @@ impl<Message: Clone> List<'_, Message> {
             let next = step(position, state.shown.len(), state.page_rows(), *named);
             state.highlight = next.and_then(|position| state.shown.get(position).copied());
             state.reveal = Some(Reveal::Nearest);
+            state.steered = true;
             state.typed.clear();
             return Outcome::Used;
         }
         match key {
             Key::Named(Named::Enter) if plain => return self.submit(state),
-            Key::Named(Named::Escape | Named::Tab) => return Outcome::Ignored,
+            Key::Named(Named::Tab) => return self.leave(state),
+            Key::Named(Named::Escape) => return Outcome::Ignored,
             _ if searching => return Outcome::Field,
             _ if !plain => return Outcome::Ignored,
             Key::Named(Named::Space) if !state.typed.is_typing(state.frame, self.pause) => {
@@ -443,7 +626,7 @@ impl<Message: Clone> List<'_, Message> {
     /// Where the rows show: below the search field, as tall as the viewport.
     fn area(&self, layout: Layout<'_>, state: &ListState) -> Rectangle {
         let bounds = layout.bounds();
-        let top = self.search_height();
+        let top = self.top(state);
         Rectangle::new(
             Point::new(bounds.x, bounds.y + top),
             Size::new(bounds.width, state.viewport),
@@ -475,7 +658,7 @@ impl<Message: Clone> List<'_, Message> {
     }
 
     fn on_field(&self, layout: Layout<'_>, point: Point) -> bool {
-        self.search.is_some()
+        self.has_field()
             && layout
                 .children()
                 .next()
@@ -517,9 +700,9 @@ impl<Message: Clone> List<'_, Message> {
     }
 
     /// The span of an option's row from the top of the rows.
-    fn span(&self, layout: Layout<'_>, option: usize) -> Option<(f32, f32)> {
+    fn span(&self, layout: Layout<'_>, state: &ListState, option: usize) -> Option<(f32, f32)> {
         let row = layout.children().nth(self.first_row() + option)?;
-        let top = row.bounds().y - layout.bounds().y - self.search_height();
+        let top = row.bounds().y - layout.bounds().y - self.top(state);
         Some((top, top + row.bounds().height))
     }
 
@@ -537,7 +720,7 @@ impl<Message: Clone> List<'_, Message> {
         let span = state
             .highlight
             .filter(|option| state.shown.contains(option))
-            .and_then(|option| self.span(layout, option));
+            .and_then(|option| self.span(layout, state, option));
         if let Some((top, bottom)) = span {
             state.offset = match reveal {
                 Reveal::Centre => {
@@ -548,6 +731,33 @@ impl<Message: Clone> List<'_, Message> {
             };
         }
         state.offset = clamp_offset(state.offset, state.content, state.viewport);
+    }
+
+    /// A press outside the list. Typed text is entered when the select
+    /// commits on leaving, unless the press is in the closed control's own
+    /// field, where it only moves the caret. A value the app turns down
+    /// captures the press, so the list stays open and nothing behind it
+    /// acts.
+    fn press_outside(
+        &self,
+        state: &mut ListState,
+        position: Point,
+        shell: &mut Shell<'_, Message>,
+    ) {
+        let in_field =
+            self.field_on_anchor() && state.anchor.is_some_and(|anchor| anchor.contains(position));
+        if in_field {
+            return;
+        }
+        // The closed control shows the selected label again.
+        if self.field_on_anchor() {
+            shell.invalidate_layout();
+        }
+        match self.leave(state) {
+            Outcome::Chosen(message) => shell.publish(message),
+            Outcome::Used => shell.capture_event(),
+            _ => {}
+        }
     }
 
     fn choose(&self, target: Target, state: &mut ListState) -> Outcome<Message> {
@@ -669,7 +879,7 @@ impl<Message: Clone> List<'_, Message> {
             if let Some(background) = style.background {
                 fill(renderer, row, background, radius::SM);
             }
-            let label = format!("Use \u{201c}{}\u{201d}", state.query.trim());
+            let label = self.message(state);
             let text = Rectangle::new(
                 Point::new(row.x + space::SM, row.y),
                 Size::new((row.width - 2.0 * space::SM).max(0.0), row.height),
@@ -683,16 +893,14 @@ impl<Message: Clone> List<'_, Message> {
             );
             return;
         }
-        let (message, colour) = if state.rejected {
-            (self.not_valid.as_str(), tokens.destructive_text)
-        } else if self.rows.is_empty() {
-            (self.empty.as_str(), tokens.muted_foreground)
+        let colour = if state.rejected {
+            tokens.destructive_text
         } else {
-            (self.no_results.as_str(), tokens.muted_foreground)
+            tokens.muted_foreground
         };
         draw_text(
             renderer,
-            message,
+            &self.message(state),
             area,
             colour,
             core_text::Alignment::Center,
@@ -796,13 +1004,17 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for List<'_, Message> {
         renderer: &Renderer,
         limits: &layout::Limits,
     ) -> layout::Node {
-        let search_height = self.search_height();
         let first = self.first_row();
         let width = limits
             .resolve(Length::Fill, Length::Shrink, Size::ZERO)
             .width;
         let state = tree.state.downcast_mut::<ListState>();
-        state.shown = self.shown_for(&state.query);
+        if state.refilter {
+            self.refilter(state);
+        } else {
+            state.shown = self.shown_for(&state.query);
+        }
+        let search_height = self.top(state);
         if state
             .highlight
             .is_some_and(|option| !state.shown.contains(&option))
@@ -899,6 +1111,15 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for List<'_, Message> {
         let state = tree.state.downcast_ref::<ListState>();
         let tokens = Tokens::of(theme);
         self.draw_field(tree, renderer, theme, style, layout, cursor);
+        if self.shows_notice(state) {
+            draw_text(
+                renderer,
+                &self.not_valid,
+                self.notice_bounds(layout),
+                tokens.destructive_text,
+                core_text::Alignment::Left,
+            );
+        }
         let area = self.area(layout, state);
         if state.shown.is_empty() {
             self.draw_message(state, renderer, &tokens, area);
@@ -991,8 +1212,11 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for List<'_, Message> {
         let content = Rectangle::new(area.position(), Size::new(area.width, state.content));
         let translation = Vector::new(0.0, state.offset);
         let shown = state.shown.clone();
+        // The lines the list draws itself, so tests can find them by text.
+        let notice = self.shows_notice(state).then(|| self.notice_bounds(layout));
+        let message = shown.is_empty().then(|| self.message(state));
         let (field_tree, row_trees) = children.split_at_mut(first);
-        operation.container(None, layout.bounds());
+        operation.container(Some(&list_id()), layout.bounds());
         operation.traverse(&mut |operation| {
             if let (Some(field), Some(field_tree), Some(field_layout)) = (
                 field.as_mut(),
@@ -1002,6 +1226,12 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for List<'_, Message> {
                 field
                     .as_widget_mut()
                     .operate(field_tree, field_layout, renderer, operation);
+            }
+            if let Some(bounds) = notice {
+                operation.text(None, bounds, &self.not_valid);
+            }
+            if let Some(message) = &message {
+                operation.text(None, area, message);
             }
             operation.scrollable(None, area, content, translation, state);
             // The rows go one level down, so each row starts from the
@@ -1039,6 +1269,7 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for List<'_, Message> {
             state.offset,
             state.over_bar,
             state.query.len(),
+            state.rejected,
         );
         let mut outcome = Outcome::Ignored;
         if matches!(
@@ -1047,6 +1278,17 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for List<'_, Message> {
         ) && state.reveal == Some(Reveal::Centre)
         {
             state.reveal = None;
+        }
+        // The menu surface pads the list above and below.
+        if let Some(position) = press_position(event, cursor)
+            && !layout.bounds().expand(space::XS).contains(position)
+        {
+            self.press_outside(state, position, shell);
+            if state.rejected != before.4 {
+                shell.invalidate_layout();
+                shell.request_redraw();
+            }
+            return;
         }
 
         match event {
@@ -1063,6 +1305,11 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for List<'_, Message> {
                 text,
                 ..
             }) => {
+                // Escape closes the list, and the closed control then
+                // shows the selected label again.
+                if self.field_on_anchor() && *key == Key::Named(Named::Escape) {
+                    shell.invalidate_layout();
+                }
                 outcome = self.key(state, key, *modifiers, text.as_deref());
                 self.reveal_now(layout, state);
             }
@@ -1204,7 +1451,11 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for List<'_, Message> {
             state.offset,
             state.over_bar,
             state.query.len(),
+            state.rejected,
         );
+        if after.4 != before.4 {
+            shell.invalidate_layout();
+        }
         if edited || before != after {
             shell.request_redraw();
         }
@@ -1256,14 +1507,25 @@ mod tests {
     ];
 
     fn list<'a>(filters: bool, custom: bool, accepts: bool) -> List<'a, Message> {
+        with_custom(filters, custom, move |text| {
+            accepts.then_some(Message::Custom(text))
+        })
+    }
+
+    fn with_custom<'a>(
+        filters: bool,
+        custom: bool,
+        on_custom: impl Fn(String) -> Option<Message> + 'a,
+    ) -> List<'a, Message> {
         let search = (filters || custom).then(|| Search {
             filters,
-            on_custom: custom.then(|| {
-                Box::new(move |text: String| accepts.then_some(Message::Custom(text)))
-                    as Box<dyn Fn(String) -> Option<Message>>
-            }),
+            on_custom: custom
+                .then(|| Box::new(on_custom) as Box<dyn Fn(String) -> Option<Message> + 'a>),
             placeholder: "Search".to_owned(),
             shortcuts: Shortcuts::all(),
+            on_anchor: false,
+            prefer_custom: false,
+            commit_on_leave: false,
         });
         List {
             rows: DAYS.iter().map(|_| iced::widget::space().into()).collect(),
@@ -1452,6 +1714,151 @@ mod tests {
         );
     }
 
+    fn preferring(accepts: &'static [&'static str]) -> List<'static, Message> {
+        let mut list = with_custom(true, true, move |text| {
+            accepts
+                .contains(&text.as_str())
+                .then_some(Message::Custom(text))
+        });
+        if let Some(search) = list.search.as_mut() {
+            search.prefer_custom = true;
+            search.commit_on_leave = true;
+        }
+        list
+    }
+
+    #[test]
+    fn preferring_custom_values_asks_the_app_before_the_highlight() {
+        let list = preferring(&["s"]);
+        let mut state = open(&list);
+        list.set_query(&mut state, "s".to_owned());
+        assert_eq!(state.highlight, Some(1), "Tuesday matches first");
+        assert_eq!(
+            named(&list, &mut state, Named::Enter),
+            Outcome::Chosen(Message::Custom("s".to_owned()))
+        );
+        list.set_query(&mut state, "sat".to_owned());
+        assert_eq!(
+            named(&list, &mut state, Named::Enter),
+            Outcome::Chosen(Message::Pick(5)),
+            "turned down, so the highlight"
+        );
+        list.set_query(&mut state, "sunday".to_owned());
+        assert_eq!(
+            named(&list, &mut state, Named::Enter),
+            Outcome::Chosen(Message::Pick(6)),
+            "a whole label is that option"
+        );
+        list.set_query(&mut state, "zz".to_owned());
+        assert_eq!(named(&list, &mut state, Named::Enter), Outcome::Used);
+        assert!(state.rejected, "nothing to fall back to");
+    }
+
+    #[test]
+    fn a_highlight_moved_by_the_keys_wins_over_a_preferred_custom_value() {
+        let list = preferring(&["s"]);
+        let mut state = open(&list);
+        list.set_query(&mut state, "s".to_owned());
+        named(&list, &mut state, Named::ArrowDown);
+        assert_eq!(
+            named(&list, &mut state, Named::Enter),
+            Outcome::Chosen(Message::Pick(2))
+        );
+        list.set_query(&mut state, "s".to_owned());
+        assert!(!state.steered, "editing hands it back to the text");
+    }
+
+    #[test]
+    fn leaving_enters_typed_text_only_when_asked() {
+        let committing = preferring(&["s"]);
+        let mut state = open(&committing);
+        assert_eq!(
+            named(&committing, &mut state, Named::Tab),
+            Outcome::Ignored,
+            "nothing typed"
+        );
+        committing.set_query(&mut state, "s".to_owned());
+        assert_eq!(
+            named(&committing, &mut state, Named::Tab),
+            Outcome::Chosen(Message::Custom("s".to_owned()))
+        );
+        committing.set_query(&mut state, "zz".to_owned());
+        assert_eq!(named(&committing, &mut state, Named::Tab), Outcome::Used);
+        assert!(state.rejected);
+
+        let plain = list_with_search(true, true);
+        let mut state = open(&plain);
+        plain.set_query(&mut state, "zz".to_owned());
+        assert_eq!(
+            plain.leave(&mut state),
+            Outcome::Ignored,
+            "text that chooses nothing is dropped"
+        );
+        let off = list(true, true, true);
+        let mut state = open(&off);
+        off.set_query(&mut state, "s".to_owned());
+        assert_eq!(off.leave(&mut state), Outcome::Ignored, "off by default");
+    }
+
+    fn list_with_search(filters: bool, commit: bool) -> List<'static, Message> {
+        let mut list = list(filters, false, false);
+        if let Some(search) = list.search.as_mut() {
+            search.commit_on_leave = commit;
+        }
+        list
+    }
+
+    #[test]
+    fn the_not_valid_line_shows_above_rows_and_in_place_of_none() {
+        let custom = list(false, true, false);
+        let mut state = open(&custom);
+        assert_eq!(custom.top(&state), SEARCH_HEIGHT);
+        custom.set_query(&mut state, "x".to_owned());
+        named(&custom, &mut state, Named::Enter);
+        assert!(custom.shows_notice(&state), "rows still show");
+        assert_eq!(custom.top(&state), SEARCH_HEIGHT + NOTICE_HEIGHT);
+        let filtering = list_with_search(true, false);
+        let mut state = open(&filtering);
+        filtering.set_query(&mut state, "x".to_owned());
+        state.rejected = true;
+        assert!(!filtering.shows_notice(&state), "said in place of rows");
+        assert_eq!(filtering.message(&state), "Not valid");
+    }
+
+    #[test]
+    fn the_line_in_place_of_rows_says_why() {
+        let list = list(true, true, true);
+        let mut state = open(&list);
+        list.set_query(&mut state, "9:40".to_owned());
+        assert_eq!(list.message(&state), "Use \u{201c}9:40\u{201d}");
+        let plain = list_with_search(true, false);
+        let mut state = open(&plain);
+        plain.set_query(&mut state, "x".to_owned());
+        assert_eq!(plain.message(&state), "No results found.");
+        let mut empty = list_with_search(true, false);
+        empty.rows.clear();
+        empty.labels.clear();
+        assert_eq!(empty.message(&ListState::default()), "No options");
+    }
+
+    #[test]
+    fn a_field_on_the_closed_control_leaves_the_list_without_one() {
+        let mut list = list(true, true, true);
+        if let Some(search) = list.search.as_mut() {
+            search.on_anchor = true;
+        }
+        assert!(!list.has_field());
+        assert_eq!(list.first_row(), 0);
+        assert_eq!(list.search_height(), 0.0);
+        let mut state = open(&list);
+        assert_eq!(typed(&list, &mut state, "s"), Outcome::Field);
+        state.edit("sa".to_owned());
+        assert!(state.refilter, "filtered on the next layout");
+        assert_eq!(state.edited_query(), Some("sa"));
+        list.refilter(&mut state);
+        assert_eq!(state.shown, vec![5]);
+    }
+
     #[test]
     fn without_a_search_field_chords_are_left_alone() {
         let list = list(false, false, false);
@@ -1469,17 +1876,18 @@ mod tests {
     #[test]
     fn the_field_text_turns_red_once_rejected() {
         let tokens = Tokens::of(&crate::theme::light());
+        assert_eq!(field_style(&tokens, false, true).value, tokens.foreground);
         assert_eq!(
-            field_style(&tokens, Status::Active, false).value,
-            tokens.foreground
-        );
-        assert_eq!(
-            field_style(&tokens, Status::Active, true).value,
+            field_style(&tokens, true, true).value,
             tokens.destructive_text
         );
         assert_eq!(
-            field_style(&tokens, Status::Focused { is_hovered: false }, false).background,
+            field_style(&tokens, false, true).background,
             Background::Color(Color::TRANSPARENT)
+        );
+        assert_eq!(
+            field_style(&tokens, false, false).value,
+            fade(tokens.foreground, 0.5)
         );
     }
 

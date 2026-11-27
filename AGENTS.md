@@ -64,7 +64,7 @@ iced has no general focus model, so there is one rule: a key press goes to the i
 - A focused text field keeps the keys it uses. Combobox and command resolve their keymap while their field has focus.
 - An open dialog captures every key its content leaves, except chords passed through with `.pass_through(...)`.
 - Whatever is left reaches `keys::subscription()`, and the app resolves it through a component's `Keymap` (tabs, slider, toast, opening a closed menu).
-- Overlays are built on `overlay::anchored`: content first, one `on_dismiss` sent once, outside clicks captured unless the panel passes them through (only Popover does), Escape read from the component's keymap. Menus and lists draw rows with `overlay::menu` and float on the `Tokens::popover` surface.
+- Overlays are built on `overlay::anchored`: content first, one `on_dismiss` sent once, outside clicks captured unless the panel passes them through (Popover does, and a select built with `.pass_through(true)`), Escape read from the component's keymap. Menus and lists draw rows with `overlay::menu` and float on the `Tokens::popover` surface.
 - Every stateful overlay takes `.keymap(...)`. Use the shared words: Highlight, Activate and Close for events and actions, and `on_dismiss` for overlays the app opens with a flag.
 
 When adding one:

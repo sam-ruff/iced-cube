@@ -73,7 +73,7 @@
 //! for a new entry there. Two quick presses therefore open or create, and
 //! so do two taps on a touch screen. In the week and day views a drag on
 //! empty space asks for an entry of that length, a drag on an entry moves
-//! it and a drag on its lower edge changes when it ends.
+//! it, and a drag on its top or lower edge changes when it starts or ends.
 //!
 //! The calendar only asks; the app decides what to show. [`editor`] is a
 //! ready-made form for that: title, all day, start and end date and time,

@@ -46,8 +46,12 @@ pub const MIN_DAY_WIDTH: f32 = 84.0;
 /// The most lanes of whole-day entries shown above the hours.
 pub const ALL_DAY_LANES: usize = 2;
 
-/// How close to the lower edge of a block a press must be to resize it.
+/// How close to the top or lower edge of a block a press must be to
+/// resize it.
 const RESIZE_ZONE: f32 = 6.0;
+/// The smallest resize zone. A block too short for zones this deep at
+/// both ends, with as much again between them, has no edges to drag.
+const MIN_RESIZE_ZONE: f32 = 4.0;
 /// How far a press may move and still be a click.
 const DRAG_SLOP: f32 = 4.0;
 /// The width of the stripe down the leading edge of a block.
@@ -661,10 +665,10 @@ fn hours<'a, Message: Clone + 'a>(
 /// What a point on the grid is over.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Hit {
-    /// A block, and whether the point is on its lower edge.
+    /// A block, and the edge the point is on, if any.
     Block {
         index: usize,
-        edge: bool,
+        edge: Option<Edge>,
     },
     /// Empty space in a day, at this many minutes.
     Slot {
@@ -680,14 +684,11 @@ fn hit(grid: &Grid, placed: &[Placed], point: Point) -> Hit {
         rect.contains(point).then_some((index, rect))
     });
     if let Some((index, rect)) = over {
-        // An end that is tomorrow, or below the last hour on show, is not
-        // an edge to drag.
         let block = &placed[index].block;
-        let (_, last) = grid.minutes();
-        let resizable =
-            !block.ends_after && block.bottom <= last && rect.height >= 3.0 * RESIZE_ZONE;
-        let edge = resizable && point.y >= rect.y + rect.height - RESIZE_ZONE;
-        return Hit::Block { index, edge };
+        return Hit::Block {
+            index,
+            edge: edge_at(grid, block, rect, point.y),
+        };
     }
     if point.y < 0.0 || point.y >= grid.height() {
         return Hit::Nothing;
@@ -701,6 +702,39 @@ fn hit(grid: &Grid, placed: &[Placed], point: Point) -> Hit {
     }
 }
 
+/// An edge of a block, which a drag resizes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Edge {
+    Top,
+    Bottom,
+}
+
+/// How deep the resize zones of a block `height` tall are, or `None` when
+/// it is too short to have any.
+fn resize_zone(height: f32) -> Option<f32> {
+    // Each zone takes at most a quarter, so at least half the block is
+    // left to move it by.
+    let zone = (height / 4.0).min(RESIZE_ZONE);
+    (zone >= MIN_RESIZE_ZONE).then_some(zone)
+}
+
+/// The edge of `block`, drawn at `rect`, that a point at `y` is on.
+fn edge_at(grid: &Grid, block: &Block, rect: Rectangle, y: f32) -> Option<Edge> {
+    let zone = resize_zone(rect.height)?;
+    let (first, last) = grid.minutes();
+    // A start that is yesterday or above the first hour on show, or an end
+    // that is tomorrow or below the last hour, is not an edge to drag.
+    let top = !block.starts_before && block.top >= first;
+    let bottom = !block.ends_after && block.bottom <= last;
+    if top && y < rect.y + zone {
+        return Some(Edge::Top);
+    }
+    if bottom && y >= rect.y + rect.height - zone {
+        return Some(Edge::Bottom);
+    }
+    None
+}
+
 /// What a press took hold of.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Grab {
@@ -708,8 +742,8 @@ enum Grab {
     Create { day: usize, anchor: f32 },
     /// A block, this many minutes below its top.
     Move { index: usize, offset: f32 },
-    /// The lower edge of a block.
-    Resize { index: usize },
+    /// An edge of a block.
+    Resize { index: usize, edge: Edge },
     /// A block that cannot be moved from here, because it began on an
     /// earlier day. It can still be pressed.
     Hold { index: usize },
@@ -725,7 +759,7 @@ impl Grab {
     fn limited_to(self, allow: Allow) -> Self {
         match self {
             Grab::Create { .. } if !allow.create => Grab::Point,
-            Grab::Move { index, .. } | Grab::Resize { index } if !allow.reschedule => {
+            Grab::Move { index, .. } | Grab::Resize { index, .. } if !allow.reschedule => {
                 Grab::Hold { index }
             }
             grab => grab,
@@ -741,8 +775,11 @@ fn grab(placed: &[Placed], hit: Hit, first_minute: u16) -> Option<Grab> {
             anchor: minutes,
         }),
         Hit::Block { index, .. } if placed.get(index)?.locked => Some(Grab::Hold { index }),
-        Hit::Block { index, edge: true } => Some(Grab::Resize { index }),
-        Hit::Block { index, edge: false } => {
+        Hit::Block {
+            index,
+            edge: Some(edge),
+        } => Some(Grab::Resize { index, edge }),
+        Hit::Block { index, edge: None } => {
             let block = placed.get(index)?.block;
             // A start that is yesterday, or above the first hour on show,
             // cannot be seen, so the block is not moved from here.
@@ -792,13 +829,28 @@ fn span(grid: &Grid, placed: &[Placed], grab: Grab, point: Point) -> Option<Span
                 bottom: top.saturating_add(length),
             })
         }
-        Grab::Resize { index } => {
+        Grab::Resize {
+            index,
+            edge: Edge::Bottom,
+        } => {
             let placed = placed.get(index)?;
             let top = placed.block.top;
             Some(Span {
                 day: placed.day,
                 top,
                 bottom: snap(pointer, SNAP_MINUTES).max(top + SNAP_MINUTES),
+            })
+        }
+        Grab::Resize {
+            index,
+            edge: Edge::Top,
+        } => {
+            let placed = placed.get(index)?;
+            let bottom = placed.block.bottom;
+            Some(Span {
+                day: placed.day,
+                top: snap(pointer, SNAP_MINUTES).min(bottom.saturating_sub(SNAP_MINUTES)),
+                bottom,
             })
         }
     }
@@ -831,7 +883,22 @@ fn dropped(
                 to: (start, end),
             })
         }
-        Grab::Resize { index } => {
+        Grab::Resize {
+            index,
+            edge: Edge::Top,
+        } => {
+            let occurrence = placed.get(index)?.block.occurrence;
+            let start = instant_at(date, span.top, time_zone);
+            (start != occurrence.start).then_some(Event::Reschedule {
+                entry: occurrence.entry,
+                start: occurrence.start,
+                to: (start, occurrence.end),
+            })
+        }
+        Grab::Resize {
+            index,
+            edge: Edge::Bottom,
+        } => {
             let occurrence = placed.get(index)?.block.occurrence;
             let end = instant_at(date, span.bottom, time_zone);
             (end != occurrence.end).then_some(Event::Reschedule {
@@ -1240,7 +1307,12 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for Hours<'_, Message> {
             return mouse::Interaction::None;
         };
         match hit(&self.grid(bounds.width), &self.placed, local(bounds, point)) {
-            Hit::Block { edge: true, .. } if self.allow.reschedule => {
+            Hit::Block {
+                index,
+                edge: Some(_),
+            } if self.allow.reschedule
+                && self.placed.get(index).is_some_and(|placed| !placed.locked) =>
+            {
                 mouse::Interaction::ResizingVertically
             }
             Hit::Block { .. } => mouse::Interaction::Pointer,
@@ -1571,14 +1643,14 @@ mod tests {
             hit(&grid, &placed, point(1, 570.0)),
             Hit::Block {
                 index: stand_up,
-                edge: false
+                edge: None
             }
         );
         assert_eq!(
             hit(&grid, &placed, point(1, 595.0)),
             Hit::Block {
                 index: stand_up,
-                edge: true
+                edge: Some(Edge::Bottom)
             }
         );
         assert_eq!(
@@ -1613,7 +1685,7 @@ mod tests {
             hit(&grid(), &placed, point(2, 1437.0)),
             Hit::Block {
                 index: tonight,
-                edge: false
+                edge: None
             }
         );
         // The part after midnight began yesterday, so it is held, not moved.
@@ -1648,7 +1720,7 @@ mod tests {
             hit(&small, &placed, point(1, 281.0)),
             Hit::Block {
                 index: 0,
-                edge: false
+                edge: None
             }
         );
     }
@@ -1678,18 +1750,21 @@ mod tests {
                 &placed,
                 Hit::Block {
                     index: stand_up,
-                    edge: true
+                    edge: Some(Edge::Bottom)
                 },
                 0
             ),
-            Some(Grab::Resize { index: stand_up })
+            Some(Grab::Resize {
+                index: stand_up,
+                edge: Edge::Bottom
+            })
         );
         assert!(matches!(
             grab(
                 &placed,
                 Hit::Block {
                     index: stand_up,
-                    edge: false
+                    edge: None
                 },
                 0
             ),
@@ -1703,7 +1778,7 @@ mod tests {
             &placed,
             Hit::Block {
                 index: stand_up,
-                edge: false,
+                edge: None,
             },
             570,
         );
@@ -1716,7 +1791,7 @@ mod tests {
             hit(&until_ten, &placed, point(1, 597.0)),
             Hit::Block {
                 index: stand_up,
-                edge: true
+                edge: Some(Edge::Bottom)
             },
             "ends at the last hour, so its edge is there"
         );
@@ -1725,7 +1800,7 @@ mod tests {
             hit(&until_ten, &self::placed(&long), point(1, 597.0)),
             Hit::Block {
                 index: 0,
-                edge: false
+                edge: None
             },
             "ends below the last hour"
         );
@@ -1741,7 +1816,10 @@ mod tests {
             index: 2,
             offset: 5.0,
         };
-        let resizing = Grab::Resize { index: 2 };
+        let resizing = Grab::Resize {
+            index: 2,
+            edge: Edge::Top,
+        };
 
         for grab in [create, moving, resizing, Grab::Hold { index: 2 }] {
             assert_eq!(grab.limited_to(Allow::ALL), grab);
@@ -1883,14 +1961,19 @@ mod tests {
             None
         );
 
-        let resizing = Grab::Resize { index: stand_up };
-        let Some(same) = span(&grid(), &placed, resizing, point(1, 598.0)) else {
-            panic!("a span");
-        };
-        assert_eq!(
-            dropped(&week(), &TimeZone::UTC, &placed, resizing, same),
-            None
-        );
+        for (edge, y) in [(Edge::Bottom, 598.0), (Edge::Top, 542.0)] {
+            let resizing = Grab::Resize {
+                index: stand_up,
+                edge,
+            };
+            let Some(same) = span(&grid(), &placed, resizing, point(1, y)) else {
+                panic!("a span");
+            };
+            assert_eq!(
+                dropped(&week(), &TimeZone::UTC, &placed, resizing, same),
+                None
+            );
+        }
     }
 
     #[test]
@@ -1922,7 +2005,10 @@ mod tests {
         let entries = entries();
         let placed = placed(&entries);
         let stand_up = index_of(&placed, 1, 1);
-        let resizing = Grab::Resize { index: stand_up };
+        let resizing = Grab::Resize {
+            index: stand_up,
+            edge: Edge::Bottom,
+        };
 
         let Some(longer) = span(&grid(), &placed, resizing, point(1, 668.0)) else {
             panic!("a span");
@@ -1944,6 +2030,155 @@ mod tests {
     }
 
     #[test]
+    fn dragging_the_top_edge_changes_the_start_and_keeps_the_end() {
+        let entries = entries();
+        let placed = placed(&entries);
+        let stand_up = index_of(&placed, 1, 1);
+        let resizing = Grab::Resize {
+            index: stand_up,
+            edge: Edge::Top,
+        };
+
+        let Some(earlier) = span(&grid(), &placed, resizing, point(1, 452.0)) else {
+            panic!("a span");
+        };
+        assert_eq!((earlier.top, earlier.bottom), (450, 600));
+        assert_eq!(
+            dropped(&week(), &TimeZone::UTC, &placed, resizing, earlier),
+            Some(Event::Reschedule {
+                entry: EntryId(1),
+                start: at(3, 9, 0),
+                to: (at(3, 7, 30), at(3, 10, 0)),
+            })
+        );
+
+        // Dragged below the end, it keeps the shortest length.
+        let Some(below) = span(&grid(), &placed, resizing, point(1, 800.0)) else {
+            panic!("a span");
+        };
+        assert_eq!((below.top, below.bottom), (585, 600));
+        assert_eq!(
+            dropped(&week(), &TimeZone::UTC, &placed, resizing, below),
+            Some(Event::Reschedule {
+                entry: EntryId(1),
+                start: at(3, 9, 0),
+                to: (at(3, 9, 45), at(3, 10, 0)),
+            })
+        );
+
+        // Above the first hour on show, it stops at that hour.
+        let from_eight = Grid {
+            first_hour: 8,
+            ..grid()
+        };
+        let above = span(&from_eight, &placed, resizing, point(1, -100.0));
+        assert_eq!(above.map(|span| span.top), Some(480));
+        let elsewhere = span(&grid(), &placed, resizing, point(5, 452.0));
+        assert_eq!(elsewhere.map(|span| span.day), Some(1));
+    }
+
+    #[test]
+    fn a_block_has_a_top_edge_only_where_its_start_is_on_show() {
+        let entries = entries();
+        let placed = placed(&entries);
+        let stand_up = index_of(&placed, 1, 1);
+        assert_eq!(
+            hit(&grid(), &placed, point(1, 542.0)),
+            Hit::Block {
+                index: stand_up,
+                edge: Some(Edge::Top)
+            }
+        );
+        assert_eq!(
+            grab(
+                &placed,
+                Hit::Block {
+                    index: stand_up,
+                    edge: Some(Edge::Top)
+                },
+                0
+            ),
+            Some(Grab::Resize {
+                index: stand_up,
+                edge: Edge::Top
+            })
+        );
+
+        // The part of the deploy after midnight began yesterday.
+        let morning = index_of(&placed, 2, 3);
+        assert_eq!(
+            hit(&grid(), &placed, point(3, 2.0)),
+            Hit::Block {
+                index: morning,
+                edge: None
+            }
+        );
+        // Its evening part has a top edge but no lower one.
+        let tonight = index_of(&placed, 2, 2);
+        assert_eq!(
+            hit(&grid(), &placed, point(2, 1382.0)),
+            Hit::Block {
+                index: tonight,
+                edge: Some(Edge::Top)
+            }
+        );
+
+        // With the grid starting at 09:00 an 08:00 start is out of sight.
+        let from_nine = Grid {
+            first_hour: 9,
+            ..grid()
+        };
+        let long = Entries::utc().with([Entry::new(EntryId(1), "Long", at(3, 8, 0), at(3, 11, 0))]);
+        let long = self::placed(&long);
+        assert_eq!(
+            hit(&from_nine, &long, point(1, 2.0)),
+            Hit::Block {
+                index: 0,
+                edge: None
+            }
+        );
+        assert_eq!(
+            hit(&from_nine, &long, point(1, 115.0)),
+            Hit::Block {
+                index: 0,
+                edge: Some(Edge::Bottom)
+            }
+        );
+    }
+
+    #[test]
+    fn short_blocks_have_shallower_zones_and_room_to_move() {
+        assert_eq!(resize_zone(60.0), Some(RESIZE_ZONE));
+        assert_eq!(resize_zone(20.0), Some(5.0));
+        assert_eq!(resize_zone(16.0), Some(MIN_RESIZE_ZONE));
+        assert_eq!(resize_zone(15.0), None);
+        for height in [16.0, 18.0, 20.0, 24.0, 40.0] {
+            let Some(zone) = resize_zone(height) else {
+                panic!("zones at {height}");
+            };
+            assert!(height - 2.0 * zone >= height / 2.0, "middle at {height}");
+        }
+
+        // Half an hour is 20 pixels at 40 an hour, less the gap between
+        // blocks: zones under 5 pixels at each end and 9 between them.
+        let entries =
+            Entries::utc().with([Entry::new(EntryId(1), "Short", at(3, 9, 0), at(3, 9, 30))]);
+        let placed = placed(&entries);
+        let small = Grid {
+            hour_height: 40.0,
+            ..grid()
+        };
+        let edge = |y: f32| match hit(&small, &placed, point(1, y)) {
+            Hit::Block { edge, .. } => edge,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(edge(361.0), Some(Edge::Top));
+        assert_eq!(edge(366.0), None);
+        assert_eq!(edge(372.0), None);
+        assert_eq!(edge(375.0), Some(Edge::Bottom));
+    }
+
+    #[test]
     fn a_press_without_a_drag_selects_the_entry_or_the_slot() {
         let entries = entries();
         let placed = placed(&entries);
@@ -1954,7 +2189,7 @@ mod tests {
                 &placed,
                 Hit::Block {
                     index: stand_up,
-                    edge: true
+                    edge: Some(Edge::Bottom)
                 },
                 false
             ),
@@ -2003,7 +2238,7 @@ mod tests {
         let stand_up = index_of(&placed, 1, 1);
         let block = Hit::Block {
             index: stand_up,
-            edge: false,
+            edge: None,
         };
         assert_eq!(
             pressed(&week(), &placed, block, true),
@@ -2031,7 +2266,7 @@ mod tests {
         let mut placed = placed(&entries);
         let stand_up = index_of(&placed, 1, 1);
         placed[stand_up].locked = true;
-        for edge in [false, true] {
+        for edge in [None, Some(Edge::Top), Some(Edge::Bottom)] {
             assert_eq!(
                 grab(
                     &placed,
