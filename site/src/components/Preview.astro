@@ -30,7 +30,14 @@ const scrolling = new Set([
   "fab",
   "calendar",
 ]);
-const wheel = scrolling.has(story.component);
+// Single examples whose open list scrolls.
+const scrollingStories = new Set([
+  "select/long-list",
+  "select/near-bottom",
+  "select/searchable",
+  "select/custom-value",
+]);
+const wheel = scrolling.has(story.component) || scrollingStories.has(id);
 ---
 
 <div class="preview" data-preview-root>

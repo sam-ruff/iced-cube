@@ -161,7 +161,7 @@ let entry = form.entry(calendar.entries().next_id());
 calendar.update(calendar::Event::Insert(entry));
 ```
 
-A date opens a small month to pick from. The time menus step in quarter hours: the start's opens an hour before the time chosen, and the end's begins just after the start. Moving the start carries the end along, so the entry keeps its length, and an end earlier than the start on the same day is taken to mean the next day. Turning "All day" on hides the times and keeps the dates.
+A date opens a small month to pick from. The time menus list the day in quarter hours and open with the chosen time in the middle. Typing filters them, and a time off the quarter hours, such as 9:40, can be typed and confirmed with Enter. Moving the start carries the end along, so the entry keeps its length, and an end earlier than the start on the same day is taken to mean the next day. Turning "All day" on hides the times and keeps the dates.
 
 Choosing a repeat adds two rows. "Every" takes a number, so "Weekly" with 2 is every two weeks. "Stops" is never, on a date picked from a month, or after a number of times, counting the first. The number fields keep only digits, and a blank one counts as 1. The last date stays on or after the start.
 

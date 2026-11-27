@@ -99,14 +99,25 @@ fn an_open_list_keeps_keys_from_what_is_behind_it() {
     for key in [
         Named::ArrowDown,
         Named::ArrowUp,
+        Named::PageDown,
+        Named::PageUp,
         Named::Backspace,
-        Named::Tab,
     ] {
         let status = ui.tap_key(key);
         assert_eq!(status, iced::event::Status::Captured, "open: {key:?}");
     }
     assert!(ui.find("Banana").is_ok(), "the list stays open");
     assert_eq!(ui.into_messages().count(), 0);
+}
+
+#[test]
+fn tab_closes_the_list_and_goes_on_to_move_focus() {
+    let mut ui = simulator(view(Some("Apple"), true));
+    open(&mut ui);
+    let status = ui.tap_key(Named::Tab);
+    assert_eq!(status, iced::event::Status::Ignored, "left for focus");
+    assert!(ui.find("Banana").is_err(), "the list closes");
+    assert_eq!(ui.into_messages().count(), 0, "nothing is chosen");
 }
 
 #[cfg(feature = "dialog")]

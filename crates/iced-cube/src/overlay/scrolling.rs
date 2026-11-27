@@ -10,6 +10,7 @@ use iced::advanced::{Clipboard, Shell};
 use iced::widget::scrollable;
 use iced::{Element, Event, Length, Rectangle, Renderer, Size, Theme, Vector, mouse};
 
+use crate::overlay::menu::reveal_offset;
 use crate::primitives::scroll_area;
 use crate::theme::Tokens;
 
@@ -29,18 +30,6 @@ pub(crate) fn scrolling<'a, Message: 'a>(
         content: list.into(),
         index: reveal,
     })
-}
-
-/// The offset that shows a row spanning `top` to `bottom` in a viewport of
-/// `height` scrolled to `offset`, moving it as little as possible.
-pub(crate) fn reveal_offset(offset: f32, height: f32, top: f32, bottom: f32) -> f32 {
-    if top < offset {
-        return top;
-    }
-    if bottom > offset + height {
-        return (bottom - height).min(top);
-    }
-    offset
 }
 
 /// Scrolls the scrollable it wraps to a row after layout.
@@ -393,22 +382,5 @@ impl<Message> Widget<Message, Theme, Renderer> for Fitted<'_, Message> {
             })
             .max()
             .unwrap_or_default()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn reveal_moves_the_least_distance() {
-        assert_eq!(reveal_offset(0.0, 100.0, 20.0, 52.0), 0.0, "already shown");
-        assert_eq!(reveal_offset(0.0, 100.0, 300.0, 332.0), 232.0, "below");
-        assert_eq!(reveal_offset(250.0, 100.0, 64.0, 96.0), 64.0, "above");
-        assert_eq!(
-            reveal_offset(0.0, 20.0, 40.0, 72.0),
-            40.0,
-            "a row taller than the viewport shows its top"
-        );
     }
 }

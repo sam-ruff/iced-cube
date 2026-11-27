@@ -345,6 +345,19 @@ pub(crate) fn inset<'a, Message: 'a>(
         .into()
 }
 
+/// The offset that shows a row spanning `top` to `bottom` in a viewport of
+/// `height` scrolled to `offset`, moving it as little as possible.
+#[cfg(any(feature = "dropdown-menu", feature = "select"))]
+pub(crate) fn reveal_offset(offset: f32, height: f32, top: f32, bottom: f32) -> f32 {
+    if top < offset {
+        return top;
+    }
+    if bottom > offset + height {
+        return (bottom - height).min(top);
+    }
+    offset
+}
+
 /// The floating surface around a list of rows, with its vertical padding.
 #[cfg(any(feature = "combobox", feature = "dropdown-menu", feature = "select"))]
 pub(crate) fn surface<'a, Message: 'a>(
@@ -359,6 +372,19 @@ pub(crate) fn surface<'a, Message: 'a>(
 mod tests {
     use super::*;
     use crate::theme::{dark, light};
+
+    #[cfg(any(feature = "dropdown-menu", feature = "select"))]
+    #[test]
+    fn reveal_moves_the_least_distance() {
+        assert_eq!(reveal_offset(0.0, 100.0, 20.0, 52.0), 0.0, "already shown");
+        assert_eq!(reveal_offset(0.0, 100.0, 300.0, 332.0), 232.0, "below");
+        assert_eq!(reveal_offset(250.0, 100.0, 64.0, 96.0), 64.0, "above");
+        assert_eq!(
+            reveal_offset(0.0, 20.0, 40.0, 72.0),
+            40.0,
+            "a row taller than the viewport shows its top"
+        );
+    }
 
     #[test]
     fn row_metrics_add_up_to_32_pixels() {
