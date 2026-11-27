@@ -1,3 +1,9 @@
+## [0.0.18](https://github.com/sam-ruff/iced-cube/compare/v0.0.17...v0.0.18) (2026-11-27)
+
+### Features
+
+* **calendar:** resize entries from the top edge, typed-value select options and editor fixes ([#15](https://github.com/sam-ruff/iced-cube/issues/15)) ([1312ff0](https://github.com/sam-ruff/iced-cube/commit/1312ff075f8810cbace78f10308c54ac850c0a75))
+
 ## [0.0.17](https://github.com/sam-ruff/iced-cube/compare/v0.0.16...v0.0.17) (2026-11-27)
 
 ### Features
