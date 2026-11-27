@@ -9,10 +9,10 @@ imports: |
 keywords: [dropdown, combobox, picker, scroll, search, filter, type-ahead]
 related: [radio, field, combobox]
 hero: select/default
-stories: [select/default, select/states, select/swatches, select/long-list, select/near-bottom, select/searchable, select/custom-value]
+stories: [select/default, select/states, select/swatches, select/long-list, select/near-bottom, select/searchable, select/custom-value, select/editable, select/commit-on-leave]
 api:
   - name: "select(options, selected)"
-    description: "Creates a select over a slice or Vec of options, labelled with their Display text. It renders disabled until it has a message."
+    description: "Creates a select over a slice or Vec of options, labelled with their Display text. selected need not be one of the options. It renders disabled until it has a message."
   - name: ".on_select(f) / .on_select_maybe(option)"
     description: "Sets the message emitted with the chosen option. None disables the select."
   - name: ".placeholder(text)"
@@ -29,8 +29,18 @@ api:
     description: "Adds a search field to the open list that filters the options as you type. Off by default."
   - name: ".on_custom(f)"
     description: "Lets the user type a value that is not in the list. Enter with text that matches no option calls f with the text; return the message for a valid value, or None to keep the text with the invalid look."
+  - name: ".prefer_custom(bool)"
+    description: "With searchable and on_custom, Enter asks on_custom before taking the highlighted match, and falls back to the match when on_custom returns None. Off by default."
+  - name: ".commit_on_leave(bool)"
+    description: "Enters typed text when the list is left by Tab or a press outside, as Enter would. A value turned down keeps the list open. Off by default."
+  - name: ".pass_through(bool)"
+    description: "Lets a press outside the open list reach what is under it as well as closing the list. Off by default."
+  - name: ".editable(bool)"
+    description: "Makes the closed control a text field: typing opens the list with the text, and the list has no search field of its own. Off by default."
   - name: ".search_placeholder(text) / .empty(text) / .not_valid(text)"
-    description: "The text in the empty search field, the text shown when nothing matches, and the text shown when on_custom turns a typed value down."
+    description: "The text in the empty search field, the text shown when nothing matches, and the text shown when on_custom turns a typed value down: above the rows, or in their place when none show."
+  - name: "select::list_id() / select::search_id()"
+    description: "The ids of the open list and of its search field, for finding them in tests."
   - name: ".shortcuts(shortcuts)"
     description: "The editing shortcuts of the search field, as on an input. Escape always closes the list."
   - name: ".type_ahead_pause(duration)"
@@ -55,7 +65,9 @@ keyboard:
   - keys: "Enter"
     action: "With custom values on, sends text that matches no option to the app."
   - keys: "Tab"
-    action: "Closes the list without choosing and moves focus on."
+    action: "Closes the list without choosing and moves focus on. With commit_on_leave, typed text is entered first."
+  - keys: "Down"
+    action: "Opens the list of a focused editable select."
   - keys: "Escape"
     action: "Closes the list without choosing."
 ---
@@ -69,6 +81,12 @@ Options can be borrowed, such as a `const` slice, so the list is not copied on e
 A long list shows eight rows at a time and scrolls by wheel, scrollbar, a finger drag or the keys. It opens with the selected option in the middle, and is never taller than the room the window has: near the bottom of the window it opens above the field. Scrolling stops at either end of the list rather than moving the page behind it. A list that fits shows no scrollbar.
 
 For lists people search, such as timezones or countries, turn on `.searchable(true)`. The open list then starts with a search field that has the same editing keys as an input, such as paste, undo and deleting a word. To accept values that are not in the list, such as a time off the quarter hours, pass `.on_custom(...)`: when nothing matches, the list offers the typed text as its only row, and Enter or a click hands it to your app, which decides whether it is valid. A value turned down stays in the field in red, with the `.not_valid(...)` text below it, until it is edited. Both are off unless you ask for them, and the query is cleared whenever the list closes.
+
+With search on, Enter normally takes the highlighted match. For values people type more than they pick, such as times, `.prefer_custom(true)` asks `on_custom` first, so a bare "9" is 09:00 rather than the first time containing a nine. The match is still taken when `on_custom` turns the text down, or when the arrow keys moved the highlight.
+
+In a form, `.commit_on_leave(true)` enters typed text when the list is left by Tab or a click elsewhere, as a text field does, and `.pass_through(true)` lets that click reach what is under it, so one click on Save both enters the time and saves. Escape still closes the list without entering anything.
+
+`.editable(true)` makes the closed control a text field you type into straight away, with the list opening below it as you type. The field shows the selected value, which need not be one of the options, so a time typed off the half hours still shows as chosen.
 
 When the options are known up front and you want the field itself to take typing, with the query and list in your app's state, use a [combobox](../combobox/) instead.
 

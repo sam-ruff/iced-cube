@@ -122,15 +122,18 @@ impl TimeOfDay {
         times
     }
 
-    /// Reads a time typed as "9:40", "09:40", "940" or "0940". `None`
-    /// for anything else or a time outside the day.
+    /// Reads a time typed as "9", "09", "9:40", "09.40", "940" or "0940".
+    /// A bare hour is on the hour. `None` for anything else or a time
+    /// outside the day.
     pub fn parse(text: &str) -> Option<TimeOfDay> {
         let text = text.trim();
-        if text.is_empty() || !text.chars().all(|c| c.is_ascii_digit() || c == ':') {
+        let separator = |c: char| c == ':' || c == '.';
+        if text.is_empty() || !text.chars().all(|c| c.is_ascii_digit() || separator(c)) {
             return None;
         }
-        let (hours, minutes) = match text.split_once(':') {
+        let (hours, minutes) = match text.split_once(separator) {
             Some(parts) => parts,
+            None if (1..=2).contains(&text.len()) => (text, "00"),
             None if (3..=4).contains(&text.len()) => text.split_at(text.len() - 2),
             None => return None,
         };
@@ -317,6 +320,12 @@ pub struct State {
     all_day: bool,
     start: (Date, u16),
     end: (Date, u16),
+    /// The instants the form opened with, kept while their field still
+    /// shows them so seconds are not lost.
+    opened: Option<(Timestamp, Timestamp)>,
+    /// Whether the end was put on the next day because its time was not
+    /// after the start's, rather than by picking its date.
+    rolled: bool,
     repeats: Repeats,
     interval: String,
     stops: Stops,
@@ -326,15 +335,20 @@ pub struct State {
     tag: Option<String>,
     location: String,
     notes: Content,
+    /// The notes the form opened with, returned as they were until the
+    /// notes are edited.
+    opened_notes: Option<String>,
     time_zone: TimeZone,
     week_start: Weekday,
     picker: Option<Picker>,
 }
 
-/// The digits of `text`, up to [`NUMBER_DIGITS`] of them.
+/// The digits of `text`, up to [`NUMBER_DIGITS`] of them, without leading
+/// zeros, so the field never shows a 0 the form would read as 1.
 fn digits(text: &str) -> String {
     text.chars()
         .filter(char::is_ascii_digit)
+        .skip_while(|c| *c == '0')
         .take(NUMBER_DIGITS)
         .collect()
 }
@@ -359,6 +373,7 @@ impl State {
             tag: entry.tag_of().map(str::to_owned),
             location: entry.location_of().unwrap_or_default().to_owned(),
             notes: Content::with_text(entry.notes_of().unwrap_or_default()),
+            opened_notes: entry.notes_of().map(str::to_owned),
             ..Self::over(entry.when(), time_zone)
         };
         let Some(repeat) = entry.repeat_of() else {
@@ -382,12 +397,15 @@ impl State {
 
     fn over(when: When, time_zone: &TimeZone) -> Self {
         let nine = 9 * 60;
-        let (all_day, start, end) = match when {
-            When::AllDay { first, last } => (true, (first, nine), (last, nine + DEFAULT_MINUTES)),
+        let (all_day, start, end, opened) = match when {
+            When::AllDay { first, last } => {
+                (true, (first, nine), (last, nine + DEFAULT_MINUTES), None)
+            }
             When::Timed { start, end } => (
                 false,
                 local(start, time_zone),
                 local(end.max(start), time_zone),
+                Some((start, end.max(start))),
             ),
         };
         Self {
@@ -396,6 +414,8 @@ impl State {
             all_day,
             start,
             end,
+            opened,
+            rolled: false,
             repeats: Repeats::Never,
             interval: String::from("1"),
             stops: Stops::Never,
@@ -405,6 +425,7 @@ impl State {
             tag: None,
             location: String::new(),
             notes: Content::new(),
+            opened_notes: None,
             time_zone: time_zone.clone(),
             week_start: Weekday::Monday,
             picker: None,
@@ -482,8 +503,13 @@ impl State {
         &self.location
     }
 
-    /// The notes as text, without the space around them.
+    /// The notes as text. Notes the form opened with come back exactly as
+    /// they were until they are edited; edited notes lose the space around
+    /// them.
     pub fn notes(&self) -> String {
+        if let Some(notes) = &self.opened_notes {
+            return notes.clone();
+        }
         self.notes.text().trim().to_owned()
     }
 
@@ -533,7 +559,7 @@ impl State {
     /// takes a typed time off the [`TIME_STEP`] grid.
     pub fn times(&self, field: Field) -> Vec<TimeOfDay> {
         match field {
-            Field::End if self.end.0 == self.start.0 => {
+            Field::End if self.end.0 == self.start.0 || self.rolled => {
                 TimeOfDay::from((self.start.1 + TIME_STEP) % DAY_MINUTES)
             }
             _ => TimeOfDay::all(),
@@ -553,10 +579,20 @@ impl State {
         if self.all_day {
             return When::all_day(self.start.0, self.end.0);
         }
+        let (opened_start, opened_end) = self.opened.unzip();
         When::timed(
-            instant_at(self.start.0, self.start.1, &self.time_zone),
-            instant_at(self.end.0, self.end.1, &self.time_zone),
+            self.instant(self.start, opened_start),
+            self.instant(self.end, opened_end),
         )
+    }
+
+    /// The instant a field stands for: the one the form opened with while
+    /// the field still shows it, so its seconds are kept.
+    fn instant(&self, field: (Date, u16), opened: Option<Timestamp>) -> Timestamp {
+        match opened {
+            Some(instant) if local(instant, &self.time_zone) == field => instant,
+            _ => instant_at(field.0, field.1, &self.time_zone),
+        }
     }
 
     /// The entry the form describes. A new entry takes `new_id`; a changed
@@ -582,16 +618,23 @@ impl State {
     pub fn update(&mut self, event: Event) {
         match event {
             Event::Title(title) => self.title = title,
-            Event::AllDay(all_day) => {
-                self.all_day = all_day;
-                self.settle(Field::End);
-            }
+            Event::AllDay(all_day) => self.set_all_day(all_day),
             Event::Date(field, date) => {
                 self.picker = None;
+                if field == Field::End {
+                    self.rolled = false;
+                }
                 self.set(field, (date, self.time(field)));
             }
             Event::Time(field, minute) => {
-                self.set(field, (self.date(field), minute.min(DAY_MINUTES - 1)));
+                let mut date = self.date(field);
+                // A rolled end goes back to the start's day first, so a
+                // later time can end the entry on the day it starts.
+                if field == Field::End && self.rolled {
+                    date = self.start.0;
+                    self.rolled = false;
+                }
+                self.set(field, (date, minute.min(DAY_MINUTES - 1)));
             }
             Event::Repeats(repeats) => {
                 self.repeats = repeats;
@@ -613,7 +656,12 @@ impl State {
             Event::Count(text) => self.count = digits(&text),
             Event::Tone(tone) => self.tone = tone,
             Event::Location(location) => self.location = location,
-            Event::Notes(action) => self.notes.perform(action),
+            Event::Notes(action) => {
+                if action.is_edit() {
+                    self.opened_notes = None;
+                }
+                self.notes.perform(action);
+            }
             Event::Picker(field) => {
                 self.picker = field.map(|field| Picker {
                     target: Target::Field(field),
@@ -672,6 +720,26 @@ impl State {
         }
     }
 
+    /// Switches between whole days and times. A timed end at midnight is
+    /// the end of the day before, so turning whole days on takes the day
+    /// before as the last, and turning them off gives it back.
+    fn set_all_day(&mut self, all_day: bool) {
+        if self.all_day == all_day {
+            return;
+        }
+        self.all_day = all_day;
+        let midnight_end = self.end.1 == 0;
+        match all_day {
+            true if midnight_end && self.end.0 > self.start.0 => {
+                self.end.0 = add_days(self.end.0, -1);
+            }
+            false if midnight_end => self.end.0 = add_days(self.end.0, 1),
+            _ => {}
+        }
+        self.rolled = false;
+        self.settle(Field::End);
+    }
+
     /// Puts the end back at or after the start. Whole days may start and
     /// end on the same day; a timed entry is at least one step long.
     fn settle(&mut self, changed: Field) {
@@ -684,10 +752,11 @@ impl State {
         if self.end > self.start {
             return;
         }
-        // An end time picked earlier than the start on the same day means
-        // the next day, as in "22:00 to 01:00".
-        if changed == Field::End && self.end.0 == self.start.0 && self.end.1 < self.start.1 {
+        // An end time picked on the start's day at or before the start
+        // means the next day, as in "22:00 to 01:00".
+        if changed == Field::End && self.end.0 == self.start.0 {
             self.end.0 = add_days(self.start.0, 1);
+            self.rolled = true;
             return;
         }
         let end = self.start.1 + TIME_STEP;
@@ -1365,10 +1434,14 @@ mod tests {
         assert_eq!(form.date(Field::End), date(2026, 6, 19));
         assert_eq!(form.time(Field::End), 660 + TIME_STEP);
 
-        // The same time as the start is one step long.
+        // The same time as the start is the same time the next day, not a
+        // time nobody chose.
         let mut form = timed();
         form.update(Event::Time(Field::End, 660));
-        assert_eq!(form.time(Field::End), 660 + TIME_STEP);
+        assert_eq!(
+            (form.date(Field::End), form.time(Field::End)),
+            (date(2026, 6, 20), 660)
+        );
 
         // At the last step of the day, the shortest entry ends at midnight.
         let late = at(23, 45);
@@ -1378,11 +1451,103 @@ mod tests {
             },
             &UTC,
         );
-        form.update(Event::Time(Field::End, 23 * 60 + 45));
+        form.update(Event::Time(Field::Start, 23 * 60 + 45));
         assert_eq!(
             (form.date(Field::End), form.time(Field::End)),
             (date(2026, 6, 20), 0)
         );
+    }
+
+    #[test]
+    fn an_end_put_on_the_next_day_comes_back_when_a_later_time_is_typed() {
+        let mut form = State::new(
+            &Draft {
+                when: When::timed(at(9, 0), at(10, 0)),
+            },
+            &UTC,
+        );
+        form.update(Event::Time(Field::End, 8 * 60));
+        assert_eq!(
+            form.date(Field::End),
+            date(2026, 6, 20),
+            "08:00 is overnight"
+        );
+        assert_eq!(form.times(Field::End)[0], TimeOfDay(9 * 60 + TIME_STEP));
+        form.update(Event::Time(Field::End, 11 * 60));
+        assert_eq!(
+            form.when(),
+            When::timed(at(9, 0), at(11, 0)),
+            "not 26 hours"
+        );
+
+        // A next day picked on purpose stays.
+        form.update(Event::Date(Field::End, date(2026, 6, 20)));
+        form.update(Event::Time(Field::End, 12 * 60));
+        assert_eq!(form.date(Field::End), date(2026, 6, 20));
+
+        // Moving the start keeps a rolled end rolled.
+        let mut form = timed();
+        form.update(Event::Time(Field::End, 9 * 60));
+        form.update(Event::Time(Field::Start, 10 * 60));
+        form.update(Event::Time(Field::End, 12 * 60));
+        assert_eq!(
+            (form.date(Field::End), form.time(Field::End)),
+            (date(2026, 6, 19), 720)
+        );
+    }
+
+    #[test]
+    fn whole_days_end_on_the_day_a_midnight_end_closes() {
+        let mut form = State::new(
+            &Draft {
+                when: When::timed(at(23, 0), at(23, 0) + jiff::SignedDuration::from_hours(1)),
+            },
+            &UTC,
+        );
+        form.update(Event::AllDay(true));
+        assert_eq!(
+            form.when(),
+            When::day(date(2026, 6, 19)),
+            "one day, not two"
+        );
+        form.update(Event::AllDay(false));
+        assert_eq!(
+            form.when(),
+            When::timed(at(23, 0), at(23, 0) + jiff::SignedDuration::from_hours(1)),
+            "and back"
+        );
+        form.update(Event::AllDay(false));
+        assert_eq!(form.date(Field::End), date(2026, 6, 20), "no change twice");
+    }
+
+    #[test]
+    fn editing_the_title_alone_keeps_the_notes_and_the_seconds() {
+        let start = at(9, 0) + jiff::SignedDuration::from_secs(30);
+        let end = at(10, 0) + jiff::SignedDuration::from_secs(15);
+        let notes = "  Agenda first\nthen figures\n";
+        let entry = Entry::new(EntryId(2), "Review", start, end).notes(notes);
+        let mut form = State::edit(&entry, &UTC);
+        form.update(Event::Title(String::from("Review two")));
+        assert_eq!(form.notes(), notes);
+        let saved = form.entry(EntryId(9));
+        assert_eq!(saved.when(), When::timed(start, end));
+        assert_eq!(saved.notes_of(), Some(notes));
+
+        // A changed end loses its seconds; the untouched start keeps them.
+        form.update(Event::Time(Field::End, 11 * 60));
+        assert_eq!(form.when(), When::timed(start, at(11, 0)));
+
+        // Edited notes are trimmed.
+        form.update(Event::Notes(Action::Edit(
+            iced::widget::text_editor::Edit::Insert('x'),
+        )));
+        assert!(!form.notes().starts_with(' '));
+        // Moving the cursor is not an edit.
+        let mut form = State::edit(&entry, &UTC);
+        form.update(Event::Notes(Action::Move(
+            iced::widget::text_editor::Motion::Down,
+        )));
+        assert_eq!(form.notes(), notes);
     }
 
     #[test]
@@ -1493,8 +1658,13 @@ mod tests {
         form.update(Event::Interval(String::new()));
         assert_eq!(form.interval(), 1, "blank while typing");
         form.update(Event::Interval(String::from("0")));
+        assert_eq!(form.interval_text(), "", "a 0 is never shown");
         assert_eq!(form.interval(), 1);
         assert_eq!(form.repeat(), Some(Repeat::daily()));
+        form.update(Event::Interval(String::from("05")));
+        assert_eq!(form.interval_text(), "5");
+        form.update(Event::Interval(String::from("10")));
+        assert_eq!(form.interval(), 10);
 
         form.update(Event::Stops(Stops::After));
         form.update(Event::Count(String::from("-5 times")));
@@ -1601,8 +1771,13 @@ mod tests {
         assert_eq!(TimeOfDay::parse("940"), Some(TimeOfDay(580)));
         assert_eq!(TimeOfDay::parse("2359"), Some(TimeOfDay(1439)));
         assert_eq!(TimeOfDay::parse("0:00"), Some(TimeOfDay(0)));
+        assert_eq!(TimeOfDay::parse("9"), Some(TimeOfDay(540)), "a bare hour");
+        assert_eq!(TimeOfDay::parse("17"), Some(TimeOfDay(1020)));
+        assert_eq!(TimeOfDay::parse("09.05"), Some(TimeOfDay(545)));
+        assert_eq!(TimeOfDay::parse("9.05"), Some(TimeOfDay(545)));
         for bad in [
-            "", "9", "24:00", "12:60", "9:4", "123:00", "ab:cd", "€12", "12:3x", ":30",
+            "", "24", "24:00", "12:60", "9:4", "123:00", "ab:cd", "€12", "12:3x", ":30", "9:",
+            "9.", "9:30.5", ".",
         ] {
             assert_eq!(TimeOfDay::parse(bad), None, "{bad:?}");
         }

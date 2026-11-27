@@ -130,7 +130,7 @@ The first press on a day, a time or an entry selects it. A double click or a dou
 
 By default a press on what is already selected activates it too, however long after the first, which is what a touch screen wants. Where a double click should be the only way to open things, turn that off with `with_activate_on_second_press(false)`: a single click then only selects.
 
-In the week and day views a mouse can also drag: across empty space to ask for an entry of that length, on an entry to move it, and on its lower edge to change when it ends. Drags snap to 15 minutes. In the month, and in the strip of whole-day entries above the hours, an entry is dragged by whole days: a timed one keeps its time of day and a whole-day one its length. A finger scrolls instead, so on a touch screen entries are created with two taps and edited in whatever the app opens.
+In the week and day views a mouse can also drag: across empty space to ask for an entry of that length, on an entry to move it, and on its top or lower edge to change when it starts or ends, keeping the other edge where it is. Drags snap to 15 minutes, and a resized entry is never shorter than that. An edge that is on another day or outside the hours on show cannot be dragged, and on a short entry the edges take less of it, so the middle is always left to move it by. In the month, and in the strip of whole-day entries above the hours, an entry is dragged by whole days: a timed one keeps its time of day and a whole-day one its length. A finger scrolls instead, so on a touch screen entries are created with two taps and edited in whatever the app opens.
 
 `Requested` and `Opened` are where the app shows its dialog or side panel, as the "Creating and editing" example does.
 
@@ -183,7 +183,7 @@ A calendar with no `.on_event` at all is a picture: it shows the entries and res
 
 ## Repeating entries
 
-A repeating entry is one entry with a rule. Occurrences are counted from the first, so an entry on the 31st that repeats monthly uses the last day of shorter months and returns to the 31st afterwards, and a timed entry keeps its local time when the clocks change. Dragging one occurrence moves the whole series by the same amount. Rules are simple: there is no "last Friday of the month" and no way to skip or move a single occurrence.
+A repeating entry is one entry with a rule. Occurrences are counted from the first, so an entry on the 31st that repeats monthly uses the last day of shorter months and returns to the 31st afterwards, and a timed entry keeps its local time when the clocks change. Dragging one occurrence moves the whole series by the same amount, and resizing one by either edge makes every occurrence that length. Rules are simple: there is no "last Friday of the month" and no way to skip or move a single occurrence.
 
 The rules live in `calendar::rules`, which uses only `jiff` and works on a `When` and a `Repeat` rather than an entry, so other code in the app can list the same occurrences the window shows.
 

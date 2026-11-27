@@ -160,9 +160,11 @@ pub enum Event {
     OpenDay(Date),
     /// A span dragged out on empty space.
     Request(Draft),
-    /// An occurrence dragged to a new time. `start` says which occurrence;
-    /// a repeating entry moves as a whole by the same amount. A whole-day
-    /// entry moves by the days between the two starts.
+    /// An occurrence dragged or resized to a new time. `start` says which
+    /// occurrence; every occurrence of a repeating entry starts as far from
+    /// where it did as this one, and takes this one's new length, so
+    /// resizing one edge resizes the series. A whole-day entry moves by the
+    /// days between the two starts.
     Reschedule {
         entry: EntryId,
         start: Timestamp,
@@ -1675,6 +1677,35 @@ mod tests {
         });
         let moved = state.entries().get(EntryId(1)).map(Entry::when);
         assert_eq!(moved, Some(When::timed(at(16, 11), at(16, 12))));
+    }
+
+    #[test]
+    fn resizing_one_occurrence_changes_the_length_of_the_whole_series() {
+        let series = || {
+            State::new(today())
+                .with_entries(Entries::utc().with([meeting(1, 16, 9).repeat(Repeat::daily())]))
+        };
+        // The top edge of the 19th is dragged an hour earlier: every
+        // occurrence starts an hour earlier and still ends at 10:00.
+        let mut state = series();
+        let _ = state.update(Event::Reschedule {
+            entry: EntryId(1),
+            start: at(19, 9),
+            to: (at(19, 8), at(19, 10)),
+        });
+        let longer = state.entries().get(EntryId(1)).map(Entry::when);
+        assert_eq!(longer, Some(When::timed(at(16, 8), at(16, 10))));
+
+        // The lower edge of the 19th is dragged an hour later: every
+        // occurrence still starts at 09:00 and ends at 11:00.
+        let mut state = series();
+        let _ = state.update(Event::Reschedule {
+            entry: EntryId(1),
+            start: at(19, 9),
+            to: (at(19, 9), at(19, 11)),
+        });
+        let longer = state.entries().get(EntryId(1)).map(Entry::when);
+        assert_eq!(longer, Some(When::timed(at(16, 9), at(16, 11))));
     }
 
     #[test]

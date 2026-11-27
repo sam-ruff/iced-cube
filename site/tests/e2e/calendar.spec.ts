@@ -15,6 +15,10 @@ const STORIES = [
   "calendar/triggers",
 ];
 
+// Several wasm previews booting at once on a software renderer can take
+// well over a minute, so every wait here allows for a loaded machine.
+test.describe.configure({ timeout: 240_000 });
+
 async function noHorizontalScroll(page: Page): Promise<void> {
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(0);
@@ -24,7 +28,7 @@ async function noHorizontalScroll(page: Page): Promise<void> {
 async function live(page: Page, story: string): Promise<Locator> {
   const frame = page.locator(`[data-story="${story}"]`).first();
   await frame.scrollIntoViewIfNeeded();
-  await expect(frame).toHaveClass(/live/, { timeout: 30_000 });
+  await expect(frame).toHaveClass(/live/, { timeout: 120_000 });
   return frame;
 }
 
@@ -44,7 +48,7 @@ async function settled(frame: Locator): Promise<string> {
         last = now;
         return same;
       },
-      { timeout: 15_000, intervals: [250] },
+      { timeout: 60_000, intervals: [250] },
     )
     .toBe(true);
   return last;
@@ -52,7 +56,7 @@ async function settled(frame: Locator): Promise<string> {
 
 /** Waits for the frame to look different from `before`, then to settle. */
 async function changedFrom(frame: Locator, before: string): Promise<string> {
-  await expect.poll(async () => (await picture(frame)) !== before, { timeout: 15_000 }).toBe(true);
+  await expect.poll(async () => (await picture(frame)) !== before, { timeout: 60_000 }).toBe(true);
   return settled(frame);
 }
 
@@ -172,8 +176,8 @@ test("dragging across the live week opens the entry form, and Enter saves it", a
   // Restarting the preview puts the week back as it was.
   const root = page.locator("[data-preview-root]").filter({ has: frame });
   await root.locator("[data-reset]").click();
-  await expect(frame).toHaveClass(/live/, { timeout: 30_000 });
-  await expect.poll(async () => (await settled(frame)) === week, { timeout: 30_000 }).toBe(true);
+  await expect(frame).toHaveClass(/live/, { timeout: 120_000 });
+  await expect.poll(async () => (await settled(frame)) === week, { timeout: 120_000 }).toBe(true);
 });
 
 test("Escape closes the entry form without adding anything", async ({ page, isMobile }) => {
@@ -221,7 +225,7 @@ test("the header of a live calendar moves to the next month and Today comes back
 
   await page.mouse.click(today.x, today.y);
   await changedFrom(frame, july);
-  await expect.poll(async () => (await picture(frame)) === june, { timeout: 15_000 }).toBe(true);
+  await expect.poll(async () => (await picture(frame)) === june, { timeout: 60_000 }).toBe(true);
 });
 
 test("the calendar pages fit a phone", async ({ page, isMobile }) => {

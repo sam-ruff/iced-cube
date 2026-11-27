@@ -3,8 +3,8 @@
 use iced::keyboard::{self, Key, key::Named};
 use iced::{Element, Event as Input, Point, Settings, Size, mouse, touch};
 use iced_cube::data::calendar::{
-    Draft, Entries, Entry, EntryId, Event, Output, Selection, State, Tone, View, When, calendar,
-    instant,
+    Draft, Entries, Entry, EntryId, Event, Output, Repeat, Selection, State, Tone, View, When,
+    calendar, instant,
 };
 use iced_test::simulator::Simulator;
 use jiff::Timestamp;
@@ -374,6 +374,52 @@ fn dragging_the_lower_edge_changes_when_an_entry_ends() {
 }
 
 #[test]
+fn dragging_the_top_edge_changes_when_an_entry_starts() {
+    let mut state = state(View::Week);
+    let (events, outputs) = drive(&mut state, DESKTOP, |ui| {
+        let nine = slot(ui, "TUE", 9.0);
+        let edge = Point::new(nine.x, nine.y + 3.0);
+        let to = slot(ui, "TUE", 8.5);
+        drag(ui, edge, to);
+    });
+    assert_eq!(
+        events,
+        vec![Event::Reschedule {
+            entry: EntryId(1),
+            start: at(17, 9, 0),
+            to: (at(17, 8, 30), at(17, 10, 0)),
+        }]
+    );
+    assert!(matches!(outputs.as_slice(), [Output::Changed(_)]));
+    let longer = state.entries().get(EntryId(1)).map(Entry::when);
+    assert_eq!(longer, Some(When::timed(at(17, 8, 30), at(17, 10, 0))));
+}
+
+#[test]
+fn dragging_the_top_edge_of_a_repeat_changes_the_length_of_every_occurrence() {
+    let mut state = State::new(date(2026, 11, 19))
+        .with_entries(Entries::utc().with([
+            Entry::new(EntryId(1), "Stand-up", at(16, 9, 0), at(16, 10, 0)).repeat(Repeat::daily()),
+        ]))
+        .with_view(View::Week);
+    let (events, _) = drive(&mut state, DESKTOP, |ui| {
+        let nine = slot(ui, "WED", 9.0);
+        let to = slot(ui, "WED", 9.5);
+        drag(ui, Point::new(nine.x, nine.y + 3.0), to);
+    });
+    assert_eq!(
+        events,
+        vec![Event::Reschedule {
+            entry: EntryId(1),
+            start: at(18, 9, 0),
+            to: (at(18, 9, 30), at(18, 10, 0)),
+        }]
+    );
+    let shorter = state.entries().get(EntryId(1)).map(Entry::when);
+    assert_eq!(shorter, Some(When::timed(at(16, 9, 30), at(16, 10, 0))));
+}
+
+#[test]
 fn escape_abandons_a_drag() {
     let mut state = state(View::Week);
     let (events, _) = drive(&mut state, DESKTOP, |ui| {
@@ -500,7 +546,7 @@ fn a_read_only_calendar_selects_and_opens_but_takes_no_changes() {
     let mut state = state(View::Week).read_only();
     let before = state.entries().clone();
     let (events, outputs) = drive(&mut state, DESKTOP, |ui| {
-        // Drags across empty space, on an entry and on its lower edge.
+        // Drags across empty space, on an entry and on its edges.
         let from = slot(ui, "WED", 10.0);
         let to = slot(ui, "WED", 11.5);
         drag(ui, from, to);
@@ -510,6 +556,9 @@ fn a_read_only_calendar_selects_and_opens_but_takes_no_changes() {
         let ten = slot(ui, "TUE", 10.0);
         let to = slot(ui, "TUE", 11.5);
         drag(ui, Point::new(ten.x, ten.y - 4.0), to);
+        let nine = slot(ui, "TUE", 9.0);
+        let to = slot(ui, "TUE", 8.5);
+        drag(ui, Point::new(nine.x, nine.y + 3.0), to);
     });
     assert_eq!(events, vec![], "no drag sends anything");
     assert_eq!(outputs, vec![]);

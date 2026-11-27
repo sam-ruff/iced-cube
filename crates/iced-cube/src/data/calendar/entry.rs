@@ -161,10 +161,11 @@ impl Entry {
         self
     }
 
-    /// Free text kept with the entry, which may run over several lines.
-    /// Blank text clears it.
+    /// Free text kept with the entry exactly as given, which may run over
+    /// several lines. Blank text clears it.
     pub fn notes(mut self, notes: impl Into<String>) -> Self {
-        self.notes = filled(notes.into());
+        let notes = notes.into();
+        self.notes = (!notes.trim().is_empty()).then_some(notes);
         self
     }
 
@@ -553,18 +554,21 @@ mod tests {
     }
 
     #[test]
-    fn location_and_notes_are_trimmed_and_blank_clears_them() {
+    fn the_location_is_trimmed_the_notes_kept_and_blank_clears_them() {
         let entry = meeting(1, 3, 9);
         assert_eq!(entry.location_of(), None);
         assert_eq!(entry.notes_of(), None);
 
         let entry = entry
             .location("  Room 4 ")
-            .notes("Bring the plan\nand the figures\n");
+            .notes("  Bring the plan\nand the figures\n");
         assert_eq!(entry.location_of(), Some("Room 4"));
-        assert_eq!(entry.notes_of(), Some("Bring the plan\nand the figures"));
+        assert_eq!(
+            entry.notes_of(),
+            Some("  Bring the plan\nand the figures\n")
+        );
 
-        let entry = entry.location("   ").notes("");
+        let entry = entry.location("   ").notes(" \n ");
         assert_eq!(entry.location_of(), None);
         assert_eq!(entry.notes_of(), None);
     }

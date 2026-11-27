@@ -330,6 +330,16 @@ crate::stories! {
         description: "Type a time that is not in the list and press Enter. The app decides whether it is valid.",
         file: "select/custom_value.rs", height: 360,
     }
+    SelectEditable => select::editable {
+        id: "select/editable", component: "select", title: "Typing into the field",
+        description: "The closed select is a text field. Typing opens the list filtered by the text, and Enter takes the typed time, such as 9 for 09:00, over the first match.",
+        file: "select/editable.rs", height: 360,
+    }
+    SelectCommitOnLeave => select::commit_on_leave {
+        id: "select/commit-on-leave", component: "select", title: "Entering a value on leaving",
+        description: "Type a time and press Save: the time is entered as the list closes, and the same click reaches the button. A time that cannot be read keeps the list open and says why.",
+        file: "select/commit_on_leave.rs", height: 360,
+    }
     ComboboxDefault => combobox::default {
         id: "combobox/default", component: "combobox", title: "Default",
         description: "Suggestions filter as you type. The list starts open here so you can see it.",

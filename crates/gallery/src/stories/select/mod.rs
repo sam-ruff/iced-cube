@@ -1,5 +1,7 @@
+pub mod commit_on_leave;
 pub mod custom_value;
 pub mod default;
+pub mod editable;
 pub mod long_list;
 pub mod near_bottom;
 pub mod searchable;

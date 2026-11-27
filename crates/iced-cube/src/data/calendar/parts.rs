@@ -84,7 +84,10 @@ pub fn when_label(when: &When, time_zone: &TimeZone) -> String {
             if end <= start {
                 return format!("{day}, {first}");
             }
-            if from.date() == to.date() {
+            // An end at midnight closes the day the entry starts on.
+            let ends_that_night = to.time() == jiff::civil::Time::midnight()
+                && from.date().tomorrow().is_ok_and(|next| next == to.date());
+            if from.date() == to.date() || ends_that_night {
                 return format!("{day}, {first} - {last}");
             }
             format!("{day} {first} - {} {last}", to.strftime(DAY))
@@ -734,6 +737,15 @@ mod tests {
         assert_eq!(
             when_label(&When::timed(at(19, 22, 0), at(20, 2, 0)), utc),
             "Thu 19 Nov 22:00 - Fri 20 Nov 02:00"
+        );
+        assert_eq!(
+            when_label(&When::timed(at(19, 23, 0), at(20, 0, 0)), utc),
+            "Thu 19 Nov, 23:00 - 00:00",
+            "an end at midnight is the same day"
+        );
+        assert_eq!(
+            when_label(&When::timed(at(19, 23, 0), at(21, 0, 0)), utc),
+            "Thu 19 Nov 23:00 - Sat 21 Nov 00:00"
         );
     }
 
