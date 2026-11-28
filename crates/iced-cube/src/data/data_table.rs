@@ -1715,7 +1715,7 @@ where
         #[cfg(feature = "icedwright")]
         let header = icedwright_probe::semantic(header)
             .role(icedwright_probe::role::Row)
-            .click_clock(icedwright_probe::ClickClock::Iced)
+            .click_clock(icedwright_probe::ClickClock::Probe)
             .component("iced_cube::data_table");
         let header = widget::column![header, divider];
 
@@ -1970,7 +1970,7 @@ where
                     u32::try_from(at).unwrap_or(u32::MAX),
                     u32::try_from(state.filtered_len()).unwrap_or(u32::MAX),
                 )
-                .click_clock(icedwright_probe::ClickClock::Iced)
+                .click_clock(icedwright_probe::ClickClock::Probe)
                 .component("iced_cube::data_table");
             if let Some(selected) = selected {
                 annotated = annotated.selected(selected);

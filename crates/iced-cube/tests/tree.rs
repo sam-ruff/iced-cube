@@ -507,19 +507,19 @@ fn rows_report_tree_items_that_own_their_children() {
     let mut state = files();
     let _ = state.update(Event::Press(2, Modifiers::empty()));
     let expected = r#"- tree [focused=false] [focusable]:
-  - treeitem "src" [expanded] [selected=false] [level=1] [position=1] [set-size=3] [prop:click-clock="iced"]:
+  - treeitem "src" [expanded] [selected=false] [level=1] [position=1] [set-size=3] [prop:click-clock="probe"]:
     - button "Collapse" [expanded]
     - text: src
-    - treeitem "main.rs" [selected] [level=2] [position=1] [set-size=3] [prop:click-clock="iced"]:
+    - treeitem "main.rs" [selected] [level=2] [position=1] [set-size=3] [prop:click-clock="probe"]:
       - text: main.rs
-    - treeitem "lib.rs" [selected=false] [level=2] [position=2] [set-size=3] [prop:click-clock="iced"]:
+    - treeitem "lib.rs" [selected=false] [level=2] [position=2] [set-size=3] [prop:click-clock="probe"]:
       - text: lib.rs
-    - treeitem "old.rs" [disabled] [selected=false] [level=2] [position=3] [set-size=3] [prop:click-clock="iced"]:
+    - treeitem "old.rs" [disabled] [selected=false] [level=2] [position=3] [set-size=3] [prop:click-clock="probe"]:
       - text: old.rs
-  - treeitem "docs" [expanded=false] [selected=false] [level=1] [position=2] [set-size=3] [prop:click-clock="iced"]:
+  - treeitem "docs" [expanded=false] [selected=false] [level=1] [position=2] [set-size=3] [prop:click-clock="probe"]:
     - button "Expand" [expanded=false]
     - text: docs
-  - treeitem "readme.md" [selected=false] [level=1] [position=3] [set-size=3] [prop:click-clock="iced"]:
+  - treeitem "readme.md" [selected=false] [level=1] [position=3] [set-size=3] [prop:click-clock="probe"]:
     - text: readme.md
 "#;
     assert_eq!(semantic::yaml(view(&state)), expected);

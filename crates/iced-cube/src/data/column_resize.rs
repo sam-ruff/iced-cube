@@ -1,8 +1,8 @@
 //! Dragging the edge between two column headers to resize the column
 //! before it.
 
+use crate::click::{self, Click};
 use iced::advanced::layout::{self, Layout};
-use iced::advanced::mouse::{Click, click};
 use iced::advanced::overlay;
 use iced::advanced::renderer::{self, Quad};
 use iced::advanced::widget::{Operation, Tree, Widget, tree};
@@ -348,7 +348,12 @@ impl<Message> Widget<Message, Theme, Renderer> for Resizer<'_, Message> {
             && let Some(index) = over
             && let Some(position) = cursor.position()
         {
-            let click = Click::new(position, mouse::Button::Left, grip.last_click);
+            let click = Click::new(
+                position,
+                mouse::Button::Left,
+                grip.last_click,
+                crate::time::now(),
+            );
             grip.last_click = Some(click);
             shell.capture_event();
             if click.kind() == click::Kind::Double {

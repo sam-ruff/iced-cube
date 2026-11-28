@@ -196,6 +196,7 @@ unicode-segmentation = { version = "1.13.3", optional = true }
 futures = "0.3.34"
 iced = { version = "0.14.0", default-features = false, features = ["svg", "advanced", "tiny-skia"] }
 iced_test = "0.14.0"
+icedwright-probe = { git = "https://github.com/sam-ruff/icedwright", features = ["control"] }
 icedwright-protocol = { git = "https://github.com/sam-ruff/icedwright" }
 icedwright-semantics = { git = "https://github.com/sam-ruff/icedwright", features = ["collect"] }
 icedwright-types = { git = "https://github.com/sam-ruff/icedwright" }

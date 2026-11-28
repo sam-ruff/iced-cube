@@ -552,11 +552,11 @@ fn members_report_tree_items_with_their_level() {
     };
     let yaml = icedwright_semantics::yaml::write(&tree, root.id, &Default::default());
     let expected = r#"- tree:
-  - treeitem "name" [selected=false] [level=1] [prop:click-clock="iced"]:
+  - treeitem "name" [selected=false] [level=1] [prop:click-clock="probe"]:
     - text: name
     - text: ":"
     - text: "\"Ada\""
-  - treeitem "tags" [expanded=false] [selected=false] [level=1] [prop:click-clock="iced"]:
+  - treeitem "tags" [expanded=false] [selected=false] [level=1] [prop:click-clock="probe"]:
     - text: tags
     - text: ":"
     - text: "[1]"

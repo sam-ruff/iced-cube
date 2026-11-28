@@ -737,17 +737,17 @@ fn document_tabs_report_tabs_with_unsaved_and_close_buttons() {
     assert_eq!(
         written,
         [
-            "- tab \"alpha.rs\" [selected] [prop:click-clock=\"iced\"] [prop:unsaved=\"false\"]:\n\
+            "- tab \"alpha.rs\" [selected] [prop:click-clock=\"probe\"] [prop:unsaved=\"false\"]:\n\
              \x20 - text [hidden]: alpha.rs\n  - button \"Close alpha.rs\" [hidden]\n\
              \x20 - text: alpha.rs\n  - button \"Close alpha.rs\"\n",
-            "- tab \"beta.rs\" [selected=false] [prop:click-clock=\"iced\"] [prop:unsaved=\"true\"]:\n\
+            "- tab \"beta.rs\" [selected=false] [prop:click-clock=\"probe\"] [prop:unsaved=\"true\"]:\n\
              \x20 - text [hidden]: beta.rs\n  - text: beta.rs\n  - button \"Close beta.rs\"\n",
-            "- tab \"gamma.rs\" [selected=false] [prop:click-clock=\"iced\"] [prop:unsaved=\"false\"]:\n\
+            "- tab \"gamma.rs\" [selected=false] [prop:click-clock=\"probe\"] [prop:unsaved=\"false\"]:\n\
              \x20 - text [hidden]: gamma.rs\n  - text: gamma.rs\n  - button \"Close gamma.rs\"\n",
         ]
     );
     assert!(
-        semantic::write(&tree).starts_with("- tablist [prop:click-clock=\"iced\"]:\n"),
+        semantic::write(&tree).starts_with("- tablist [prop:click-clock=\"probe\"]:\n"),
         "{}",
         semantic::write(&tree)
     );

@@ -29,6 +29,7 @@
 #[cfg(any(feature = "button", feature = "toggle", feature = "tooltip"))]
 mod after_touch;
 pub mod application;
+pub mod click;
 pub mod data;
 #[cfg(feature = "input")]
 mod editing;
@@ -73,10 +74,16 @@ pub mod theme;
 mod ticker;
 #[cfg(any(
     feature = "calendar",
+    feature = "data-table",
+    feature = "document-tabs",
+    feature = "json-viewer",
+    feature = "property-grid",
     feature = "rich-text-editor",
     feature = "selectable-text",
     feature = "tappable",
-    feature = "tooltip"
+    feature = "tooltip",
+    feature = "tree",
+    feature = "virtual-list"
 ))]
 mod time;
 

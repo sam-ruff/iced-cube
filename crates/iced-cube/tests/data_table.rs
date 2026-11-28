@@ -638,21 +638,21 @@ fn the_grid_reports_a_table_of_rows_and_cells() {
     };
     let yaml = icedwright_semantics::yaml::write(&tree, table.id, &Default::default());
     let expected = r#"- table:
-  - row [prop:click-clock="iced"]:
+  - row [prop:click-clock="probe"]:
     - columnheader "Email" [prop:sort="none"]:
       - text: Email
     - columnheader "Status" [prop:sort="none"]:
       - text: Status
     - columnheader "Amount" [prop:sort="descending"]:
       - text: Amount
-  - row [position=1] [set-size=2] [prop:click-clock="iced"]:
+  - row [position=1] [set-size=2] [prop:click-clock="probe"]:
     - cell "user2@example.com":
       - text: user2@example.com
     - cell "Failed":
       - text: Failed
     - cell "$20.00":
       - text: $20.00
-  - row [position=2] [set-size=2] [prop:click-clock="iced"]:
+  - row [position=2] [set-size=2] [prop:click-clock="probe"]:
     - cell "user1@example.com":
       - text: user1@example.com
     - cell "Pending":

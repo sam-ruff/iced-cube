@@ -495,7 +495,7 @@ fn the_editor_reports_a_multiline_text_box_with_its_clocks() {
     assert_eq!(
         semantic::write(&tree),
         "- textbox [focused=false] [multiline] [focusable] [prop:caret-clock=\"probe\"] \
-         [prop:click-clock=\"iced\"]: Hello\n"
+         [prop:click-clock=\"probe\"]: Hello\n"
     );
     let editor = tree
         .iter()
@@ -508,6 +508,6 @@ fn the_editor_reports_a_multiline_text_box_with_its_clocks() {
     });
     assert_eq!(
         props,
-        Some((Some("iced".to_owned()), Some("probe".to_owned())))
+        Some((Some("probe".to_owned()), Some("probe".to_owned())))
     );
 }

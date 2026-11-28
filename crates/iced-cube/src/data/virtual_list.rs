@@ -902,7 +902,7 @@ where
                                 u32::try_from(index + 1).unwrap_or(u32::MAX),
                                 u32::try_from(state.len()).unwrap_or(u32::MAX),
                             )
-                            .click_clock(icedwright_probe::ClickClock::Iced)
+                            .click_clock(icedwright_probe::ClickClock::Probe)
                             .component("iced_cube::virtual_list");
                         if state.mode != Mode::None {
                             annotated = annotated.selected(state.selected.contains(&id));

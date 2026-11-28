@@ -383,7 +383,7 @@ fn rendered_rows_report_their_place_in_the_whole_list() {
         .map(|n| {
             format!(
                 "  - listitem \"Row {n}\" [selected=false] [position={}] [set-size=1000] \
-                 [prop:click-clock=\"iced\"]:\n    - text: Row {n}\n",
+                 [prop:click-clock=\"probe\"]:\n    - text: Row {n}\n",
                 n + 1
             )
         })

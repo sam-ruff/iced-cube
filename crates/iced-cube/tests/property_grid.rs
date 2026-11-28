@@ -550,7 +550,7 @@ fn the_grid_reports_rows_of_names_and_values() {
     };
     let yaml = icedwright_semantics::yaml::write(&tree, table.id, &Default::default());
     let expected = r#"- table:
-  - row "Id" [prop:click-clock="iced"]:
+  - row "Id" [prop:click-clock="probe"]:
     - rowheader "Id":
       - text: Id
     - cell "rect-1":
@@ -558,7 +558,7 @@ fn the_grid_reports_rows_of_names_and_values() {
   - row "Layout" [expanded]:
     - text: Layout
     - text: 1
-  - row "Width" [prop:click-clock="iced"] [prop:modified="true"]:
+  - row "Width" [prop:click-clock="probe"] [prop:modified="true"]:
     - rowheader "Width":
       - text: Width
     - cell "120":

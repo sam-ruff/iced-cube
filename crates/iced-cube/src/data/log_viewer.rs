@@ -1551,7 +1551,7 @@ impl<'a, Message: Clone + 'a> View<'a, Message> {
                         u32::try_from(index + 1).unwrap_or(u32::MAX),
                         u32::try_from(state.visible_len()).unwrap_or(u32::MAX),
                     )
-                    .click_clock(icedwright_probe::ClickClock::Iced)
+                    .click_clock(icedwright_probe::ClickClock::Probe)
                     .component("iced_cube::log_viewer")
                     .into();
                 Some(line)

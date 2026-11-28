@@ -1395,7 +1395,7 @@ mod probe {
                 u32::try_from(siblings.len()).unwrap_or(u32::MAX),
             )
             .key(key(state, id))
-            .click_clock(ClickClock::Iced)
+            .click_clock(ClickClock::Probe)
             .component("iced_cube::tree");
         if state.has_children(id) {
             annotated = annotated.expanded(state.is_expanded(id));

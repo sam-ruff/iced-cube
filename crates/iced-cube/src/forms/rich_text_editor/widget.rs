@@ -1,9 +1,9 @@
 //! The editor widget: draws the laid out blocks and turns input into
 //! [`Action`]s for the app.
 
+use crate::click::{self, Click};
 use iced::advanced::clipboard::Kind;
 use iced::advanced::layout::{self, Layout};
-use iced::advanced::mouse::click::{self, Click};
 use iced::advanced::text::{self, Paragraph as _, Renderer as _, Text};
 use iced::advanced::widget::{Operation, Tree, Widget, operation, tree};
 use iced::advanced::{Clipboard, InputMethod, Shell, input_method, renderer};
@@ -175,7 +175,7 @@ impl<'a, Message> Editor<'a, Message> {
             .multiline(true)
             .value(self.content.text())
             .text_size(self.text_size)
-            .click_clock(ClickClock::Iced)
+            .click_clock(ClickClock::Probe)
             .caret_clock(CaretClock::Probe)
             .component("iced_cube::rich_text_editor");
         if let Some(placeholder) = &self.placeholder {
@@ -455,7 +455,12 @@ impl<'a, Message> Editor<'a, Message> {
             shell.capture_event();
             return;
         }
-        let click = Click::new(position, mouse::Button::Left, state.last_click);
+        let click = Click::new(
+            position,
+            mouse::Button::Left,
+            state.last_click,
+            crate::time::now(),
+        );
         let action = match click.kind() {
             click::Kind::Single if state.modifiers.shift() => Action::Select(Motion::To(at)),
             click::Kind::Single => Action::Move(Motion::To(at)),

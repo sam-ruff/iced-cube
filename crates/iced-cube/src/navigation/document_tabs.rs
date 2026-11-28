@@ -27,7 +27,9 @@
 use std::rc::Rc;
 
 use iced::advanced::layout::{self, Layout};
-use iced::advanced::mouse::{self, click};
+use iced::advanced::mouse;
+
+use crate::click::{self, Click};
 use iced::advanced::overlay;
 use iced::advanced::renderer;
 use iced::advanced::widget::operation::scrollable::{AbsoluteOffset, RelativeOffset, Scrollable};
@@ -1049,7 +1051,7 @@ where
         #[cfg(feature = "icedwright")]
         let strip = icedwright_probe::semantic(strip)
             .role(icedwright_probe::role::TabList)
-            .click_clock(icedwright_probe::ClickClock::Iced)
+            .click_clock(icedwright_probe::ClickClock::Probe)
             .component("iced_cube::document_tabs")
             .into();
         strip
@@ -1068,7 +1070,7 @@ fn annotate_tab<'a, Id, Message: 'a>(
         .name(document.label.as_str())
         .selected(active)
         .prop("unsaved", if document.modified { "true" } else { "false" })
-        .click_clock(icedwright_probe::ClickClock::Iced)
+        .click_clock(icedwright_probe::ClickClock::Probe)
         .component("iced_cube::document_tabs")
         .into()
 }
@@ -1453,7 +1455,7 @@ struct Memory {
     /// The content and viewport widths the strip last scrolled for.
     measured: Option<(f32, f32)>,
     press: Option<Press>,
-    last_click: Option<mouse::Click>,
+    last_click: Option<Click>,
     touch: Option<Touch>,
 }
 
@@ -2422,7 +2424,12 @@ impl<Message> Strip<'_, Message> {
                     shell.capture_event();
                     return;
                 }
-                let click = mouse::Click::new(position, mouse::Button::Left, memory.last_click);
+                let click = Click::new(
+                    position,
+                    mouse::Button::Left,
+                    memory.last_click,
+                    crate::time::now(),
+                );
                 memory.last_click = Some(click);
                 if click.kind() == click::Kind::Double {
                     self.publish(shell, Gesture::DoubleClick);

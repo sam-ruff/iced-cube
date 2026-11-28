@@ -1701,7 +1701,7 @@ fn row_view<'a, Message: Clone + 'a>(
             })
             .level(u16::try_from(item.depth + 1).unwrap_or(u16::MAX))
             .selected(highlighted)
-            .click_clock(icedwright_probe::ClickClock::Iced)
+            .click_clock(icedwright_probe::ClickClock::Probe)
             .component("iced_cube::json_viewer");
         if state.has_children(id) {
             annotated = annotated.expanded(expanded);

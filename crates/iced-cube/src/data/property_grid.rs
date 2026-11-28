@@ -2220,7 +2220,7 @@ where
                         let mut annotated = icedwright_probe::semantic(row)
                             .role(icedwright_probe::role::Row)
                             .name(property.name.clone())
-                            .click_clock(icedwright_probe::ClickClock::Iced)
+                            .click_clock(icedwright_probe::ClickClock::Probe)
                             .component("iced_cube::property_grid");
                         if property.disabled || self.on_event.is_none() {
                             annotated = annotated.disabled(true);
