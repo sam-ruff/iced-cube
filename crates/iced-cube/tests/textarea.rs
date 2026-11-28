@@ -241,3 +241,24 @@ fn disabled_textarea_emits_nothing() -> Result<(), Error> {
     assert_eq!(ui.into_messages().count(), 0);
     Ok(())
 }
+
+#[cfg(feature = "icedwright")]
+#[path = "support/semantic.rs"]
+mod semantic;
+
+#[cfg(feature = "icedwright")]
+#[test]
+fn a_textarea_reports_a_multiline_text_box() {
+    let content = Content::with_text("first\nsecond");
+    assert_eq!(
+        semantic::yaml(view(&content, true)),
+        "- textbox \"Write a note\" [focused=false] [multiline] [focusable] \
+         [placeholder=\"Write a note\"] [prop:caret-clock=\"iced\"]: \"first\\nsecond\"\n"
+    );
+    let empty = Content::new();
+    assert_eq!(
+        semantic::yaml(view(&empty, false)),
+        "- textbox \"Write a note\" [disabled] [focused=false] [multiline] [focusable] \
+         [placeholder=\"Write a note\"] [prop:caret-clock=\"iced\"]: \"\"\n"
+    );
+}

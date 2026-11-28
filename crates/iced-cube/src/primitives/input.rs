@@ -358,6 +358,18 @@ impl<'a, Message: Clone + 'a> From<Input<'a, Message>> for Element<'a, Message> 
             input.shortcuts,
             input.max_length,
         );
+        #[cfg(feature = "icedwright")]
+        let field = annotate(
+            field,
+            Field {
+                placeholder: input.placeholder.clone(),
+                value: input.value.clone(),
+                secure: input.secure,
+                enabled,
+                invalid,
+            },
+            "iced_cube::input",
+        );
 
         // A clearable field keeps the same widget tree whether or not the
         // button shows, so it stays focused as the first character is typed.
@@ -389,6 +401,58 @@ impl<'a, Message: Clone + 'a> From<Input<'a, Message>> for Element<'a, Message> 
     }
 }
 
+/// What a text field reports about itself.
+#[cfg(feature = "icedwright")]
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Field {
+    pub(crate) placeholder: String,
+    pub(crate) value: String,
+    pub(crate) secure: bool,
+    pub(crate) enabled: bool,
+    pub(crate) invalid: bool,
+}
+
+/// Reports a text field as a text box, or a password input when it masks
+/// its value, which is then left out.
+#[cfg(feature = "icedwright")]
+pub(crate) fn annotate<'a, Message: 'a>(
+    element: Element<'a, Message>,
+    field: Field,
+    kind: &'static str,
+) -> Element<'a, Message> {
+    use icedwright_probe::role::{Editable, RoleKind};
+    use icedwright_probe::{Semantic, role, semantic};
+
+    fn states<'a, Message: 'a, R: RoleKind + Editable>(
+        mut annotated: Semantic<'a, Message, iced::Theme, iced::Renderer, R>,
+        field: &Field,
+        kind: &'static str,
+    ) -> Semantic<'a, Message, iced::Theme, iced::Renderer, R> {
+        // iced's text input blinks its caret on the real clock.
+        annotated = annotated
+            .component(kind)
+            .caret_clock(icedwright_probe::CaretClock::Iced);
+        if !field.placeholder.is_empty() {
+            annotated = annotated.placeholder(field.placeholder.clone());
+        }
+        if !field.enabled {
+            annotated = annotated.disabled(true);
+        }
+        if field.invalid {
+            annotated = annotated.invalid(true);
+        }
+        annotated
+    }
+
+    if field.secure {
+        return states(semantic(element).role(role::PasswordInput), &field, kind).into();
+    }
+    let value = field.value.clone();
+    states(semantic(element).role(role::TextBox), &field, kind)
+        .value(value)
+        .into()
+}
+
 /// Padding around the clear button's icon.
 const CLEAR_PADDING: f32 = 2.0;
 
@@ -405,7 +469,14 @@ fn clear_button<'a, Message: Clone + 'a>(
         .padding(CLEAR_PADDING)
         .on_press(message)
         .style(|theme, status| clear_style(&Tokens::of(theme), status));
-    container(container(button).id(clear_id()))
+    let button: Element<'a, Message> = container(button).id(clear_id()).into();
+    #[cfg(feature = "icedwright")]
+    let button: Element<'a, Message> = icedwright_probe::semantic(button)
+        .role(icedwright_probe::role::Button)
+        .name("Clear")
+        .component("iced_cube::input")
+        .into();
+    container(button)
         .padding(Padding::ZERO.right(metrics.padding_x - CLEAR_PADDING))
         .width(Length::Fill)
         .height(Length::Fill)

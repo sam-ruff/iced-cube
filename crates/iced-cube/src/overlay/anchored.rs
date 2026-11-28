@@ -416,6 +416,18 @@ pub(crate) struct State {
     /// The side such a panel opened on. It stays there while open, so a
     /// list that shrinks as it is filtered does not jump across the anchor.
     pub(crate) side: Option<Side>,
+    /// Links the anchor to its panel for icedwright, made on first use.
+    #[cfg(feature = "icedwright")]
+    key: Option<icedwright_probe::Key>,
+}
+
+#[cfg(feature = "icedwright")]
+impl State {
+    pub(crate) fn key(&mut self) -> icedwright_probe::Key {
+        self.key
+            .get_or_insert_with(icedwright_probe::Key::unique)
+            .clone()
+    }
 }
 
 /// An anchor with a panel floating next to it. Convert it into an
@@ -628,6 +640,27 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for Anchored<'_, Message> 
         renderer: &Renderer,
         operation: &mut dyn Operation,
     ) {
+        #[cfg(feature = "icedwright")]
+        {
+            let state = tree.state.downcast_mut::<State>();
+            let shown = self.content.is_some() && (!self.behaviour.closes_itself || state.open);
+            if shown {
+                let key = state.key();
+                icedwright_probe::report(operation, layout.bounds(), || {
+                    icedwright_probe::Annotation::new()
+                        .owns(key)
+                        .component("iced_cube::anchored")
+                });
+                let anchor = &mut self.anchor;
+                let child = &mut tree.children[0];
+                operation.traverse(&mut |operation| {
+                    anchor
+                        .as_widget_mut()
+                        .operate(child, layout, renderer, operation);
+                });
+                return;
+            }
+        }
         self.anchor
             .as_widget_mut()
             .operate(&mut tree.children[0], layout, renderer, operation);
@@ -948,6 +981,23 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, Renderer> for Floating<'_,
         let Some(panel) = layout.children().next() else {
             return;
         };
+        #[cfg(feature = "icedwright")]
+        {
+            let key = self.state.key();
+            icedwright_probe::report(operation, panel.bounds(), || {
+                icedwright_probe::Annotation::new()
+                    .key(key)
+                    .component("iced_cube::anchored")
+            });
+            let content = &mut self.content;
+            let tree = &mut *self.tree;
+            operation.traverse(&mut |operation| {
+                content
+                    .as_widget_mut()
+                    .operate(tree, panel, renderer, operation);
+            });
+        }
+        #[cfg(not(feature = "icedwright"))]
         self.content
             .as_widget_mut()
             .operate(self.tree, panel, renderer, operation);

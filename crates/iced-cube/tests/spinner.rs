@@ -124,3 +124,17 @@ fn every_spinner_in_a_row_draws_its_arc_where_its_phase_says() -> Result<(), ice
     }
     Ok(())
 }
+
+#[cfg(feature = "icedwright")]
+#[path = "support/semantic.rs"]
+mod semantic;
+
+#[cfg(feature = "icedwright")]
+#[test]
+fn a_spinner_reports_a_busy_progress_indicator() {
+    let element: Element<'_, ()> = spinner(0.25).into();
+    assert_eq!(
+        semantic::yaml(element),
+        "- progressbar \"Loading\" [busy]\n"
+    );
+}

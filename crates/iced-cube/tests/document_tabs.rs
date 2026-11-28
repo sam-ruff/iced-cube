@@ -714,3 +714,41 @@ fn long_labels_stay_on_one_line_and_end_in_an_ellipsis() {
     let short = ui.find("short.rs").expect("label is rendered").bounds();
     assert!(short.height < 24.0);
 }
+
+#[cfg(feature = "icedwright")]
+#[path = "support/semantic.rs"]
+mod semantic;
+
+#[cfg(feature = "icedwright")]
+#[test]
+fn document_tabs_report_tabs_with_unsaved_and_close_buttons() {
+    use icedwright_semantics::yaml::{self, YamlOptions};
+    use icedwright_types::Role;
+
+    let state = state();
+    let tree = semantic::Recorder::default().tree(view(&state, 600.0, false));
+    let tabs: Vec<_> = tree.iter().filter(|node| node.role == Role::Tab).collect();
+    assert_eq!(tabs.len(), 3);
+    let written: Vec<String> = tabs
+        .iter()
+        .map(|tab| yaml::write(&tree, tab.id, &YamlOptions::default()))
+        .collect();
+    // The plain copy of each tab is hidden behind the hovered copy.
+    assert_eq!(
+        written,
+        [
+            "- tab \"alpha.rs\" [selected] [prop:click-clock=\"iced\"] [prop:unsaved=\"false\"]:\n\
+             \x20 - text [hidden]: alpha.rs\n  - button \"Close alpha.rs\" [hidden]\n\
+             \x20 - text: alpha.rs\n  - button \"Close alpha.rs\"\n",
+            "- tab \"beta.rs\" [selected=false] [prop:click-clock=\"iced\"] [prop:unsaved=\"true\"]:\n\
+             \x20 - text [hidden]: beta.rs\n  - text: beta.rs\n  - button \"Close beta.rs\"\n",
+            "- tab \"gamma.rs\" [selected=false] [prop:click-clock=\"iced\"] [prop:unsaved=\"false\"]:\n\
+             \x20 - text [hidden]: gamma.rs\n  - text: gamma.rs\n  - button \"Close gamma.rs\"\n",
+        ]
+    );
+    assert!(
+        semantic::write(&tree).starts_with("- tablist [prop:click-clock=\"iced\"]:\n"),
+        "{}",
+        semantic::write(&tree)
+    );
+}

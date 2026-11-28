@@ -53,3 +53,19 @@ fn buttons_inside_a_scroll_area_are_clickable() {
     let messages: Vec<_> = ui.into_messages().collect();
     assert_eq!(messages, vec![Message::Open(1)]);
 }
+
+#[cfg(feature = "icedwright")]
+#[path = "support/semantic.rs"]
+mod semantic;
+
+#[cfg(feature = "icedwright")]
+#[test]
+fn a_scroll_area_reports_a_scroll_view() {
+    let element: Element<'_, Message> = scroll_area(column![text("One"), text("Two")])
+        .height(100)
+        .into();
+    assert_eq!(
+        semantic::yaml(element),
+        "- scrollview:\n  - text: One\n  - text: Two\n"
+    );
+}

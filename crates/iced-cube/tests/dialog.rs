@@ -955,3 +955,46 @@ mod combobox_escape {
         assert!(!ui.state.open, "the second dismisses the dialog");
     }
 }
+
+#[cfg(feature = "icedwright")]
+#[path = "support/semantic.rs"]
+mod semantic;
+
+#[cfg(feature = "icedwright")]
+fn subtree(element: Element<'_, Message>, role: icedwright_types::Role) -> String {
+    let tree = semantic::Recorder::default().tree(element);
+    let Some(node) = tree.iter().find(|node| node.role == role) else {
+        return semantic::write(&tree);
+    };
+    icedwright_semantics::yaml::write(&tree, node.id, &Default::default())
+}
+
+#[cfg(feature = "icedwright")]
+#[test]
+fn an_open_dialog_reports_a_modal_dialog_over_a_scrim() {
+    use icedwright_types::Role;
+
+    // The close button that follows is the icon button's own report.
+    let open = subtree(view(OPEN), Role::Scrim);
+    assert!(
+        open.starts_with(
+            "- scrim:\n  - dialog \"Edit profile\" [modal] \
+             [description=\"Make changes to your profile.\"]:\n\
+             \x20   - text: Edit profile\n    - text: Make changes to your profile.\n\
+             \x20   - button \"Save\" [focused=false] [focusable]:\n      - text: Save\n"
+        ),
+        "{open}"
+    );
+    assert_eq!(
+        subtree(confirmation(true), Role::AlertDialog),
+        "- alertdialog \"Delete project?\" [modal] [description=\"This cannot be undone.\"]:\n\
+         \x20 - text: Delete project?\n  - text: This cannot be undone.\n\
+         \x20 - button \"Cancel\" [focused=false] [focusable]:\n    - text: Cancel\n\
+         \x20 - button \"Delete\" [focused=false] [focusable]:\n    - text: Delete\n"
+    );
+    let closed = semantic::yaml(view(Options {
+        open: false,
+        ..OPEN
+    }));
+    assert!(!closed.contains("dialog"), "{closed}");
+}

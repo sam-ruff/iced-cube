@@ -963,17 +963,23 @@ where
             };
             let base = tab_view(document, look, max_label_width, on_close.clone(), false);
             let Some(on_event) = on_event.clone() else {
-                return base;
+                return annotate_tab(base, document, active);
             };
             let hovered = Look {
                 hovered: true,
                 ..look
             };
             let top = tab_view(document, hovered, max_label_width, on_close, true);
-            context_menu::keyed(state.menu(), document.id, widget::hover(base, top))
-                .keymap(context_menu_keymap.clone())
-                .on_event(move |event| on_event(Event::Menu(event)))
-                .into()
+            // The hovered copy holds a close button on every closable tab,
+            // so it alone is reported.
+            #[cfg(feature = "icedwright")]
+            let base: Element<'a, Message> = icedwright_probe::semantic(base).hidden(true).into();
+            let tab: Element<'a, Message> =
+                context_menu::keyed(state.menu(), document.id, widget::hover(base, top))
+                    .keymap(context_menu_keymap.clone())
+                    .on_event(move |event| on_event(Event::Menu(event)))
+                    .into();
+            annotate_tab(tab, document, active)
         };
         let (pinned, unpinned) = state.documents.split_at(state.pinned_count());
         let pinned_row = row(pinned.iter().map(&tab)).into();
@@ -1030,7 +1036,7 @@ where
             }) as Box<dyn Fn(Gesture) -> Option<Message> + 'a>
         });
 
-        Element::new(Strip {
+        let strip = Element::new(Strip {
             pinned_row,
             content,
             trailing,
@@ -1039,8 +1045,41 @@ where
             count: state.documents.len(),
             pinned: state.pinned_count(),
             on_gesture,
-        })
+        });
+        #[cfg(feature = "icedwright")]
+        let strip = icedwright_probe::semantic(strip)
+            .role(icedwright_probe::role::TabList)
+            .click_clock(icedwright_probe::ClickClock::Iced)
+            .component("iced_cube::document_tabs")
+            .into();
+        strip
     }
+}
+
+/// Reports one document as a tab.
+#[cfg(feature = "icedwright")]
+fn annotate_tab<'a, Id, Message: 'a>(
+    tab: Element<'a, Message>,
+    document: &'a Document<Id>,
+    active: bool,
+) -> Element<'a, Message> {
+    icedwright_probe::semantic(tab)
+        .role(icedwright_probe::role::Tab)
+        .name(document.label.as_str())
+        .selected(active)
+        .prop("unsaved", if document.modified { "true" } else { "false" })
+        .click_clock(icedwright_probe::ClickClock::Iced)
+        .component("iced_cube::document_tabs")
+        .into()
+}
+
+#[cfg(not(feature = "icedwright"))]
+fn annotate_tab<'a, Id, Message>(
+    tab: Element<'a, Message>,
+    _document: &'a Document<Id>,
+    _active: bool,
+) -> Element<'a, Message> {
+    tab
 }
 
 fn tab_view<'a, Id, Message>(
@@ -1202,7 +1241,7 @@ where
     let active = look.active;
     let closable = in_bulk_close(document);
     if closable && (look.hovered || (active && !document.modified)) {
-        return Some(close_button(on_close));
+        return Some(close_button(&document.label, on_close));
     }
     if document.modified {
         let dot = container(widget::space())
@@ -1214,9 +1253,12 @@ where
     closable.then(|| widget::space().width(SLOT).height(SLOT).into())
 }
 
-fn close_button<'a, Message: Clone + 'a>(on_close: Option<Message>) -> Element<'a, Message> {
+fn close_button<'a, Message: Clone + 'a>(
+    label: &str,
+    on_close: Option<Message>,
+) -> Element<'a, Message> {
     let enabled = on_close.is_some();
-    widget::button(themed(
+    let button: Element<'a, Message> = widget::button(themed(
         crate::lucide!(X),
         CLOSE_ICON,
         opacity(enabled),
@@ -1227,7 +1269,21 @@ fn close_button<'a, Message: Clone + 'a>(on_close: Option<Message>) -> Element<'
     .padding((SLOT - CLOSE_ICON) / 2.0)
     .on_press_maybe(on_close)
     .style(|theme, status| close_style(&Tokens::of(theme), status))
-    .into()
+    .into();
+    #[cfg(feature = "icedwright")]
+    let button = {
+        let mut annotated = icedwright_probe::semantic(button)
+            .role(icedwright_probe::role::Button)
+            .name(format!("Close {label}"))
+            .component("iced_cube::document_tabs");
+        if !enabled {
+            annotated = annotated.disabled(true);
+        }
+        annotated.into()
+    };
+    #[cfg(not(feature = "icedwright"))]
+    let _ = label;
+    button
 }
 
 /// The colour of a tab's label and icon.

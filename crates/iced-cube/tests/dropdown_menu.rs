@@ -346,3 +346,33 @@ fn a_menu_without_on_event_is_inert() {
     let _ = ui.tap_key(Key::Named(Named::Escape));
     assert!(messages(ui).is_empty());
 }
+
+#[cfg(feature = "icedwright")]
+#[path = "support/semantic.rs"]
+mod semantic;
+
+#[cfg(feature = "icedwright")]
+#[test]
+fn an_open_menu_reports_its_items_owned_by_the_trigger() {
+    use icedwright_types::Role;
+
+    let state = opened();
+    let tree = semantic::Recorder::default().tree(view(&state));
+    let menu = tree
+        .iter()
+        .find(|node| node.role == Role::Menu)
+        .expect("the open menu is in the tree");
+    assert_eq!(
+        icedwright_semantics::yaml::write(&tree, menu.id, &Default::default()),
+        "- menu:\n  - scrollview:\n    - text: Edit\n\
+         \x20   - menuitem \"Copy\":\n      - text: Copy\n      - text: Ctrl+C\n\
+         \x20   - menuitem \"Paste\" [disabled]:\n      - text: Paste\n\
+         \x20   - menuitem \"Share\" [expanded=false]:\n      - text: Share\n\
+         \x20   - menuitemcheckbox \"Show grid\" [checked=false]:\n      - text: Show grid\n"
+    );
+    let owner = tree
+        .iter()
+        .find(|node| !node.relations.owns.is_empty())
+        .expect("the trigger owns the menu");
+    assert_eq!(owner.relations.owns, vec![menu.id]);
+}

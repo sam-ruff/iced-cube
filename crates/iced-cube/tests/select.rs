@@ -274,3 +274,50 @@ fn disabled_select_does_not_open() {
     assert!(ui.find("Banana").is_err());
     assert_eq!(ui.into_messages().count(), 0);
 }
+
+#[cfg(feature = "icedwright")]
+#[path = "support/semantic.rs"]
+mod semantic;
+
+#[cfg(feature = "icedwright")]
+#[test]
+fn a_select_reports_its_value_and_its_open_list() {
+    let mut recorder = semantic::Recorder::default();
+    assert_eq!(
+        recorder.yaml(view(Some("Banana"), true)),
+        r#"- combobox "Pick a fruit" [expanded=false] [focused=false] [focusable] [placeholder="Pick a fruit"]:
+  - /value: Banana
+  - text: Banana
+- text: Other
+"#
+    );
+
+    let field = Point::new(20.0, HEIGHT / 2.0);
+    let cursor = mouse::Cursor::Available(field);
+    let _ = recorder.events(
+        view(Some("Banana"), true),
+        cursor,
+        &[
+            Event::Mouse(mouse::Event::CursorMoved { position: field }),
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+        ],
+    );
+    assert_eq!(
+        recorder.yaml(view(Some("Banana"), true)),
+        r#"- combobox "Pick a fruit" [expanded] [focused=false] [focusable] [placeholder="Pick a fruit"]:
+  - /value: Banana
+  - text: Banana
+  - listbox:
+    - generic:
+      - scrollview:
+        - option "Apple" [selected=false]:
+          - text: Apple
+        - option "Banana" [selected]:
+          - text: Banana
+        - option "Cherry" [selected=false]:
+          - text: Cherry
+- text: Other
+"#
+    );
+}

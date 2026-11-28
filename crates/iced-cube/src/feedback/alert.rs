@@ -92,6 +92,8 @@ impl<'a, Message: 'a> From<Alert<'a>> for Element<'a, Message> {
     fn from(alert: Alert<'a>) -> Self {
         let variant = alert.variant;
         let glyph = alert.glyph();
+        #[cfg(feature = "icedwright")]
+        let (name, about) = (alert.title.clone(), alert.description.clone());
 
         let icon = themed(glyph, ICON_SIZE, 1.0, move |theme| {
             colours(&Tokens::of(theme), variant).accent
@@ -115,11 +117,24 @@ impl<'a, Message: 'a> From<Alert<'a>> for Element<'a, Message> {
                 );
         }
 
-        container(row![container(icon).padding([2, 0]), body].spacing(space::MD))
-            .padding([space::MD, space::LG])
-            .width(alert.width)
-            .style(move |theme| style(&Tokens::of(theme), variant))
-            .into()
+        let element: Element<'a, Message> =
+            container(row![container(icon).padding([2, 0]), body].spacing(space::MD))
+                .padding([space::MD, space::LG])
+                .width(alert.width)
+                .style(move |theme| style(&Tokens::of(theme), variant))
+                .into();
+        #[cfg(feature = "icedwright")]
+        let element = {
+            let mut annotated = icedwright_probe::semantic(element)
+                .role(icedwright_probe::role::Alert)
+                .name(name)
+                .component("iced_cube::alert");
+            if let Some(about) = about {
+                annotated = annotated.description(about);
+            }
+            annotated.into()
+        };
+        element
     }
 }
 

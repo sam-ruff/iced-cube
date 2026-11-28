@@ -321,7 +321,14 @@ impl<'a, Message: Clone + 'a> From<Calendar<'a, Message>> for Element<'a, Messag
         if header {
             content = content.push(self::header(state, on_event.clone(), leading, trailing));
         }
-        content.push(framed).into()
+        let content = content.push(framed);
+        #[cfg(feature = "icedwright")]
+        let content = icedwright_probe::semantic(content)
+            .role(icedwright_probe::role::Region)
+            .name("Calendar")
+            .description(state.title())
+            .component("iced_cube::calendar");
+        content.into()
     }
 }
 

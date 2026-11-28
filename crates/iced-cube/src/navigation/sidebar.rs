@@ -971,6 +971,11 @@ where
                 Some(on_event) => solid(mouse_area(scrim).on_press(on_event(Event::CloseDrawer))),
                 None => solid(scrim),
             };
+            #[cfg(feature = "icedwright")]
+            let scrim: Element<'a, Message> = icedwright_probe::semantic(scrim)
+                .role(icedwright_probe::role::Scrim)
+                .component("iced_cube::sidebar")
+                .into();
             let drawer = panel(
                 state,
                 header,
@@ -1029,6 +1034,12 @@ where
     for (index, group) in state.groups.iter().enumerate() {
         body = body.push(group_block(state, index, group, mode, keyboard, on_event));
     }
+    let body: Element<'a, Message> = body.into();
+    #[cfg(feature = "icedwright")]
+    let body: Element<'a, Message> = icedwright_probe::semantic(body)
+        .role(icedwright_probe::role::List)
+        .component("iced_cube::sidebar")
+        .into();
 
     let mut sections = column![].width(Length::Fill).height(Length::Fill);
     if let Some(header) = header {
@@ -1058,14 +1069,22 @@ where
     if with_edge {
         panel = panel.push(edge(Length::Fixed(1.0), Length::Fill));
     }
-    if mode != Mode::Drawer {
-        return panel.into();
-    }
-    container(panel)
-        .max_width(DRAWER_WIDTH)
-        .height(Length::Fill)
-        .style(|theme| drawer_style(&Tokens::of(theme)))
-        .into()
+    let panel: Element<'a, Message> = if mode == Mode::Drawer {
+        container(panel)
+            .max_width(DRAWER_WIDTH)
+            .height(Length::Fill)
+            .style(|theme| drawer_style(&Tokens::of(theme)))
+            .into()
+    } else {
+        panel.into()
+    };
+    #[cfg(feature = "icedwright")]
+    let panel = icedwright_probe::semantic(panel)
+        .role(icedwright_probe::role::Navigation)
+        .name("Sidebar")
+        .component("iced_cube::sidebar")
+        .into();
+    panel
 }
 
 /// The shadow the drawer casts over the page.
@@ -1097,10 +1116,17 @@ where
         for item in &group.items {
             block = block.push(rail_item(state, item, on_event));
         }
-        return container(block.spacing(space::XS))
+        let block: Element<'a, Message> = container(block.spacing(space::XS))
             .padding(space::SM)
             .width(Length::Fill)
             .into();
+        #[cfg(feature = "icedwright")]
+        let block = icedwright_probe::semantic(block)
+            .role(icedwright_probe::role::Group)
+            .name(group.label.as_str())
+            .component("iced_cube::sidebar")
+            .into();
+        return block;
     }
 
     if !group.label.is_empty() {
@@ -1112,10 +1138,22 @@ where
             block = block.push(item_rows(state, item, keyboard, on_event));
         }
     }
-    container(block.spacing(2.0))
+    let block: Element<'a, Message> = container(block.spacing(2.0))
         .padding([space::XS, space::XS])
         .width(Length::Fill)
-        .into()
+        .into();
+    #[cfg(feature = "icedwright")]
+    let block = {
+        let annotated = icedwright_probe::semantic(block)
+            .role(icedwright_probe::role::Group)
+            .component("iced_cube::sidebar");
+        if group.label.is_empty() {
+            annotated.into()
+        } else {
+            annotated.name(group.label.as_str()).into()
+        }
+    };
+    block
 }
 
 fn group_heading<'a, Id, Message>(
@@ -1155,13 +1193,26 @@ where
         })
     ]
     .align_y(Alignment::Center);
-    menu::inset(
+    let heading = menu::inset(
         button(heading)
             .padding(menu::ROW_PADDING)
             .width(Length::Fill)
             .on_press_maybe(on_event.map(|on_event| on_event(Event::ToggleGroup(index))))
             .style(move |theme, status| item_style(&Tokens::of(theme), false, highlighted, status)),
-    )
+    );
+    #[cfg(feature = "icedwright")]
+    let heading = {
+        let mut annotated = icedwright_probe::semantic(heading)
+            .role(icedwright_probe::role::Button)
+            .name(group.label.as_str())
+            .expanded(state.is_group_open(index))
+            .component("iced_cube::sidebar");
+        if on_event.is_none() {
+            annotated = annotated.disabled(true);
+        }
+        annotated.into()
+    };
+    heading
 }
 
 fn item_rows<'a, Id, Message>(
@@ -1248,7 +1299,9 @@ where
         }));
     }
 
-    menu::inset(
+    #[cfg(feature = "icedwright")]
+    let enabled = message.is_some();
+    let row = menu::inset(
         button(content)
             .padding(menu::ROW_PADDING)
             .width(Length::Fill)
@@ -1256,7 +1309,29 @@ where
             .style(move |theme, status| {
                 item_style(&Tokens::of(theme), active, highlighted, status)
             }),
-    )
+    );
+    #[cfg(feature = "icedwright")]
+    let row = link(row, item.label.as_str(), active, enabled);
+    row
+}
+
+/// Reports a destination as a link.
+#[cfg(feature = "icedwright")]
+fn link<'a, Message: 'a>(
+    element: Element<'a, Message>,
+    name: &'a str,
+    current: bool,
+    enabled: bool,
+) -> Element<'a, Message> {
+    let mut annotated = icedwright_probe::semantic(element)
+        .role(icedwright_probe::role::Link)
+        .name(name)
+        .current(current)
+        .component("iced_cube::sidebar");
+    if !enabled {
+        annotated = annotated.disabled(true);
+    }
+    annotated.into()
 }
 
 fn rail_item<'a, Id, Message>(
@@ -1300,9 +1375,12 @@ where
         .padding(0)
         .on_press_maybe(message)
         .style(move |theme, status| item_style(&Tokens::of(theme), active, highlighted, status));
-    tooltip(square, item.label.as_str())
+    let element: Element<'a, Message> = tooltip(square, item.label.as_str())
         .position(Position::Right)
-        .into()
+        .into();
+    #[cfg(feature = "icedwright")]
+    let element = link(element, item.label.as_str(), active, enabled);
+    element
 }
 
 /// A header or footer button: a logo or avatar, a title and a subtitle,

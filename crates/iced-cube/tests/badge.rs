@@ -51,3 +51,17 @@ fn badge_with_icon_renders_its_label() {
     let mut ui = simulator(element);
     assert!(ui.find("Live").is_ok());
 }
+
+#[cfg(feature = "icedwright")]
+#[path = "support/semantic.rs"]
+mod semantic;
+
+#[cfg(feature = "icedwright")]
+#[test]
+fn a_badge_reports_a_status_named_by_its_label() {
+    let element: Element<'_, ()> = badge("New").into();
+    assert_eq!(
+        semantic::yaml(element),
+        "- status \"New\":\n  - text: New\n"
+    );
+}

@@ -126,6 +126,8 @@ impl<'a, Message: Clone + 'a> From<Fab<'a, Message>> for Element<'a, Message> {
         });
 
         let extended = label.is_some();
+        #[cfg(feature = "icedwright")]
+        let name = label.clone();
         let content: Element<'a, Message> = match label {
             Some(label) => row![
                 icon,
@@ -162,6 +164,24 @@ impl<'a, Message: Clone + 'a> From<Fab<'a, Message>> for Element<'a, Message> {
             Some(id) => container(after_touch(button)).id(id).into(),
             None => after_touch(button),
         };
+        #[cfg(feature = "icedwright")]
+        {
+            use icedwright_probe::{role, semantic};
+            let mut annotated = semantic(element)
+                .role(role::Button)
+                .component("iced_cube::fab");
+            if !enabled {
+                annotated = annotated.disabled(true);
+            }
+            match (&name, &hint) {
+                (Some(name), _) => annotated = annotated.name(name.clone()),
+                (None, Some(hint)) => {
+                    annotated = annotated.name(hint.clone()).tooltip(hint.clone());
+                }
+                (None, None) => {}
+            }
+            element = annotated.into();
+        }
         if let (Some(hint), false) = (hint, extended) {
             element = tooltip(element, hint).position(Position::Left).into();
         }

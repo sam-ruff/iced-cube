@@ -27,3 +27,18 @@ fn title_only_alert_renders() {
     let mut ui = simulator(element);
     assert!(ui.find("Saved").is_ok());
 }
+
+#[cfg(feature = "icedwright")]
+#[path = "support/semantic.rs"]
+mod semantic;
+
+#[cfg(feature = "icedwright")]
+#[test]
+fn an_alert_reports_its_title_and_description() {
+    let element: Element<'_, ()> = alert("Saved").description("All changes are kept.").into();
+    assert_eq!(
+        semantic::yaml(element),
+        "- alert \"Saved\" [description=\"All changes are kept.\"]:\n  \
+         - text: Saved\n  - text: All changes are kept.\n"
+    );
+}

@@ -754,3 +754,37 @@ mod operations {
         assert_eq!(page.run(operation::select_all("missing")), None);
     }
 }
+
+#[cfg(feature = "icedwright")]
+#[path = "support/semantic.rs"]
+mod semantic;
+
+#[cfg(feature = "icedwright")]
+#[test]
+fn texts_report_their_size_and_caret_positions_inside_a_document() {
+    let element: Element<'_, Message> = selection_area(column![
+        selectable_text::<String, _>([span("Hello world")]).size(14.0),
+        selectable_text::<String, _>([span("Second")]),
+    ])
+    .into();
+    let tree = semantic::Recorder::default().tree(element);
+    assert_eq!(
+        semantic::write(&tree),
+        "- document:\n  - text: Hello world\n  - text: Second\n"
+    );
+    let Some(hello) = tree
+        .iter()
+        .find(|node| node.name.as_deref() == Some("Hello world"))
+    else {
+        panic!("no node for the first text");
+    };
+    assert_eq!(hello.text_size, Some(14.0));
+    let Some(geometry) = &hello.text_geometry else {
+        panic!("no text geometry");
+    };
+    let start = geometry.caret(0).map(|point| point.x);
+    let space = geometry.caret(5).map(|point| point.x);
+    let end = geometry.caret(11).map(|point| point.x);
+    assert_eq!(start, Some(0.0));
+    assert!(space > start && end > space, "{start:?} {space:?} {end:?}");
+}

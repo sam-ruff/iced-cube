@@ -188,6 +188,8 @@ impl<'a, Message: Clone + 'a> From<Button<'a, Message>> for Element<'a, Message>
         let metrics = button.size.metrics();
         let variant = button.variant;
         let enabled = button.is_enabled();
+        #[cfg(feature = "icedwright")]
+        let name = button.label.clone();
 
         let glyph = move |glyph: Glyph| -> Element<'a, Message> {
             themed(glyph, metrics.icon, opacity(enabled), move |theme| {
@@ -245,7 +247,24 @@ impl<'a, Message: Clone + 'a> From<Button<'a, Message>> for Element<'a, Message>
             .on_press_maybe(button.on_press)
             .style(move |theme, status| style(&Tokens::of(theme), variant, status)),
         ));
-        focusable(control, on_activate, Ring::around(radius::MD)).into()
+        let element: Element<'a, Message> =
+            focusable(control, on_activate, Ring::around(radius::MD)).into();
+        #[cfg(feature = "icedwright")]
+        let element = {
+            use icedwright_probe::{role, semantic};
+            let mut annotated = semantic(element)
+                .role(role::Button)
+                .text_size(metrics.text)
+                .component("iced_cube::button");
+            if !enabled {
+                annotated = annotated.disabled(true);
+            }
+            if let Some(name) = name {
+                annotated = annotated.name(name);
+            }
+            annotated.into()
+        };
+        element
     }
 }
 

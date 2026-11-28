@@ -484,6 +484,12 @@ fn list_event(event: ListEvent) -> Event {
     }
 }
 
+#[cfg(feature = "icedwright")]
+const KIND: &str = "iced_cube::multi_combobox";
+
+#[cfg(feature = "icedwright")]
+use crate::forms::combobox::{Report, annotate_field, annotate_list};
+
 impl<'a, T, Message> From<MultiCombobox<'a, T, Message>> for Element<'a, Message>
 where
     T: Display + 'a,
@@ -529,10 +535,26 @@ where
             } else {
                 column![field]
             };
-            return container(content).width(width).into();
+            let element: Element<'a, Message> = container(content).width(width).into();
+            #[cfg(feature = "icedwright")]
+            let element = annotate_field(
+                element,
+                Report {
+                    value: String::new(),
+                    placeholder,
+                    open: false,
+                    enabled: false,
+                    invalid,
+                    list: None,
+                },
+                KIND,
+            );
+            return element;
         };
 
         let open = state.is_open();
+        #[cfg(feature = "icedwright")]
+        let list_key = open.then(icedwright_probe::Key::unique);
         let list = open.then(|| {
             suggestions(
                 &state.list,
@@ -541,6 +563,20 @@ where
                 &|event| on_event(list_event(event)),
             )
         });
+        #[cfg(feature = "icedwright")]
+        let list = list.map(|list| match &list_key {
+            Some(key) => annotate_list(list, key.clone(), KIND),
+            None => list,
+        });
+        #[cfg(feature = "icedwright")]
+        let report = Report {
+            value: state.query().to_owned(),
+            placeholder: placeholder.clone(),
+            open,
+            enabled: true,
+            invalid,
+            list: list_key,
+        };
         let editing = Editing {
             on_input: {
                 let on_event = Rc::clone(&on_event);
@@ -564,8 +600,11 @@ where
         } else {
             column![field]
         };
+        let content: Element<'a, Message> = container(content).width(width).into();
+        #[cfg(feature = "icedwright")]
+        let content = annotate_field(content, report, KIND);
 
-        anchored(container(content).width(width))
+        anchored(content)
             .content(list)
             .placement(Placement::new(Side::Bottom, Align::Start))
             .match_width(true)

@@ -212,6 +212,8 @@ impl<'a, Message: Clone + 'a> From<Chip<'a, Message>> for Element<'a, Message> {
             on_remove,
         } = chip;
         let metrics = size.metrics();
+        #[cfg(feature = "icedwright")]
+        let name = label.clone();
         let foreground = move |theme: &iced::Theme| colours(&Tokens::of(theme), variant).foreground;
 
         let leading_element = matches!(leading, Leading::Element(_));
@@ -239,16 +241,28 @@ impl<'a, Message: Clone + 'a> From<Chip<'a, Message>> for Element<'a, Message> {
             if let Some(key) = &key {
                 remove = remove.id(remove_id(key));
             }
+            #[cfg(feature = "icedwright")]
+            let remove = icedwright_probe::semantic(remove)
+                .role(icedwright_probe::role::Button)
+                .name(format!("Remove {name}"))
+                .component("iced_cube::chip");
             content = content.push(remove);
         }
 
-        natural(
+        let element = natural(
             container(content)
                 .height(Length::Fixed(metrics.height))
                 .align_y(Alignment::Center)
                 .padding(metrics.padding(leading_element, removable))
                 .style(move |theme| style(&Tokens::of(theme), variant)),
-        )
+        );
+        #[cfg(feature = "icedwright")]
+        let element = icedwright_probe::semantic(element)
+            .role(icedwright_probe::role::Group)
+            .name(name)
+            .component("iced_cube::chip")
+            .into();
+        element
     }
 }
 

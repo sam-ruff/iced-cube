@@ -233,6 +233,9 @@ pub struct Dialog<'a, Message> {
     id: widget::Id,
     keymap: Keymap<Action>,
     pass_through: Vec<Chord>,
+    /// Built from an [`AlertDialog`], so icedwright reports an alert dialog.
+    #[cfg(feature = "icedwright")]
+    alert: bool,
 }
 
 impl<Message> std::fmt::Debug for Dialog<'_, Message> {
@@ -273,6 +276,8 @@ pub fn dialog<'a, Message>(base: impl Into<Element<'a, Message>>) -> Dialog<'a, 
         id: DEFAULT_ID,
         keymap: default_keymap(),
         pass_through: Vec::new(),
+        #[cfg(feature = "icedwright")]
+        alert: false,
     }
 }
 
@@ -406,6 +411,8 @@ impl<'a, Message: Clone + 'a> From<Dialog<'a, Message>> for Element<'a, Message>
             id,
             keymap,
             pass_through,
+            #[cfg(feature = "icedwright")]
+            alert,
         } = dialog;
 
         let guarded = Element::new(Guard {
@@ -418,6 +425,10 @@ impl<'a, Message: Clone + 'a> From<Dialog<'a, Message>> for Element<'a, Message>
         let mut layers = stack![guarded].width(Length::Fill).height(Length::Fill);
 
         if open {
+            #[cfg(feature = "icedwright")]
+            let name = title.clone();
+            #[cfg(feature = "icedwright")]
+            let about = description.clone();
             let surface = surface(
                 title,
                 description,
@@ -427,6 +438,8 @@ impl<'a, Message: Clone + 'a> From<Dialog<'a, Message>> for Element<'a, Message>
                 Bounds::new(width, max_height),
                 id.clone(),
             );
+            #[cfg(feature = "icedwright")]
+            let surface = annotate_surface(surface, alert, name, about);
             let scrim = center(solid(surface))
                 .padding(space::LG)
                 .style(|theme| scrim_style(&Tokens::of(theme)));
@@ -435,6 +448,11 @@ impl<'a, Message: Clone + 'a> From<Dialog<'a, Message>> for Element<'a, Message>
                 Some(message) => solid(mouse_area(scrim).on_press(message)),
                 None => solid(scrim),
             };
+            #[cfg(feature = "icedwright")]
+            let layer: Element<'a, Message> = icedwright_probe::semantic(layer)
+                .role(icedwright_probe::role::Scrim)
+                .component("iced_cube::dialog")
+                .into();
             layers = layers.push(layer);
         }
 
@@ -447,6 +465,42 @@ impl<'a, Message: Clone + 'a> From<Dialog<'a, Message>> for Element<'a, Message>
             on_escape: on_dismiss.filter(|_| dismiss_on_escape),
             on_confirm,
         })
+    }
+}
+
+/// Reports the surface as a modal dialog named by its title.
+#[cfg(feature = "icedwright")]
+fn annotate_surface<'a, Message: 'a>(
+    surface: Element<'a, Message>,
+    alert: bool,
+    title: Option<text::Fragment<'a>>,
+    description: Option<text::Fragment<'a>>,
+) -> Element<'a, Message> {
+    use icedwright_probe::{Semantic, role, semantic};
+
+    fn finish<'a, Message: 'a, R: role::RoleKind>(
+        mut annotated: Semantic<'a, Message, Theme, iced::Renderer, R>,
+        title: Option<text::Fragment<'a>>,
+        description: Option<text::Fragment<'a>>,
+    ) -> Element<'a, Message> {
+        annotated = annotated.modal(true).component("iced_cube::dialog");
+        if let Some(title) = title {
+            annotated = annotated.name(title);
+        }
+        if let Some(description) = description {
+            annotated = annotated.description(description);
+        }
+        annotated.into()
+    }
+
+    if alert {
+        finish(
+            semantic(surface).role(role::AlertDialog),
+            title,
+            description,
+        )
+    } else {
+        finish(semantic(surface).role(role::Dialog), title, description)
     }
 }
 
@@ -1541,6 +1595,10 @@ impl<'a, Message: Clone + 'a> From<AlertDialog<'a, Message>> for Dialog<'a, Mess
             .close_button(false)
             .size(alert.size)
             .keymap(alert.keymap);
+        #[cfg(feature = "icedwright")]
+        {
+            dialog.alert = true;
+        }
         if let Some(message) = alert.on_cancel {
             dialog = dialog.on_dismiss(message);
         }

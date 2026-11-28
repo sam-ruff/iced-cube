@@ -113,7 +113,13 @@ impl<'a, Message: 'a> From<ScrollArea<'a, Message>> for Element<'a, Message> {
         if let Some(id) = area.id {
             scrollable = scrollable.id(id);
         }
-        scrollable.into()
+        let element: Element<'a, Message> = scrollable.into();
+        #[cfg(feature = "icedwright")]
+        let element = icedwright_probe::semantic(element)
+            .role(icedwright_probe::role::ScrollView)
+            .component("iced_cube::scroll_area")
+            .into();
+        element
     }
 }
 

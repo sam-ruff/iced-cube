@@ -133,6 +133,12 @@ where
         let enabled = slider.is_enabled();
         let value = slider.value;
         let step = slider.step;
+        #[cfg(feature = "icedwright")]
+        let (name, start, end) = (
+            slider.label.clone(),
+            (*slider.range.start()).into(),
+            (*slider.range.end()).into(),
+        );
 
         let track: Element<'a, Message> = match slider.on_change {
             Some(on_change) => {
@@ -156,6 +162,21 @@ where
                 }
                 inert(track.into())
             }
+        };
+        #[cfg(feature = "icedwright")]
+        let track: Element<'a, Message> = {
+            use icedwright_probe::{role, semantic};
+            let mut annotated = semantic(track)
+                .role(role::Slider)
+                .range(value.into(), start..=end)
+                .component("iced_cube::slider");
+            if !enabled {
+                annotated = annotated.disabled(true);
+            }
+            if let Some(name) = name {
+                annotated = annotated.name(name);
+            }
+            annotated.into()
         };
 
         let shown = slider.format.map(|format| format(value));

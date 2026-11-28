@@ -150,6 +150,10 @@ impl<'a, Message: Clone + 'a> From<Checkbox<'a, Message>> for Element<'a, Messag
         let indicator = focusable(indicator, on_activate, Ring::around(radius::SM));
 
         let indicator: Element<'a, Message> = indicator.into();
+        // The box carries the annotation, so the focus it reports is the
+        // checkbox's. The label is its name.
+        #[cfg(feature = "icedwright")]
+        let indicator = annotate(indicator, checkbox.label.clone(), state, enabled);
         let Some(label) = checkbox.label else {
             return indicator;
         };
@@ -171,6 +175,33 @@ impl<'a, Message: Clone + 'a> From<Checkbox<'a, Message>> for Element<'a, Messag
             .align_y(Alignment::Center)
             .into()
     }
+}
+
+/// Reports a checkbox, including the mixed state.
+#[cfg(feature = "icedwright")]
+fn annotate<'a, Message: 'a>(
+    element: Element<'a, Message>,
+    name: Option<text::Fragment<'a>>,
+    state: CheckState,
+    enabled: bool,
+) -> Element<'a, Message> {
+    use icedwright_probe::{Checked, role, semantic};
+    let checked = match state {
+        CheckState::Unchecked => Checked::False,
+        CheckState::Checked => Checked::True,
+        CheckState::Indeterminate => Checked::Mixed,
+    };
+    let mut annotated = semantic(element)
+        .role(role::CheckBox)
+        .checked(checked)
+        .component("iced_cube::checkbox");
+    if !enabled {
+        annotated = annotated.disabled(true);
+    }
+    if let Some(name) = name {
+        annotated = annotated.name(name);
+    }
+    annotated.into()
 }
 
 /// Colours of a checkbox in a given state and interaction status.

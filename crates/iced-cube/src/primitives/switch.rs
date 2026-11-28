@@ -75,6 +75,8 @@ impl<'a, Message> Switch<'a, Message> {
 impl<'a, Message: 'a> From<Switch<'a, Message>> for Element<'a, Message> {
     fn from(switch: Switch<'a, Message>) -> Self {
         let is_on = switch.is_on;
+        #[cfg(feature = "icedwright")]
+        let (name, enabled) = (switch.label.clone(), switch.on_toggle.is_some());
         let mut toggler = widget::toggler(is_on)
             .size(TRACK_HEIGHT)
             .text_size(text_size::SM)
@@ -91,7 +93,7 @@ impl<'a, Message: 'a> From<Switch<'a, Message>> for Element<'a, Message> {
         if let Some(on_toggle) = on_toggle {
             toggler = toggler.on_toggle(move |value| on_toggle(value));
         }
-        focusable(
+        let element: Element<'a, Message> = focusable(
             toggler,
             on_activate,
             Ring {
@@ -99,7 +101,23 @@ impl<'a, Message: 'a> From<Switch<'a, Message>> for Element<'a, Message> {
                 ..Ring::around(radius::FULL)
             },
         )
-        .into()
+        .into();
+        #[cfg(feature = "icedwright")]
+        let element = {
+            use icedwright_probe::{role, semantic};
+            let mut annotated = semantic(element)
+                .role(role::Switch)
+                .checked(is_on)
+                .component("iced_cube::switch");
+            if !enabled {
+                annotated = annotated.disabled(true);
+            }
+            if let Some(name) = name {
+                annotated = annotated.name(name);
+            }
+            annotated.into()
+        };
+        element
     }
 }
 

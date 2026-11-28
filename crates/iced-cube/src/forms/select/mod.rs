@@ -364,6 +364,11 @@ where
         let leading_of = |option: &T| leading.as_ref().and_then(|leading| leading(option));
         let label = selected.as_ref().map(ToString::to_string);
         let has_value = label.is_some();
+        #[cfg(feature = "icedwright")]
+        let report = Report {
+            value: label.clone().unwrap_or_default(),
+            placeholder: placeholder.clone().unwrap_or_default(),
+        };
         let editable = editable.then(|| Editable {
             label: label.clone().unwrap_or_default(),
             placeholder: placeholder.clone().unwrap_or_default(),
@@ -401,7 +406,16 @@ where
             .iter()
             .map(|option| {
                 let is_selected = selected.as_ref() == Some(option);
-                option_row(&option.to_string(), leading_of(option), is_selected)
+                let label = option.to_string();
+                let row = option_row(&label, leading_of(option), is_selected);
+                #[cfg(feature = "icedwright")]
+                let row = icedwright_probe::semantic(row)
+                    .role(icedwright_probe::role::ListOption)
+                    .name(label)
+                    .selected(is_selected)
+                    .component(KIND)
+                    .into();
+                row
             })
             .collect();
         let choices = options
@@ -440,7 +454,13 @@ where
             no_results: empty,
             not_valid,
         };
-        let list = menu::surface(Element::new(list)).width(Length::Fill).into();
+        let list: Element<'a, Message> =
+            menu::surface(Element::new(list)).width(Length::Fill).into();
+        #[cfg(feature = "icedwright")]
+        let list = icedwright_probe::semantic(list)
+            .role(icedwright_probe::role::ListBox)
+            .component(KIND)
+            .into();
 
         Element::new(Picker {
             field: field.into(),
@@ -455,6 +475,8 @@ where
                 ..Behaviour::default()
             },
             editable,
+            #[cfg(feature = "icedwright")]
+            report,
         })
     }
 }
@@ -604,6 +626,46 @@ struct Picker<'a, Message> {
     enabled: bool,
     behaviour: Behaviour<'a, Message>,
     editable: Option<Editable>,
+    #[cfg(feature = "icedwright")]
+    report: Report,
+}
+
+/// What a select reports about its closed control.
+#[cfg(feature = "icedwright")]
+struct Report {
+    value: String,
+    placeholder: String,
+}
+
+#[cfg(feature = "icedwright")]
+const KIND: &str = "iced_cube::select";
+
+#[cfg(feature = "icedwright")]
+impl Report {
+    fn annotation(
+        &self,
+        open: bool,
+        enabled: bool,
+        list: icedwright_probe::Key,
+    ) -> icedwright_probe::Annotation<'static, icedwright_probe::role::ComboBox> {
+        use icedwright_probe::{Annotation, role};
+        let mut annotation = Annotation::new()
+            .role(role::ComboBox)
+            .value(self.value.clone())
+            .expanded(open)
+            .component(KIND);
+        if !self.placeholder.is_empty() {
+            annotation = annotation.placeholder(self.placeholder.clone());
+        }
+        if !enabled {
+            annotation = annotation.disabled(true);
+        }
+        // The list floats in the anchored panel, which carries the key.
+        if open {
+            annotation = annotation.controls(list.clone()).owns(list);
+        }
+        annotation
+    }
 }
 
 #[derive(Debug, Default)]
@@ -626,6 +688,55 @@ fn chooses(key: Named) -> bool {
 }
 
 impl<Message> Picker<'_, Message> {
+    /// Reports the closed control: the editable field, or the focus with
+    /// the field nested under it.
+    fn operate_control(
+        &mut self,
+        tree: &mut Tree,
+        layout: Layout<'_>,
+        renderer: &Renderer,
+        operation: &mut dyn Operation,
+    ) {
+        if let Some(mut field) = self.editable_field(tree) {
+            let Some(field_tree) = tree.children.first_mut() else {
+                return;
+            };
+            field
+                .as_widget_mut()
+                .operate(field_tree, layout, renderer, operation);
+            let focused = has_focus(&mut field, field_tree, layout, renderer);
+            let state = tree.state.downcast_mut::<PickerState>();
+            // Focus from the keyboard, such as Tab, selects the text so
+            // typing replaces it. A click places the caret instead.
+            if focused && !state.field_focused {
+                field
+                    .as_widget_mut()
+                    .operate(field_tree, layout, renderer, &mut SelectAll);
+            }
+            state.field_focused = focused;
+            return;
+        }
+        let Some(field_tree) = tree.children.first_mut() else {
+            return;
+        };
+        let field = &mut self.field;
+        if !self.enabled {
+            field
+                .as_widget_mut()
+                .operate(field_tree, layout, renderer, operation);
+            return;
+        }
+        let state = tree.state.downcast_mut::<PickerState>();
+        focus::report(operation, None, layout.bounds(), &mut state.focus);
+        // Traversing nests the field under the focus report for operations
+        // that record the call structure.
+        operation.traverse(&mut |operation| {
+            field
+                .as_widget_mut()
+                .operate(field_tree, layout, renderer, operation);
+        });
+    }
+
     /// Opens the list with a fresh highlight on the selected option.
     fn open(&self, tree: &mut Tree) {
         if let Some(list) = tree.children.get_mut(1) {
@@ -862,32 +973,20 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for Picker<'_, Message> {
         renderer: &Renderer,
         operation: &mut dyn Operation,
     ) {
-        if let Some(mut field) = self.editable_field(tree) {
-            let Some(field_tree) = tree.children.first_mut() else {
-                return;
-            };
-            field
-                .as_widget_mut()
-                .operate(field_tree, layout, renderer, operation);
-            let focused = has_focus(&mut field, field_tree, layout, renderer);
-            let state = tree.state.downcast_mut::<PickerState>();
-            // Focus from the keyboard, such as Tab, selects the text so
-            // typing replaces it. A click places the caret instead.
-            if focused && !state.field_focused {
-                field
-                    .as_widget_mut()
-                    .operate(field_tree, layout, renderer, &mut SelectAll);
-            }
-            state.field_focused = focused;
-            return;
+        #[cfg(feature = "icedwright")]
+        {
+            let panel = &mut tree.state.downcast_mut::<PickerState>().panel;
+            let open = panel.open;
+            let list = panel.key();
+            icedwright_probe::report(operation, layout.bounds(), || {
+                self.report.annotation(open, self.enabled, list)
+            });
+            operation.traverse(&mut |operation| {
+                self.operate_control(tree, layout, renderer, operation);
+            });
         }
-        if self.enabled {
-            let state = tree.state.downcast_mut::<PickerState>();
-            focus::report(operation, None, layout.bounds(), &mut state.focus);
-        }
-        self.field
-            .as_widget_mut()
-            .operate(&mut tree.children[0], layout, renderer, operation);
+        #[cfg(not(feature = "icedwright"))]
+        self.operate_control(tree, layout, renderer, operation);
     }
 
     fn update(

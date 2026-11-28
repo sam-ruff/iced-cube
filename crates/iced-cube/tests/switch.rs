@@ -51,3 +51,22 @@ fn disabled_switch_emits_nothing() {
 
     assert_eq!(ui.into_messages().count(), 0);
 }
+
+#[cfg(feature = "icedwright")]
+#[path = "support/semantic.rs"]
+mod semantic;
+
+#[cfg(feature = "icedwright")]
+#[test]
+fn switches_report_whether_they_are_on() {
+    let element: Element<'_, Message> = column![
+        switch(true).label("Wi-Fi").on_toggle(Message::Wifi),
+        switch(false).label("Bluetooth"),
+    ]
+    .into();
+    assert_eq!(
+        semantic::yaml(element),
+        "- switch \"Wi-Fi\" [checked] [focused=false] [focusable]\n\
+         - switch \"Bluetooth\" [disabled] [checked=false]\n"
+    );
+}

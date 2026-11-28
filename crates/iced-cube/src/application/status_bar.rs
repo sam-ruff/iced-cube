@@ -452,15 +452,19 @@ where
         })
         .height(Length::Shrink);
 
-        column![
-            crate::application::edge(),
-            container(content)
-                .padding(Padding::from([gap::XS, gap::SM]))
-                .width(Length::Fill)
-                .style(|theme| bar_style(&Tokens::of(theme))),
-        ]
-        .width(Length::Fill)
-        .into()
+        let bar: Element<'a, Message> = container(content)
+            .padding(Padding::from([gap::XS, gap::SM]))
+            .width(Length::Fill)
+            .style(|theme| bar_style(&Tokens::of(theme)))
+            .into();
+        #[cfg(feature = "icedwright")]
+        let bar: Element<'a, Message> = icedwright_probe::semantic(bar)
+            .role(icedwright_probe::role::Status)
+            .component("iced_cube::status_bar")
+            .into();
+        column![crate::application::edge(), bar]
+            .width(Length::Fill)
+            .into()
     }
 }
 
@@ -553,11 +557,24 @@ where
         }));
     }
     content = content.push(muted_text(item.label.clone()));
-    widget::button(content)
+    let button: Element<'a, Message> = widget::button(content)
         .padding(Padding::from([2.0, 6.0]))
         .style(|theme, status| button::style(&Tokens::of(theme), Variant::Ghost, status))
         .on_press_maybe(on_event.map(|on_event| on_event(Event::Press(item.id.clone()))))
-        .into()
+        .into();
+    #[cfg(feature = "icedwright")]
+    let button = {
+        let annotated = icedwright_probe::semantic(button)
+            .role(icedwright_probe::role::Button)
+            .name(item.label.clone())
+            .component("iced_cube::status_bar");
+        if enabled {
+            annotated.into()
+        } else {
+            annotated.disabled(true).into()
+        }
+    };
+    button
 }
 
 #[cfg(test)]

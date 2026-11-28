@@ -586,7 +586,21 @@ where
         let Some(on_event) = on_event else {
             let value = selected.unwrap_or_default();
             let field = field(&placeholder, &value, size, id, None, false, invalid);
-            return container(field).width(width).into();
+            let element: Element<'a, Message> = container(field).width(width).into();
+            #[cfg(feature = "icedwright")]
+            let element = annotate_field(
+                element,
+                Report {
+                    value,
+                    placeholder,
+                    open: false,
+                    enabled: false,
+                    invalid,
+                    list: None,
+                },
+                KIND,
+            );
+            return element;
         };
         let on_event: Rc<dyn Fn(Event) -> Message + 'a> = Rc::from(on_event);
 
@@ -597,6 +611,8 @@ where
             (selected.unwrap_or_default(), placeholder)
         };
 
+        #[cfg(feature = "icedwright")]
+        let list_key = open.then(icedwright_probe::Key::unique);
         let list = open.then(|| {
             let chosen = state.selected;
             suggestions(
@@ -605,6 +621,11 @@ where
                 &move |index| chosen == Some(index),
                 &|event| on_event(list_event(event)),
             )
+        });
+        #[cfg(feature = "icedwright")]
+        let list = list.map(|list| match &list_key {
+            Some(key) => annotate_list(list, key.clone(), KIND),
+            None => list,
         });
         let on_anchor_press = (!open).then(|| on_event(Event::Open));
         let on_dismiss = open.then(|| on_event(Event::Close));
@@ -617,12 +638,25 @@ where
         };
         let field =
             container(field(&hint, &value, size, id, Some(editing), open, invalid)).width(width);
-        let field = CaretToEnd {
+        let field = Element::new(CaretToEnd {
             content: field.into(),
             watch: (open, state.selected),
-        };
+        });
+        #[cfg(feature = "icedwright")]
+        let field = annotate_field(
+            field,
+            Report {
+                value,
+                placeholder: hint,
+                open,
+                enabled: true,
+                invalid,
+                list: list_key,
+            },
+            KIND,
+        );
 
-        anchored(Element::new(field))
+        anchored(field)
             .content(list)
             .placement(Placement::new(Side::Bottom, Align::Start))
             .match_width(true)
@@ -737,7 +771,15 @@ pub(crate) fn suggestions<'a, T: Display, Message: Clone + 'a>(
                 on_event(ListEvent::Highlight(index)),
                 on_event(ListEvent::Activate(index)),
             );
-            menu::item(parts, status, false, Some(messages))
+            let row = menu::item(parts, status, false, Some(messages));
+            #[cfg(feature = "icedwright")]
+            let row = icedwright_probe::semantic(row)
+                .role(icedwright_probe::role::ListOption)
+                .name(label)
+                .selected(ticked(index))
+                .component("iced_cube::combobox")
+                .into();
+            row
         })
         .collect();
 
@@ -754,6 +796,64 @@ pub(crate) fn suggestions<'a, T: Display, Message: Clone + 'a>(
             ScrollDelta::Lines { y, .. } | ScrollDelta::Pixels { y, .. } if y < 0.0 => down.clone(),
             _ => up.clone(),
         })
+        .into()
+}
+
+#[cfg(feature = "icedwright")]
+const KIND: &str = "iced_cube::combobox";
+
+/// What a combobox field reports: its value, placeholder and whether its
+/// list is open.
+#[cfg(feature = "icedwright")]
+pub(crate) struct Report {
+    pub(crate) value: String,
+    pub(crate) placeholder: String,
+    pub(crate) open: bool,
+    pub(crate) enabled: bool,
+    pub(crate) invalid: bool,
+    /// The key of the open list, which the field owns.
+    pub(crate) list: Option<icedwright_probe::Key>,
+}
+
+/// Reports a combobox field.
+#[cfg(feature = "icedwright")]
+pub(crate) fn annotate_field<'a, Message: 'a>(
+    element: Element<'a, Message>,
+    report: Report,
+    kind: &'static str,
+) -> Element<'a, Message> {
+    use icedwright_probe::{role, semantic};
+    let mut annotated = semantic(element)
+        .role(role::ComboBox)
+        .value(report.value)
+        .expanded(report.open)
+        .component(kind);
+    if !report.placeholder.is_empty() {
+        annotated = annotated.placeholder(report.placeholder);
+    }
+    if !report.enabled {
+        annotated = annotated.disabled(true);
+    }
+    if report.invalid {
+        annotated = annotated.invalid(true);
+    }
+    if let Some(list) = report.list {
+        annotated = annotated.controls(list.clone()).owns(list);
+    }
+    annotated.into()
+}
+
+/// Reports an open list as a list box with `key`.
+#[cfg(feature = "icedwright")]
+pub(crate) fn annotate_list<'a, Message: 'a>(
+    element: Element<'a, Message>,
+    key: icedwright_probe::Key,
+    kind: &'static str,
+) -> Element<'a, Message> {
+    icedwright_probe::semantic(element)
+        .role(icedwright_probe::role::ListBox)
+        .key(key)
+        .component(kind)
         .into()
 }
 

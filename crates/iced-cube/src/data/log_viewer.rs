@@ -1540,10 +1540,21 @@ impl<'a, Message: Clone + 'a> View<'a, Message> {
                     state.focused && state.highlighted == Some(id),
                 );
                 let line = line_view(state, id, entry, narrow, ringed, on_event.as_ref());
-                Some(match &menu {
+                let line = match &menu {
                     Some(menu) => menu.wrap(id, line),
                     None => line,
-                })
+                };
+                #[cfg(feature = "icedwright")]
+                let line = icedwright_probe::semantic(line)
+                    .role(icedwright_probe::role::ListItem)
+                    .position(
+                        u32::try_from(index + 1).unwrap_or(u32::MAX),
+                        u32::try_from(state.visible_len()).unwrap_or(u32::MAX),
+                    )
+                    .click_clock(icedwright_probe::ClickClock::Iced)
+                    .component("iced_cube::log_viewer")
+                    .into();
+                Some(line)
             }))
             .into()
         };
@@ -1577,7 +1588,13 @@ impl<'a, Message: Clone + 'a> View<'a, Message> {
                 .padding(Padding::ZERO.top(FRAME_PADDING).right(space::XS))
                 .into()
         });
-        frame(column(std::iter::once(list.into()).chain(pill)).into()).into()
+        let list: Element<'a, Message> = list.into();
+        #[cfg(feature = "icedwright")]
+        let list = icedwright_probe::semantic(list)
+            .role(icedwright_probe::role::List)
+            .component("iced_cube::log_viewer")
+            .into();
+        frame(column(std::iter::once(list).chain(pill)).into()).into()
     }
 
     /// A button under the lines: resume while paused, or jump to the newest

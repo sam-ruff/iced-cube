@@ -204,3 +204,25 @@ fn an_outlined_group_is_as_tall_as_a_button() {
     let b = ui.find("B").expect("button").bounds();
     assert_eq!(b.y - a.y, 36.0);
 }
+
+#[cfg(feature = "icedwright")]
+#[path = "support/semantic.rs"]
+mod semantic;
+
+#[cfg(feature = "icedwright")]
+#[test]
+fn a_group_reports_each_item_as_a_toggle_button() {
+    let mut state = State::multiple(items());
+    let _ = state.update(Event::Toggle(Format::Bold));
+    assert_eq!(
+        semantic::yaml(view(&state, Variant::Outline)),
+        r#"- group:
+  - togglebutton "Bold" [pressed]:
+    - text: Bold
+  - togglebutton "Italic" [pressed=false]:
+    - text: Italic
+  - togglebutton "Underline" [disabled] [pressed=false]:
+    - text: Underline
+"#
+    );
+}

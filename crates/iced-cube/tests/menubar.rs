@@ -366,3 +366,41 @@ fn a_disabled_bar_renders_its_titles_and_sends_nothing() {
     ui.point_at(Point::new(300.0, 300.0));
     assert!(ui.into_messages().next().is_none());
 }
+
+#[cfg(feature = "icedwright")]
+#[path = "support/semantic.rs"]
+mod semantic;
+
+#[cfg(feature = "icedwright")]
+#[test]
+fn the_bar_reports_its_titles_and_the_open_menu() {
+    use icedwright_types::Role;
+
+    let mut state = state();
+    let _ = state.update(Event::Toggle(0));
+    let tree = semantic::Recorder::default().tree(view(&state));
+    let bar = tree
+        .iter()
+        .find(|node| node.role == Role::MenuBar)
+        .expect("the bar is in the tree");
+    assert_eq!(
+        icedwright_semantics::yaml::write(&tree, bar.id, &Default::default()),
+        "- menubar:\n  - menuitem \"File\" [expanded]:\n    - text: File\n    - menu:\n\
+         \x20     - scrollview:\n\
+         \x20       - menuitem \"New file\":\n          - text: New file\n          - text: Ctrl+N\n\
+         \x20       - menuitem \"Open recent\" [expanded=false]:\n          - text: Open recent\n\
+         \x20       - menuitem \"Quit\":\n          - text: Quit\n\
+         \x20 - menuitem \"Edit\" [expanded=false]:\n    - text: Edit\n\
+         \x20 - menuitem \"View\" [expanded=false]:\n    - text: View\n\
+         \x20 - menuitem \"Help\" [expanded=false]:\n    - text: Help\n"
+    );
+    let menu = tree
+        .iter()
+        .find(|node| node.role == Role::Menu)
+        .expect("the open menu is in the tree");
+    let file = tree
+        .iter()
+        .find(|node| node.name.as_deref() == Some("File"))
+        .expect("the File title");
+    assert_eq!(file.relations.owns, vec![menu.id]);
+}

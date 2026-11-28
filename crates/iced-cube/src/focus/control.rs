@@ -144,13 +144,26 @@ impl<Message> Widget<Message, Theme, Renderer> for Focus<'_, Message> {
         renderer: &Renderer,
         operation: &mut dyn Operation,
     ) {
-        if self.on_activate.is_some() {
-            let state = tree.state.downcast_mut::<State>();
-            report(operation, self.id.as_ref(), layout.bounds(), state);
+        if self.on_activate.is_none() {
+            self.content.as_widget_mut().operate(
+                &mut tree.children[0],
+                layout,
+                renderer,
+                operation,
+            );
+            return;
         }
-        self.content
-            .as_widget_mut()
-            .operate(&mut tree.children[0], layout, renderer, operation);
+        let state = tree.state.downcast_mut::<State>();
+        report(operation, self.id.as_ref(), layout.bounds(), state);
+        // Traversing nests the content under the focus report for operations
+        // that record the call structure.
+        let content = &mut self.content;
+        let child = &mut tree.children[0];
+        operation.traverse(&mut |operation| {
+            content
+                .as_widget_mut()
+                .operate(child, layout, renderer, operation);
+        });
     }
 
     fn update(

@@ -81,3 +81,24 @@ fn single_radios_emit_their_own_value() {
     let messages: Vec<_> = ui.into_messages().collect();
     assert_eq!(messages, vec![Message::Size(1)]);
 }
+
+#[cfg(feature = "icedwright")]
+#[path = "support/semantic.rs"]
+mod semantic;
+
+#[cfg(feature = "icedwright")]
+#[test]
+fn a_group_reports_its_radios_and_which_is_checked() {
+    let element: Element<'_, Message> = radio_group([Plan::Free, Plan::Pro], Some(Plan::Pro))
+        .on_select(Message::Plan)
+        .into();
+    assert_eq!(
+        semantic::yaml(element),
+        r#"- radiogroup:
+  - radio "Free" [checked=false] [focused=false] [focusable]
+  - text: Free
+  - radio "Pro" [checked] [focused=false] [focusable]
+  - text: Pro
+"#
+    );
+}

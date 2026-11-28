@@ -190,7 +190,7 @@ checksum = "6a1f896587b6f2c069c73d2f0913e2d590c3990285cd2f0b6aa02b786b4c679c"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.6",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -745,7 +745,7 @@ checksum = "ea5190182e6915eb873ddbc16e23b711b6eb1f9c00a0d0a3a91b5f6228475225"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.6",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -810,7 +810,7 @@ checksum = "9fb9654ba8355388abeb8dcb4fc62f511300867002afc858860463bdd9fe0c44"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.6",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -1119,6 +1119,10 @@ dependencies = [
  "futures",
  "iced",
  "iced_test",
+ "icedwright-probe",
+ "icedwright-protocol",
+ "icedwright-semantics",
+ "icedwright-types",
  "jiff",
  "lucide-static-svg",
  "num-traits",
@@ -1326,6 +1330,60 @@ dependencies = [
 ]
 
 [[package]]
+name = "icedwright-probe"
+version = "0.1.0"
+source = "git+https://github.com/sam-ruff/icedwright#de82c765443521f15dcaaf5cca409f106c9ceb12"
+dependencies = [
+ "iced_core",
+ "icedwright-probe-macros",
+ "icedwright-protocol",
+ "icedwright-types",
+]
+
+[[package]]
+name = "icedwright-probe-macros"
+version = "0.1.0"
+source = "git+https://github.com/sam-ruff/icedwright#de82c765443521f15dcaaf5cca409f106c9ceb12"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.10",
+]
+
+[[package]]
+name = "icedwright-protocol"
+version = "0.1.0"
+source = "git+https://github.com/sam-ruff/icedwright#de82c765443521f15dcaaf5cca409f106c9ceb12"
+dependencies = [
+ "icedwright-types",
+ "serde",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "icedwright-semantics"
+version = "0.0.1"
+source = "git+https://github.com/sam-ruff/icedwright#de82c765443521f15dcaaf5cca409f106c9ceb12"
+dependencies = [
+ "iced_core",
+ "iced_runtime",
+ "icedwright-probe",
+ "icedwright-protocol",
+ "icedwright-types",
+ "serde",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "icedwright-types"
+version = "0.1.0"
+source = "git+https://github.com/sam-ruff/icedwright#de82c765443521f15dcaaf5cca409f106c9ceb12"
+dependencies = [
+ "iced_core",
+ "serde",
+]
+
+[[package]]
 name = "image"
 version = "0.25.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1406,7 +1464,7 @@ dependencies = [
  "jiff-core",
  "proc-macro2",
  "quote",
- "syn 3.0.6",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -2596,7 +2654,7 @@ checksum = "e7a5d71263a5a7d47b41f6b3f06ba276f10cc18b0931f1799f710578e2309348"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.6",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -2876,9 +2934,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "3.0.6"
+version = "3.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8593e8e72159ed2257d083c7a454a85cbf854f37a0966d8d483aff8c8a3ebcee"
+checksum = "4ae9ccbea3a7b0b09443036490c8f34a8b1b760fd345e5c0dae0aac718faea79"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2940,7 +2998,7 @@ checksum = "fe5197923287db20a58125f0bc85c062f7f2c892de97b18c356f9efb14b28524"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.6",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -3229,7 +3287,7 @@ dependencies = [
  "bumpalo",
  "proc-macro2",
  "quote",
- "syn 3.0.6",
+ "syn 3.0.10",
  "wasm-bindgen-shared",
 ]
 

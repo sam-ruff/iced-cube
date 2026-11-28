@@ -142,11 +142,17 @@ impl<'a, Message: Clone + 'a> From<Popover<'a, Message>> for Element<'a, Message
             keymap: keymap.clone(),
         };
         let panel = open.then(|| {
-            container(Element::new(cycle))
+            let panel: Element<'a, Message> = container(Element::new(cycle))
                 .width(width)
                 .padding(padding)
                 .style(|theme| style(&Tokens::of(theme)))
-                .into()
+                .into();
+            #[cfg(feature = "icedwright")]
+            let panel = icedwright_probe::semantic(panel)
+                .role(icedwright_probe::role::Dialog)
+                .component("iced_cube::popover")
+                .into();
+            panel
         });
         anchored(trigger)
             .content(panel)

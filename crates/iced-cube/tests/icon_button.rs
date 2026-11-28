@@ -200,3 +200,26 @@ fn every_variant_and_size_renders_square() -> Result<(), iced_test::Error> {
     }
     Ok(())
 }
+
+#[cfg(feature = "icedwright")]
+#[path = "support/semantic.rs"]
+mod semantic;
+
+#[cfg(feature = "icedwright")]
+#[test]
+fn icon_buttons_report_their_label_and_pressed_state() {
+    let element: Element<'_, Message> = row![
+        icon_button(lucide!(Bold))
+            .label("Bold")
+            .pressed(true)
+            .on_press(Message::Bold),
+        icon_button(lucide!(Italic)).label("Italic").tooltip(None),
+    ]
+    .into();
+    assert_eq!(
+        semantic::yaml(element),
+        r#"- togglebutton "Bold" [pressed] [focused=false] [focusable] [description="Bold"] [tooltip="Bold"]
+- button "Italic" [disabled]
+"#
+    );
+}

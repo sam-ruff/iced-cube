@@ -22,6 +22,8 @@ pub(crate) fn every(period: Duration) -> Subscription<Instant> {
     use iced::futures::channel::mpsc;
 
     Subscription::run_with(period, |period| {
+        #[cfg(feature = "icedwright")]
+        icedwright_probe::time::real_timer("iced_cube::ticker");
         let period = *period;
         let (mut sender, receiver) = mpsc::channel(1);
         std::thread::spawn(move || {

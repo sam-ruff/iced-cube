@@ -239,7 +239,15 @@ impl<Message> Widget<Message, Theme, Renderer> for Spinner {
 
 impl<'a, Message: 'a> From<Spinner> for Element<'a, Message> {
     fn from(spinner: Spinner) -> Self {
-        Element::new(spinner)
+        let element = Element::new(spinner);
+        #[cfg(feature = "icedwright")]
+        let element = icedwright_probe::semantic(element)
+            .role(icedwright_probe::role::ProgressIndicator)
+            .name("Loading")
+            .busy(true)
+            .component("iced_cube::spinner")
+            .into();
+        element
     }
 }
 

@@ -890,10 +890,29 @@ where
                     );
                     let framed =
                         row_frame(state, index, content, row_height, ringed, on_event.as_ref());
-                    Some(match &menu {
+                    let framed = match &menu {
                         Some(menu) => menu.wrap(state.id(index), framed),
                         None => framed,
-                    })
+                    };
+                    #[cfg(feature = "icedwright")]
+                    let framed = {
+                        let mut annotated = icedwright_probe::semantic(framed)
+                            .role(icedwright_probe::role::ListItem)
+                            .position(
+                                u32::try_from(index + 1).unwrap_or(u32::MAX),
+                                u32::try_from(state.len()).unwrap_or(u32::MAX),
+                            )
+                            .click_clock(icedwright_probe::ClickClock::Iced)
+                            .component("iced_cube::virtual_list");
+                        if state.mode != Mode::None {
+                            annotated = annotated.selected(state.selected.contains(&id));
+                        }
+                        if on_event.is_none() {
+                            annotated = annotated.disabled(true);
+                        }
+                        annotated.into()
+                    };
+                    Some(framed)
                 }))
                 .into()
             }
@@ -922,21 +941,32 @@ where
             .height(height)
             .style(|theme| frame_style(&Tokens::of(theme)));
 
+        #[cfg(feature = "icedwright")]
+        let whole = |element: Element<'a, Message>| -> Element<'a, Message> {
+            icedwright_probe::semantic(element)
+                .role(icedwright_probe::role::List)
+                .component("iced_cube::virtual_list")
+                .into()
+        };
+        #[cfg(not(feature = "icedwright"))]
+        let whole = |element: Element<'a, Message>| element;
         let Some(on_event) = on_event else {
-            return framed.into();
+            return whole(framed.into());
         };
         let on_focus = on_event.clone();
-        scope(framed)
-            .on_focus(move |focused| on_focus(Event::Focus(focused)))
-            .on_key(move |key| {
-                let target = state.highlighted().map(|index| state.id(index));
-                let opened = menu
-                    .as_ref()
-                    .zip(target)
-                    .and_then(|(menu, target)| menu.key(key, target));
-                opened.or_else(|| state.key_event(&keymap, key).map(&*on_event))
-            })
-            .into()
+        whole(
+            scope(framed)
+                .on_focus(move |focused| on_focus(Event::Focus(focused)))
+                .on_key(move |key| {
+                    let target = state.highlighted().map(|index| state.id(index));
+                    let opened = menu
+                        .as_ref()
+                        .zip(target)
+                        .and_then(|(menu, target)| menu.key(key, target));
+                    opened.or_else(|| state.key_event(&keymap, key).map(&*on_event))
+                })
+                .into(),
+        )
     }
 }
 

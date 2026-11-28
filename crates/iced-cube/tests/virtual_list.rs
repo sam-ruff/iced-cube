@@ -369,3 +369,24 @@ fn a_producer_thread_sends_items_through_the_channel() {
     let mut ui = sized(view(&state, 200.0));
     assert!(ui.find("Row 999").is_ok(), "follows the newest item");
 }
+
+#[cfg(feature = "icedwright")]
+#[path = "support/semantic.rs"]
+mod semantic;
+
+#[cfg(feature = "icedwright")]
+#[test]
+fn rendered_rows_report_their_place_in_the_whole_list() {
+    let state = numbers(1000);
+    let yaml = semantic::yaml(view(&state, 90.0));
+    let rows: String = (0..7)
+        .map(|n| {
+            format!(
+                "  - listitem \"Row {n}\" [selected=false] [position={}] [set-size=1000] \
+                 [prop:click-clock=\"iced\"]:\n    - text: Row {n}\n",
+                n + 1
+            )
+        })
+        .collect();
+    assert_eq!(yaml, format!("- list [focused=false] [focusable]:\n{rows}"));
+}

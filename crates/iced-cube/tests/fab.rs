@@ -66,3 +66,24 @@ fn a_disabled_fab_emits_nothing() -> Result<(), iced_test::Error> {
     assert_eq!(ui.into_messages().count(), 0);
     Ok(())
 }
+
+#[cfg(feature = "icedwright")]
+#[path = "support/semantic.rs"]
+mod semantic;
+
+#[cfg(feature = "icedwright")]
+#[test]
+fn fabs_are_named_by_their_label_or_tooltip() {
+    let element: Element<'_, Message> = column![
+        fab(lucide!(Plus)).label("New note").on_press(Message::New),
+        fab(lucide!(Share)).tooltip("Share"),
+    ]
+    .into();
+    assert_eq!(
+        semantic::yaml(element),
+        r#"- button "New note":
+  - text: New note
+- button "Share" [disabled] [description="Share"] [tooltip="Share"]
+"#
+    );
+}

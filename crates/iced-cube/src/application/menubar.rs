@@ -674,15 +674,19 @@ where
             title(state, index, menu, on_event.clone(), keymaps.clone(), width)
         });
 
-        column![
-            container(row(titles).spacing(2))
-                .padding([space::XS, space::XS])
-                .width(Length::Fill)
-                .style(|theme| bar_style(&Tokens::of(theme))),
-            crate::application::edge(),
-        ]
-        .width(Length::Fill)
-        .into()
+        let bar: Element<'a, Message> = container(row(titles).spacing(2))
+            .padding([space::XS, space::XS])
+            .width(Length::Fill)
+            .style(|theme| bar_style(&Tokens::of(theme)))
+            .into();
+        #[cfg(feature = "icedwright")]
+        let bar: Element<'a, Message> = icedwright_probe::semantic(bar)
+            .role(icedwright_probe::role::MenuBar)
+            .component("iced_cube::menubar")
+            .into();
+        column![bar, crate::application::edge()]
+            .width(Length::Fill)
+            .into()
     }
 }
 
@@ -717,6 +721,20 @@ where
     if let Some(on_event) = on_event.as_ref().filter(|_| state.is_open() && !open) {
         anchor = anchor.on_enter(on_event(Event::Hover(index)));
     }
+    let anchor: Element<'a, Message> = anchor.into();
+    #[cfg(feature = "icedwright")]
+    let anchor: Element<'a, Message> = {
+        let annotated = icedwright_probe::semantic(anchor)
+            .role(icedwright_probe::role::MenuItem)
+            .name(menu.title.as_str())
+            .expanded(open)
+            .component("iced_cube::menubar");
+        if on_event.is_some() {
+            annotated.into()
+        } else {
+            annotated.disabled(true).into()
+        }
+    };
 
     let on_menu = on_event
         .clone()

@@ -153,7 +153,7 @@ where
                 ..container::Style::default()
             });
 
-        container(column![
+        let bar: Element<'a, Message> = container(column![
             border,
             row(slots).width(Length::Fill).height(HEIGHT - 1.0)
         ])
@@ -163,7 +163,13 @@ where
             ..Padding::ZERO
         })
         .style(|theme: &Theme| bar_style(&Tokens::of(theme)))
-        .into()
+        .into();
+        #[cfg(feature = "icedwright")]
+        let bar = icedwright_probe::semantic(bar)
+            .role(icedwright_probe::role::Navigation)
+            .component("iced_cube::bottom_nav")
+            .into();
+        bar
     }
 }
 
@@ -173,6 +179,8 @@ fn slot<'a, Id, Message: Clone + 'a>(
     enabled: bool,
     message: Option<Message>,
 ) -> Element<'a, Message> {
+    #[cfg(feature = "icedwright")]
+    let name = item.label.clone();
     let icon = themed(item.glyph, ICON, opacity(enabled), move |theme| {
         colours(&Tokens::of(theme), on).icon
     });
@@ -209,7 +217,20 @@ fn slot<'a, Id, Message: Clone + 'a>(
     if let Some(message) = message {
         slot = slot.on_tap(message);
     }
-    slot.into()
+    let slot: Element<'a, Message> = slot.into();
+    #[cfg(feature = "icedwright")]
+    let slot = {
+        let mut annotated = icedwright_probe::semantic(slot)
+            .role(icedwright_probe::role::Link)
+            .name(name)
+            .current(on)
+            .component("iced_cube::bottom_nav");
+        if !enabled {
+            annotated = annotated.disabled(true);
+        }
+        annotated.into()
+    };
+    slot
 }
 
 /// Icon and label colours of a destination.

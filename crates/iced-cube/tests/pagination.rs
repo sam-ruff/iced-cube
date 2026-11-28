@@ -147,3 +147,27 @@ fn numbers_fall_back_to_compact_when_nothing_else_fits() {
         .bounds();
     assert!(label.height < 24.0, "one line, got {}", label.height);
 }
+
+#[cfg(feature = "icedwright")]
+#[path = "support/semantic.rs"]
+mod semantic;
+
+#[cfg(feature = "icedwright")]
+#[test]
+fn pagination_reports_navigation_with_page_buttons() {
+    let state = State::new(3).with_page(1);
+    assert_eq!(
+        semantic::yaml(view(&state, Variant::Numbers)),
+        "- navigation \"Pagination\":\n  - button \"Previous page\" [disabled]\n\
+         \x20 - button \"Page 1\" [current]:\n    - text: 1\n\
+         \x20 - button \"Page 2\":\n    - text: 2\n\
+         \x20 - button \"Page 3\":\n    - text: 3\n\
+         \x20 - button \"Next page\"\n"
+    );
+    assert_eq!(
+        semantic::yaml(view(&state, Variant::Compact)),
+        "- navigation \"Pagination\":\n  - button \"First page\" [disabled]\n\
+         \x20 - button \"Previous page\" [disabled]\n  - text: Page 1 of 3\n\
+         \x20 - button \"Next page\"\n  - button \"Last page\"\n"
+    );
+}

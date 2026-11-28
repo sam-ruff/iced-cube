@@ -138,3 +138,17 @@ fn chips_in_a_wrapping_row_move_onto_new_lines() {
     }
     assert!(lines.len() > 1, "wrapped onto {} lines", lines.len());
 }
+
+#[cfg(feature = "icedwright")]
+#[path = "support/semantic.rs"]
+mod semantic;
+
+#[cfg(feature = "icedwright")]
+#[test]
+fn a_chip_reports_a_group_with_its_remove_button() {
+    let element: Element<'_, Message> = chip("Rust").on_remove(Message::Remove("rust")).into();
+    assert_eq!(
+        semantic::yaml(element),
+        "- group \"Rust\":\n  - text: Rust\n  - button \"Remove Rust\"\n"
+    );
+}

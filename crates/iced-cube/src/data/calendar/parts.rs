@@ -174,6 +174,29 @@ pub fn entry_id(entry: EntryId, start: Timestamp) -> widget::Id {
     ))
 }
 
+/// Reports an entry's chip, bar, block or row as a button named by its
+/// title. Its double presses are counted on the app's clock.
+#[cfg(feature = "icedwright")]
+pub(super) fn annotate_entry<'a, Message: 'a>(
+    element: impl Into<Element<'a, Message>>,
+    title: &str,
+    selected: bool,
+    enabled: bool,
+) -> Element<'a, Message> {
+    let mut annotated = icedwright_probe::semantic(element)
+        .role(icedwright_probe::role::Button)
+        .name(title.to_owned())
+        .click_clock(icedwright_probe::ClickClock::Probe)
+        .component("iced_cube::calendar");
+    if selected {
+        annotated = annotated.prop("selected", "true");
+    }
+    if !enabled {
+        annotated = annotated.disabled(true);
+    }
+    annotated.into()
+}
+
 /// The id of a day's cell in the month, or its heading over the hours,
 /// for finding it in tests and for drags that end on it.
 pub fn day_id(date: Date) -> widget::Id {
@@ -378,10 +401,13 @@ pub(super) fn chip<'a, Message: Clone + 'a>(
         .padding(0)
         .on_press_maybe(send(on_event, Event::Press(selection)))
         .style(move |theme, status| style::marked_button(&Tokens::of(theme), tone, look, status));
-    container(pressable(state, button, selection, on_event))
+    let chip: Element<'a, Message> = container(pressable(state, button, selection, on_event))
         .id(entry_id(bar.occurrence.entry, bar.occurrence.start))
         .width(Length::Fill)
-        .into()
+        .into();
+    #[cfg(feature = "icedwright")]
+    let chip = annotate_entry(chip, entry.title(), look.selected, on_event.is_some());
+    chip
 }
 
 /// Whether a bar is a timed entry that starts and ends within one day,
@@ -428,10 +454,13 @@ pub(super) fn line<'a, Message: Clone + 'a>(
         .padding(0)
         .on_press_maybe(send(on_event, Event::Press(selection)))
         .style(move |theme, status| style::marked_line(&Tokens::of(theme), tone, look, status));
-    container(pressable(state, button, selection, on_event))
+    let line: Element<'a, Message> = container(pressable(state, button, selection, on_event))
         .id(entry_id(bar.occurrence.entry, bar.occurrence.start))
         .width(Length::Fill)
-        .into()
+        .into();
+    #[cfg(feature = "icedwright")]
+    let line = annotate_entry(line, entry.title(), look.selected, on_event.is_some());
+    line
 }
 
 /// A circle outlined in a tone.

@@ -172,6 +172,8 @@ impl<'a, Message: Clone + 'a> From<Toggle<'a, Message>> for Element<'a, Message>
             on_toggle,
         } = toggle;
         let message = on_toggle.map(|on_toggle| on_toggle(!pressed));
+        #[cfg(feature = "icedwright")]
+        let (name, enabled) = (label.clone(), message.is_some());
         let on_activate = message
             .clone()
             .map(|message| Box::new(move || message.clone()) as Box<dyn Fn() -> Message + 'a>);
@@ -184,8 +186,33 @@ impl<'a, Message: Clone + 'a> From<Toggle<'a, Message>> for Element<'a, Message>
             message,
             move |tokens, status| style(tokens, variant, pressed, status),
         ));
-        focusable(control, on_activate, Ring::around(radius::MD)).into()
+        let element: Element<'a, Message> =
+            focusable(control, on_activate, Ring::around(radius::MD)).into();
+        #[cfg(feature = "icedwright")]
+        let element = annotate(element, name, pressed, enabled, "iced_cube::toggle");
+        element
     }
+}
+
+/// Reports a toggle button, named by its label, with its pressed state.
+#[cfg(feature = "icedwright")]
+pub(crate) fn annotate<'a, Message: 'a>(
+    element: Element<'a, Message>,
+    name: text::Fragment<'a>,
+    pressed: bool,
+    enabled: bool,
+    kind: &'static str,
+) -> Element<'a, Message> {
+    use icedwright_probe::{role, semantic};
+    let mut annotated = semantic(element)
+        .role(role::ToggleButton)
+        .name(name)
+        .pressed(pressed)
+        .component(kind);
+    if !enabled {
+        annotated = annotated.disabled(true);
+    }
+    annotated.into()
 }
 
 /// Renders the toggle button itself, so a group can draw its items with

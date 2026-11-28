@@ -181,9 +181,11 @@ impl<'a, Message: Clone + 'a> From<Breadcrumb<'a, Message>> for Element<'a, Mess
         } = breadcrumb;
         let len = crumbs.len();
         if !collapse_to_fit {
-            return trail(&crumbs, separator, max_items, &on_expand)
-                .wrap()
-                .into();
+            return navigation(list(
+                trail(&crumbs, separator, max_items, &on_expand)
+                    .wrap()
+                    .into(),
+            ));
         }
 
         // Each shorter trail is tried in turn; the shortest wraps if even
@@ -196,14 +198,41 @@ impl<'a, Message: Clone + 'a> From<Breadcrumb<'a, Message>> for Element<'a, Mess
             .map(|(index, max)| {
                 let trail = trail(&crumbs, separator, Some(max), &on_expand);
                 if index == last {
-                    trail.wrap().into()
+                    list(trail.wrap().into())
                 } else {
-                    trail.into()
+                    list(trail.into())
                 }
             })
             .collect();
-        first_fit(candidates)
+        navigation(first_fit(candidates))
     }
+}
+
+#[cfg(feature = "icedwright")]
+fn navigation<'a, Message: 'a>(trail: Element<'a, Message>) -> Element<'a, Message> {
+    icedwright_probe::semantic(trail)
+        .role(icedwright_probe::role::Navigation)
+        .name("Breadcrumb")
+        .component("iced_cube::breadcrumb")
+        .into()
+}
+
+#[cfg(not(feature = "icedwright"))]
+fn navigation<Message>(trail: Element<'_, Message>) -> Element<'_, Message> {
+    trail
+}
+
+#[cfg(feature = "icedwright")]
+fn list<'a, Message: 'a>(trail: Element<'a, Message>) -> Element<'a, Message> {
+    icedwright_probe::semantic(trail)
+        .role(icedwright_probe::role::List)
+        .component("iced_cube::breadcrumb")
+        .into()
+}
+
+#[cfg(not(feature = "icedwright"))]
+fn list<Message>(trail: Element<'_, Message>) -> Element<'_, Message> {
+    trail
 }
 
 /// One row of crumbs, showing at most `max` of them.
@@ -250,6 +279,32 @@ fn item<'a, Message: Clone + 'a>(crumb: Crumb<'a, Message>, current: bool) -> El
     } = crumb;
     let message = on_press.filter(|_| !current);
 
+    #[cfg(feature = "icedwright")]
+    let link = message.is_some();
+    #[cfg(feature = "icedwright")]
+    let name = label.clone();
+    let element = crumb_element(label, icon, message, current);
+    #[cfg(feature = "icedwright")]
+    let element = {
+        let mut annotated = icedwright_probe::semantic(element)
+            .role(icedwright_probe::role::Link)
+            .name(name)
+            .current(current)
+            .component("iced_cube::breadcrumb");
+        if !link && !current {
+            annotated = annotated.disabled(true);
+        }
+        annotated.into()
+    };
+    element
+}
+
+fn crumb_element<'a, Message: Clone + 'a>(
+    label: text::Fragment<'a>,
+    icon: Option<Glyph>,
+    message: Option<Message>,
+    current: bool,
+) -> Element<'a, Message> {
     let link = message.is_some();
     let content = |status: Status| {
         let mut content = row![].spacing(6).align_y(Alignment::Center);
@@ -311,15 +366,30 @@ fn ellipsis<'a, Message: Clone + 'a>(on_expand: Option<Message>) -> Element<'a, 
         })
     };
     let Some(message) = on_expand else {
-        return container(glyph(Status::Active))
+        let element: Element<'a, Message> = container(glyph(Status::Active))
             .center_y(Length::Fixed(24.0))
             .into();
+        #[cfg(feature = "icedwright")]
+        let element = icedwright_probe::semantic(element)
+            .role(icedwright_probe::role::Button)
+            .name("Show path")
+            .disabled(true)
+            .component("iced_cube::breadcrumb")
+            .into();
+        return element;
     };
-    widget::button(glyph(Status::Active))
+    let element: Element<'a, Message> = widget::button(glyph(Status::Active))
         .padding(Padding::from([4.0, 2.0]))
         .on_press(message)
         .style(|theme, status| ellipsis_style(&Tokens::of(theme), status))
-        .into()
+        .into();
+    #[cfg(feature = "icedwright")]
+    let element = icedwright_probe::semantic(element)
+        .role(icedwright_probe::role::Button)
+        .name("Show path")
+        .component("iced_cube::breadcrumb")
+        .into();
+    element
 }
 
 /// The text colour of a crumb: the current one in the foreground colour,

@@ -53,3 +53,25 @@ fn every_size_renders_its_label_on_one_line_in_a_narrow_container() {
         assert!(bounds.width > 40.0, "{size:?}: {}", bounds.width);
     }
 }
+
+#[cfg(feature = "icedwright")]
+#[path = "support/semantic.rs"]
+mod semantic;
+
+#[cfg(feature = "icedwright")]
+#[test]
+fn toggles_report_whether_they_are_pressed() {
+    let element: Element<'_, Message> = column![
+        toggle("Grid").pressed(true).on_toggle(Message::Grid),
+        toggle("List"),
+    ]
+    .into();
+    assert_eq!(
+        semantic::yaml(element),
+        r#"- togglebutton "Grid" [pressed] [focused=false] [focusable]:
+  - text: Grid
+- togglebutton "List" [disabled] [pressed=false]:
+  - text: List
+"#
+    );
+}

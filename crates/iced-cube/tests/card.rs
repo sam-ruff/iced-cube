@@ -124,3 +124,23 @@ fn a_stack_body_with_a_filling_row_fills_the_card() {
         "the row reaches the card's right padding: {right:?}"
     );
 }
+
+#[cfg(feature = "icedwright")]
+#[path = "support/semantic.rs"]
+mod semantic;
+
+#[cfg(feature = "icedwright")]
+#[test]
+fn a_card_reports_a_region_named_by_its_title() {
+    let element: Element<'_, Message> = card()
+        .title("Account")
+        .description("Your details")
+        .footer(button("Save").on_press(Message::Save))
+        .into();
+    assert_eq!(
+        semantic::yaml(element),
+        "- region \"Account\" [description=\"Your details\"]:\n  - text: Account\n  \
+         - text: Your details\n  - button \"Save\" [focused=false] [focusable]:\n    \
+         - text: Save\n"
+    );
+}

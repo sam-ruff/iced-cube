@@ -114,3 +114,19 @@ fn slots_share_a_narrow_width_equally() -> Result<(), iced_test::Error> {
     assert!(size.width / 3.0 >= MIN_SLOT_WIDTH);
     Ok(())
 }
+
+#[cfg(feature = "icedwright")]
+#[path = "support/semantic.rs"]
+mod semantic;
+
+#[cfg(feature = "icedwright")]
+#[test]
+fn the_bar_reports_navigation_with_the_current_destination() {
+    assert_eq!(
+        semantic::yaml(view(Screen::Search, true, 0.0)),
+        "- navigation:\n\
+         \x20 - link \"Home\" [current=false]:\n    - text: Home\n\
+         \x20 - link \"Search\" [current]:\n    - text: Search\n\
+         \x20 - link \"Settings\" [current=false]:\n    - text: Settings\n"
+    );
+}

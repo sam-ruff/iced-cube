@@ -71,6 +71,14 @@ mod solid;
 pub mod theme;
 #[cfg(any(feature = "calendar", feature = "toast"))]
 mod ticker;
+#[cfg(any(
+    feature = "calendar",
+    feature = "rich-text-editor",
+    feature = "selectable-text",
+    feature = "tappable",
+    feature = "tooltip"
+))]
+mod time;
 
 pub use icon::{Glyph, Icon};
 pub use keys::{Chord, Keymap};

@@ -146,3 +146,26 @@ fn a_bar_without_messages_is_inert() {
     ui.click("2 problems").expect("action is rendered");
     assert!(ui.into_messages().next().is_none());
 }
+
+#[cfg(feature = "icedwright")]
+#[path = "support/semantic.rs"]
+mod semantic;
+
+#[cfg(feature = "icedwright")]
+#[test]
+fn the_bar_reports_a_status_with_its_actions_as_buttons() {
+    use icedwright_types::Role;
+
+    let state = sample();
+    let tree = semantic::Recorder::default().tree(view(&state));
+    let bar = tree
+        .iter()
+        .find(|node| node.role == Role::Status)
+        .expect("the bar");
+    let action = tree
+        .iter()
+        .find(|node| node.role == Role::Button)
+        .expect("the action");
+    assert_eq!(action.name.as_deref(), Some("2 problems"));
+    assert!(tree.ancestors(action.id).any(|id| id == bar.id));
+}

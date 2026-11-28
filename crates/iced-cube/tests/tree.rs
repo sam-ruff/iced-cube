@@ -496,3 +496,31 @@ fn a_producer_thread_sends_children_through_the_channel() {
     let mut ui = simulator::simulator(view(&state));
     assert!(ui.find("guide.md").is_ok());
 }
+
+#[cfg(feature = "icedwright")]
+#[path = "support/semantic.rs"]
+mod semantic;
+
+#[cfg(feature = "icedwright")]
+#[test]
+fn rows_report_tree_items_that_own_their_children() {
+    let mut state = files();
+    let _ = state.update(Event::Press(2, Modifiers::empty()));
+    let expected = r#"- tree [focused=false] [focusable]:
+  - treeitem "src" [expanded] [selected=false] [level=1] [position=1] [set-size=3] [prop:click-clock="iced"]:
+    - button "Collapse" [expanded]
+    - text: src
+    - treeitem "main.rs" [selected] [level=2] [position=1] [set-size=3] [prop:click-clock="iced"]:
+      - text: main.rs
+    - treeitem "lib.rs" [selected=false] [level=2] [position=2] [set-size=3] [prop:click-clock="iced"]:
+      - text: lib.rs
+    - treeitem "old.rs" [disabled] [selected=false] [level=2] [position=3] [set-size=3] [prop:click-clock="iced"]:
+      - text: old.rs
+  - treeitem "docs" [expanded=false] [selected=false] [level=1] [position=2] [set-size=3] [prop:click-clock="iced"]:
+    - button "Expand" [expanded=false]
+    - text: docs
+  - treeitem "readme.md" [selected=false] [level=1] [position=3] [set-size=3] [prop:click-clock="iced"]:
+    - text: readme.md
+"#;
+    assert_eq!(semantic::yaml(view(&state)), expected);
+}

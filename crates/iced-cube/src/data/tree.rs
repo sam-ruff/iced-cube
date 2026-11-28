@@ -1281,6 +1281,14 @@ where
             let menu_target = menu.as_ref().and_then(|menu| menu.target());
             move |range: Range<usize>| -> Element<'a, Message> {
                 let lines = lines.get(range).unwrap_or_default();
+                #[cfg(feature = "icedwright")]
+                let shown: HashSet<Id> = lines
+                    .iter()
+                    .filter_map(|line| match *line {
+                        Line::Node { id, .. } => Some(id),
+                        Line::Loading { .. } => None,
+                    })
+                    .collect();
                 column(lines.iter().map(|line| match *line {
                     Line::Node { id, depth } => {
                         let ringed = ringed(
@@ -1289,10 +1297,13 @@ where
                             state.focused && state.highlighted == Some(id),
                         );
                         let row = node_view(state, id, depth, guides, ringed, on_event.as_ref());
-                        match &menu {
+                        let row = match &menu {
                             Some(menu) if state.is_enabled(id) => menu.wrap(id, row),
                             _ => row,
-                        }
+                        };
+                        #[cfg(feature = "icedwright")]
+                        let row = probe::item(state, id, depth, &shown, on_event.is_some(), row);
+                        row
                     }
                     Line::Loading { depth } => loading_view(depth, guides),
                 }))
@@ -1306,20 +1317,110 @@ where
         )
         .width(width);
 
+        #[cfg(feature = "icedwright")]
+        let whole = |element: Element<'a, Message>| -> Element<'a, Message> {
+            icedwright_probe::semantic(element)
+                .role(icedwright_probe::role::Tree)
+                .component("iced_cube::tree")
+                .into()
+        };
+        #[cfg(not(feature = "icedwright"))]
+        let whole = |element: Element<'a, Message>| element;
         let Some(on_event) = on_event else {
-            return list.into();
+            return whole(list.into());
         };
         let on_focus = on_event.clone();
-        scope(list)
-            .on_focus(move |focused| on_focus(Event::Focus(focused)))
-            .on_key(move |key| {
-                let opened = menu
-                    .as_ref()
-                    .zip(state.highlighted())
-                    .and_then(|(menu, target)| menu.key(key, target));
-                opened.or_else(|| state.key_event(&keymap, key).map(&*on_event))
-            })
-            .into()
+        whole(
+            scope(list)
+                .on_focus(move |focused| on_focus(Event::Focus(focused)))
+                .on_key(move |key| {
+                    let opened = menu
+                        .as_ref()
+                        .zip(state.highlighted())
+                        .and_then(|(menu, target)| menu.key(key, target));
+                    opened.or_else(|| state.key_event(&keymap, key).map(&*on_event))
+                })
+                .into(),
+        )
+    }
+}
+
+/// What tree rows report to icedwright.
+#[cfg(feature = "icedwright")]
+mod probe {
+    use std::collections::HashSet;
+    use std::hash::{DefaultHasher, Hash, Hasher};
+
+    use icedwright_probe::{ClickClock, Key, role, semantic};
+
+    use super::{CheckState, Element, Mode, State};
+
+    /// A key naming one node of one tree, so a row can own its children.
+    fn key<Id: Hash>(state: &State<Id>, id: Id) -> Key {
+        let mut hasher = DefaultHasher::new();
+        id.hash(&mut hasher);
+        Key::from(format!(
+            "iced_cube::tree/{:p}/{}",
+            std::ptr::from_ref(state),
+            hasher.finish()
+        ))
+    }
+
+    pub(super) fn item<'a, Id, Message: 'a>(
+        state: &State<Id>,
+        id: Id,
+        depth: usize,
+        shown: &HashSet<Id>,
+        enabled: bool,
+        row: Element<'a, Message>,
+    ) -> Element<'a, Message>
+    where
+        Id: Copy + Eq + Hash,
+    {
+        let Some(node) = state.node(id) else {
+            return row;
+        };
+        let siblings = match state.parent(id) {
+            Some(parent) => state.children(parent),
+            None => state.roots(),
+        };
+        let index = siblings.iter().position(|s| *s == id).unwrap_or_default();
+        let level = u16::try_from(depth + 1).unwrap_or(u16::MAX);
+        let mut annotated = semantic(row)
+            .role(role::TreeItem)
+            .name(node.label.clone())
+            .level(level)
+            .position(
+                u32::try_from(index + 1).unwrap_or(u32::MAX),
+                u32::try_from(siblings.len()).unwrap_or(u32::MAX),
+            )
+            .key(key(state, id))
+            .click_clock(ClickClock::Iced)
+            .component("iced_cube::tree");
+        if state.has_children(id) {
+            annotated = annotated.expanded(state.is_expanded(id));
+        }
+        if state.mode() == Mode::Checkbox {
+            annotated = annotated.checked(match state.check_state(id) {
+                CheckState::Checked => icedwright_probe::Checked::True,
+                CheckState::Unchecked => icedwright_probe::Checked::False,
+                CheckState::Indeterminate => icedwright_probe::Checked::Mixed,
+            });
+        } else {
+            annotated = annotated.selected(state.is_selected(id));
+        }
+        if state.is_loading(id) {
+            annotated = annotated.busy(true);
+        }
+        if node.disabled || !enabled {
+            annotated = annotated.disabled(true);
+        }
+        if state.is_expanded(id) {
+            for child in state.children(id).iter().filter(|c| shown.contains(c)) {
+                annotated = annotated.owns(key(state, *child));
+            }
+        }
+        annotated.into()
     }
 }
 
@@ -1418,13 +1519,26 @@ where
         .width(INDENT)
         .height(Length::Fill)
         .center_y(Length::Fill);
-        match on_event {
+        let expander: Element<'a, Message> = match on_event {
             Some(on_event) => mouse_area(icon)
                 .on_press(on_event(Event::Toggle(id)))
                 .interaction(mouse::Interaction::Pointer)
                 .into(),
             None => icon.into(),
-        }
+        };
+        #[cfg(feature = "icedwright")]
+        let expander = {
+            let mut annotated = icedwright_probe::semantic(expander)
+                .role(icedwright_probe::role::Button)
+                .name(if expanded { "Collapse" } else { "Expand" })
+                .expanded(expanded)
+                .component("iced_cube::tree");
+            if !enabled {
+                annotated = annotated.disabled(true);
+            }
+            annotated.into()
+        };
+        expander
     } else {
         Space::new().width(INDENT).into()
     };

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Checks iced-cube with no components, then with each component, group and
 # `full` feature on its own. Extra arguments are passed to `cargo check`.
+# With CHECK_ICEDWRIGHT=1 it also checks each one with `icedwright` on.
 # Needs node to read the feature list from `cargo metadata`.
 set -euo pipefail
 
@@ -37,3 +38,11 @@ check "$platform" "$@"
 for feature in $features; do
     check "$platform,$feature" "$@"
 done
+
+# Each component again with its icedwright annotations, when asked for.
+if [ "${CHECK_ICEDWRIGHT:-0}" = "1" ]; then
+    for feature in $features; do
+        [ "$feature" = "icedwright" ] && continue
+        check "$platform,$feature,icedwright" "$@"
+    done
+fi

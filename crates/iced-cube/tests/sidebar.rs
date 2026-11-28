@@ -318,3 +318,25 @@ fn shortcut_routes_ctrl_b_from_the_app() {
         Some(Event::Toggle)
     );
 }
+
+#[cfg(feature = "icedwright")]
+#[path = "support/semantic.rs"]
+mod semantic;
+
+#[cfg(feature = "icedwright")]
+#[test]
+fn the_sidebar_reports_navigation_with_groups_of_links() {
+    let state = state();
+    assert_eq!(
+        semantic::yaml(view(&state)),
+        "- navigation \"Sidebar\":\n  - scrollview:\n    - list:\n\
+         \x20     - group \"Platform\":\n        - text: Platform\n\
+         \x20       - link \"Home\" [current]:\n          - text: Home\n\
+         \x20       - link \"Inbox\" [current=false]:\n          - text: Inbox\n          - text: 4\n\
+         \x20       - link \"Projects\" [current=false]:\n          - text: Projects\n\
+         \x20     - group \"Account\":\n\
+         \x20       - button \"Account\" [expanded]:\n          - text: Account\n\
+         \x20       - link \"Settings\" [current=false]:\n          - text: Settings\n\
+         - text: Page content\n"
+    );
+}

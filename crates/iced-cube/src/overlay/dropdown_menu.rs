@@ -899,7 +899,8 @@ where
             Entry::Label(label) => menu::group_label(label, indented),
             Entry::Item(item) => {
                 let is_highlighted = highlighted == Some(index);
-                let row = item_row(item, is_highlighted, slot, on_event);
+                let expanded = is_highlighted && submenu_open;
+                let row = item_row(item, is_highlighted, expanded, slot, on_event);
                 let Some(children) = item.submenu().filter(|_| is_highlighted && submenu_open)
                 else {
                     return row;
@@ -923,7 +924,13 @@ where
     // Each level scrolls when it is taller than the room beside its
     // trigger or row, following the keyboard highlight.
     let rows = column(rows).width(width);
-    menu::surface(scrolling(rows, highlighted)).into()
+    let surface: Element<'a, Message> = menu::surface(scrolling(rows, highlighted)).into();
+    #[cfg(feature = "icedwright")]
+    let surface = icedwright_probe::semantic(surface)
+        .role(icedwright_probe::role::Menu)
+        .component("iced_cube::dropdown_menu")
+        .into();
+    surface
 }
 
 /// Whether a menu level has checkbox or radio items, whose group labels
@@ -958,6 +965,70 @@ fn leading<Id>(item: &Item<Id>, slot: bool) -> Leading {
 }
 
 fn item_row<'a, Id, Message>(
+    item: &'a Item<Id>,
+    highlighted: bool,
+    expanded: bool,
+    slot: bool,
+    on_event: Option<&dyn Fn(Event<Id>) -> Message>,
+) -> Element<'a, Message>
+where
+    Id: Copy + 'a,
+    Message: Clone + 'a,
+{
+    #[cfg(not(feature = "icedwright"))]
+    let _ = expanded;
+    #[cfg(feature = "icedwright")]
+    let enabled_row = on_event.is_some() && item.enabled();
+    let row = item_body(item, highlighted, slot, on_event);
+    #[cfg(feature = "icedwright")]
+    let row = {
+        use icedwright_probe::{role, semantic};
+        let name = item.label.as_str();
+        let kind = "iced_cube::dropdown_menu";
+        match &item.kind {
+            Kind::Checkbox(checked) => {
+                let annotated = semantic(row)
+                    .role(role::MenuItemCheckBox)
+                    .name(name)
+                    .checked(*checked)
+                    .component(kind);
+                if enabled_row {
+                    annotated.into()
+                } else {
+                    annotated.disabled(true).into()
+                }
+            }
+            Kind::Radio(checked) => {
+                let annotated = semantic(row)
+                    .role(role::MenuItemRadio)
+                    .name(name)
+                    .checked(*checked)
+                    .component(kind);
+                if enabled_row {
+                    annotated.into()
+                } else {
+                    annotated.disabled(true).into()
+                }
+            }
+            _ => {
+                let mut annotated = semantic(row)
+                    .role(role::MenuItem)
+                    .name(name)
+                    .component(kind);
+                if item.submenu().is_some() {
+                    annotated = annotated.expanded(expanded);
+                }
+                if !enabled_row {
+                    annotated = annotated.disabled(true);
+                }
+                annotated.into()
+            }
+        }
+    };
+    row
+}
+
+fn item_body<'a, Id, Message>(
     item: &'a Item<Id>,
     highlighted: bool,
     slot: bool,

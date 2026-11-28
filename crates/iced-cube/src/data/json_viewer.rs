@@ -1409,10 +1409,14 @@ where
             .height(ROW_HEIGHT)
             .into()
         } else {
-            rows(count, ROW_HEIGHT, build)
+            let rows = rows(count, ROW_HEIGHT, build)
                 .highlight(highlight)
-                .height(height)
-                .into()
+                .height(height);
+            #[cfg(feature = "icedwright")]
+            let rows = icedwright_probe::semantic(rows)
+                .role(icedwright_probe::role::Tree)
+                .component("iced_cube::json_viewer");
+            rows.into()
         };
         let body: Element<'a, Message> = if frame {
             container(body)
@@ -1677,13 +1681,37 @@ fn row_view<'a, Message: Clone + 'a>(
             divider: None,
         }
     });
-    let Some(on_event) = on_event.cloned() else {
-        return row.into();
+    let row: Element<'a, Message> = match on_event.cloned() {
+        Some(on_event) => {
+            let toggle = state.has_children(id).then(|| on_event(Event::Toggle(id)));
+            row.on_press(move |_| on_event(Event::Press(id)))
+                .on_double_click(toggle)
+                .into()
+        }
+        None => row.into(),
     };
-    let toggle = state.has_children(id).then(|| on_event(Event::Toggle(id)));
-    row.on_press(move |_| on_event(Event::Press(id)))
-        .on_double_click(toggle)
-        .into()
+    #[cfg(feature = "icedwright")]
+    let row = {
+        let mut annotated = icedwright_probe::semantic(row)
+            .role(icedwright_probe::role::TreeItem)
+            .name(match &item.segment {
+                Some(Segment::Key(key)) => key.clone(),
+                Some(Segment::Index(index)) => index.to_string(),
+                None => String::new(),
+            })
+            .level(u16::try_from(item.depth + 1).unwrap_or(u16::MAX))
+            .selected(highlighted)
+            .click_clock(icedwright_probe::ClickClock::Iced)
+            .component("iced_cube::json_viewer");
+        if state.has_children(id) {
+            annotated = annotated.expanded(expanded);
+        }
+        if !enabled {
+            annotated = annotated.disabled(true);
+        }
+        annotated.into()
+    };
+    row
 }
 
 #[cfg(test)]

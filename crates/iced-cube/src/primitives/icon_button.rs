@@ -193,11 +193,59 @@ impl<'a, Message: Clone + 'a> From<IconButton<'a, Message>> for Element<'a, Mess
             Some(id) => container(button).id(id).into(),
             None => button.into(),
         };
+        #[cfg(feature = "icedwright")]
+        {
+            element = annotate(element, label.clone(), pressed, enabled, position.is_some());
+        }
         if let (Some(label), Some(position)) = (label, position) {
             element = tooltip(element, label).position(position).into();
         }
         element
     }
+}
+
+/// A plain icon button is a `Button`; one drawn pressed is a pressed
+/// `ToggleButton`. The label names it and is its tooltip when one shows.
+#[cfg(feature = "icedwright")]
+fn annotate<'a, Message: 'a>(
+    element: Element<'a, Message>,
+    label: Option<text::Fragment<'a>>,
+    pressed: bool,
+    enabled: bool,
+    tooltip: bool,
+) -> Element<'a, Message> {
+    use icedwright_probe::role::RoleKind;
+    use icedwright_probe::{Semantic, role, semantic};
+
+    fn finish<'a, Message: 'a, R: RoleKind>(
+        mut annotated: Semantic<'a, Message, iced::Theme, iced::Renderer, R>,
+        label: Option<text::Fragment<'a>>,
+        enabled: bool,
+        tooltip: bool,
+    ) -> Element<'a, Message> {
+        annotated = annotated.component("iced_cube::icon_button");
+        if !enabled {
+            annotated = annotated.disabled(true);
+        }
+        if let Some(label) = label {
+            if tooltip {
+                annotated = annotated.tooltip(label.clone());
+            }
+            annotated = annotated.name(label);
+        }
+        annotated.into()
+    }
+
+    if pressed {
+        let annotated = semantic(element).role(role::ToggleButton).pressed(true);
+        return finish(annotated, label, enabled, tooltip);
+    }
+    finish(
+        semantic(element).role(role::Button),
+        label,
+        enabled,
+        tooltip,
+    )
 }
 
 /// Colours of an icon button, switched on or off, in a state.

@@ -39,3 +39,17 @@ fn every_variant_and_size_renders() {
         }
     }
 }
+
+#[cfg(feature = "icedwright")]
+#[path = "support/semantic.rs"]
+mod semantic;
+
+#[cfg(feature = "icedwright")]
+#[test]
+fn progress_reports_its_label_and_percentage() {
+    let element: Element<'_, ()> = progress(0.42).label("Uploading").into();
+    assert_eq!(
+        semantic::yaml(element),
+        "- progressbar \"Uploading\":\n  - /value: 42%\n  - text: Uploading\n"
+    );
+}
