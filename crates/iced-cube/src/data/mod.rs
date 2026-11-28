@@ -44,6 +44,8 @@ pub mod property_grid;
 mod rows;
 #[cfg(feature = "selectable-text")]
 pub mod selectable_text;
+#[cfg(feature = "timeline")]
+pub mod timeline;
 #[cfg(feature = "tree")]
 pub mod tree;
 #[cfg(feature = "virtual-list")]
@@ -61,6 +63,8 @@ pub use log_viewer::{LogViewer, log_viewer};
 pub use property_grid::{PropertyGrid, property_grid};
 #[cfg(feature = "selectable-text")]
 pub use selectable_text::{SelectableText, SelectionArea, selectable_text, selection_area};
+#[cfg(feature = "timeline")]
+pub use timeline::{Timeline, timeline};
 #[cfg(feature = "tree")]
 pub use tree::{Tree, tree};
 #[cfg(feature = "virtual-list")]

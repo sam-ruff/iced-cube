@@ -75,6 +75,7 @@ data = [
     "virtual-list",
     "selectable-text",
     "calendar",
+    "timeline",
 ]
 
 button = ["iced/advanced"]
@@ -160,6 +161,7 @@ virtual-list = ["iced/advanced", "context-menu", "scroll-area"]
 log-viewer = ["virtual-list", "button", "context-menu", "icon-button", "input", "toggle-group"]
 rich-text-editor = ["iced/advanced", "input", "dep:unicode-segmentation"]
 selectable-text = ["iced/advanced"]
+timeline = ["iced/advanced"]
 formatting-toolbar = [
     "rich-text-editor",
     "toolbar",

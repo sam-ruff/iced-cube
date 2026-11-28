@@ -114,6 +114,8 @@ pub use data::json_viewer;
 pub use data::log_viewer;
 #[cfg(feature = "property-grid")]
 pub use data::property_grid;
+#[cfg(feature = "timeline")]
+pub use data::timeline;
 #[cfg(feature = "tree")]
 pub use data::tree;
 #[cfg(feature = "virtual-list")]

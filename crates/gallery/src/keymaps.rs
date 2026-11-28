@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use iced_cube::application::{command_palette, menubar, toolbar};
 use iced_cube::data::{
-    calendar, data_table, json_viewer, log_viewer, property_grid, selectable_text, tree,
+    calendar, data_table, json_viewer, log_viewer, property_grid, selectable_text, timeline, tree,
     virtual_list,
 };
 use iced_cube::forms::{combobox, multi_combobox, rich_text_editor, select};
@@ -82,6 +82,7 @@ pub fn all() -> BTreeMap<&'static str, Vec<Binding>> {
         ("switch", bindings::<switch::Action>()),
         ("tabs", bindings::<tabs::Action>()),
         ("textarea", bindings::<input::Shortcut>()),
+        ("timeline", bindings::<timeline::Action>()),
         ("toast", bindings::<toast::Action>()),
         ("toggle", bindings::<toggle::Action>()),
         ("toggle-group", bindings::<toggle_group::Action>()),

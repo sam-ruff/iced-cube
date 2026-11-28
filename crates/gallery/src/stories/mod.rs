@@ -55,6 +55,7 @@ pub mod tabs;
 pub mod tappable;
 pub mod textarea;
 pub mod theme;
+pub mod timeline;
 pub mod toast;
 pub mod toggle;
 pub mod toggle_group;
@@ -1054,6 +1055,26 @@ crate::stories! {
         id: "calendar/triggers", component: "calendar", title: "Custom triggers",
         description: "Rules built from base parts: changes to entries, a reminder limited to a tag, one that repeats before a single entry, and one for when an entry ends. Each carries the app's own key.",
         file: "calendar/triggers.rs", height: 480,
+    }
+    TimelineDefault => timeline::default {
+        id: "timeline/default", component: "timeline", title: "Default",
+        description: "Steps coloured by outcome, with a playhead that follows a press or a drag.",
+        file: "timeline/default.rs", height: 160,
+    }
+    TimelineLanes => timeline::lanes {
+        id: "timeline/lanes", component: "timeline", title: "Lanes",
+        description: "Labelled lanes under the track show work that ran across several steps.",
+        file: "timeline/lanes.rs", height: 200,
+    }
+    TimelineKeyboard => timeline::keyboard {
+        id: "timeline/keyboard", component: "timeline", title: "Keyboard shortcuts",
+        description: "Arrow, Page, Home and End keys through the default keymap, plus two added bindings.",
+        file: "timeline/keyboard.rs", height: 200, subscription: true,
+    }
+    TimelineDisabled => timeline::disabled {
+        id: "timeline/disabled", component: "timeline", title: "Disabled",
+        description: "A timeline without a message only shows progress.",
+        file: "timeline/disabled.rs", height: 160,
     }
     ShowcaseSettings => showcase::settings {
         id: "showcase/settings", component: "showcase", title: "Preferences",
