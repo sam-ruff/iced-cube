@@ -183,6 +183,46 @@ fn a_fixed_height_letterboxes_the_image() {
     );
 }
 
+mod support;
+
+fn keyed_view(divider: &f32) -> Element<'_, Message> {
+    iced::widget::container(
+        image_compare::image_compare(picture(), picture())
+            .divider(*divider)
+            .on_divider(Message::Divider),
+    )
+    .width(400)
+    .into()
+}
+
+fn apply(divider: &mut f32, message: Message) {
+    if let Message::Divider(next) = message {
+        *divider = next;
+    }
+}
+
+#[test]
+fn keys_move_the_divider_only_after_the_compare_is_pressed() {
+    use iced::keyboard::{Key, key::Named};
+
+    let mut ui = support::Harness::new(0.5, keyed_view, apply);
+    assert!(!ui.tap(Key::Named(Named::End)), "not pressed yet");
+    assert_eq!(ui.state, 0.5);
+
+    ui.click(Point::new(50.0, 100.0));
+    assert!(ui.tap(Key::Named(Named::End)));
+    assert_eq!(ui.state, 1.0);
+
+    // A press elsewhere hands the keys back to the rest of the app.
+    ui.click(Point::new(50.0, 400.0));
+    assert!(!ui.tap(Key::Named(Named::Home)));
+    assert_eq!(ui.state, 1.0);
+
+    ui.focus_next();
+    assert!(ui.tap(Key::Named(Named::Home)));
+    assert_eq!(ui.state, 0.0);
+}
+
 #[cfg(feature = "icedwright")]
 #[path = "support/semantic.rs"]
 mod semantic;
@@ -197,7 +237,7 @@ fn the_compare_reports_its_images_and_divider() {
     assert_eq!(
         semantic::yaml(element),
         "- group \"Image compare\" [prop:mode=\"slider\"]:\n  - img \"Before\"\n  - img \"After\"\n  \
-         - separator \"Divider\" [value=25] [min=0] [max=100]\n"
+         - separator \"Divider\" [focused=false] [focusable] [value=25] [min=0] [max=100]\n"
     );
     let single: Element<'_, Message> = image_compare::single(picture()).label("Frame").into();
     assert_eq!(

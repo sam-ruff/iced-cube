@@ -28,7 +28,6 @@ pub(crate) use control::{Ring, focusable};
 use iced::advanced::widget::Operation;
 use iced::advanced::widget::operation::Focusable;
 use iced::advanced::{Renderer as _, renderer};
-use iced::keyboard::{self, key::Named};
 use iced::widget;
 use iced::{Background, Border, Color, Event, Rectangle, Renderer, Theme, mouse, touch};
 
@@ -101,7 +100,17 @@ fn is_pointer_press(event: &Event) -> bool {
 }
 
 /// The named key of a press without modifiers, if the event is one.
-pub(crate) fn named_press(event: &Event) -> Option<Named> {
+#[cfg(any(
+    feature = "button",
+    feature = "checkbox",
+    feature = "radio",
+    feature = "select",
+    feature = "switch",
+    feature = "toggle"
+))]
+pub(crate) fn named_press(event: &Event) -> Option<iced::keyboard::key::Named> {
+    use iced::keyboard;
+
     let Event::Keyboard(keyboard::Event::KeyPressed {
         key: keyboard::Key::Named(named),
         modifiers,
@@ -141,6 +150,7 @@ pub(crate) fn draw_ring(renderer: &mut Renderer, theme: &Theme, target: Rectangl
 #[cfg(test)]
 mod tests {
     use super::*;
+    use iced::keyboard::{self, key::Named};
     use iced::{Point, Size};
 
     fn key(named: Named, modifiers: keyboard::Modifiers) -> Event {
@@ -157,6 +167,14 @@ mod tests {
         })
     }
 
+    #[cfg(any(
+        feature = "button",
+        feature = "checkbox",
+        feature = "radio",
+        feature = "select",
+        feature = "switch",
+        feature = "toggle"
+    ))]
     #[test]
     fn named_presses_ignore_chords_with_modifiers() {
         let none = keyboard::Modifiers::empty();

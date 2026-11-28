@@ -10,7 +10,8 @@ use iced::keyboard::{self, Key, Modifiers, key};
 use iced::{Element, Event, Font, Pixels, Point, Size};
 use iced_test::core::clipboard::{Clipboard, Kind};
 use iced_test::core::renderer::Headless;
-use iced_test::core::widget::operation::focusable;
+use iced_test::core::widget::Operation;
+use iced_test::core::widget::operation::{Outcome, focusable};
 use iced_test::renderer::Renderer;
 use iced_test::runtime::user_interface::{Cache, UserInterface};
 
@@ -61,6 +62,21 @@ impl<S, M> Harness<S, M> {
         let cache = self.cache.take().unwrap_or_default();
         let mut ui = build((self.view)(&self.state), cache, &mut self.renderer);
         ui.operate(&self.renderer, &mut focusable::focus(id.into()));
+        self.cache = Some(ui.into_cache());
+    }
+
+    /// Moves keyboard focus to the next focusable widget, as Tab does.
+    pub fn focus_next(&mut self) {
+        let cache = self.cache.take().unwrap_or_default();
+        let mut ui = build((self.view)(&self.state), cache, &mut self.renderer);
+        let mut operation: Box<dyn Operation> = Box::new(focusable::focus_next());
+        loop {
+            ui.operate(&self.renderer, operation.as_mut());
+            match operation.finish() {
+                Outcome::Chain(next) => operation = next,
+                _ => break,
+            }
+        }
         self.cache = Some(ui.into_cache());
     }
 

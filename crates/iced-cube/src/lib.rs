@@ -39,9 +39,11 @@ mod fit;
 #[cfg(any(
     feature = "button",
     feature = "checkbox",
+    feature = "image-compare",
     feature = "radio",
     feature = "select",
     feature = "switch",
+    feature = "timeline",
     feature = "toggle"
 ))]
 mod focus;

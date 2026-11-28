@@ -63,6 +63,7 @@ impl Example {
 
         column![
             image_compare::single(self.screen.clone())
+                .pixelated(true)
                 .outlines(outlines)
                 .on_hover(Message::Hovered)
                 .on_press(Message::Pressed),

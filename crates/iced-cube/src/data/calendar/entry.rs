@@ -13,25 +13,7 @@ use crate::icon::Glyph;
 pub struct EntryId(pub u64);
 
 /// The colour of an entry, taken from the theme's tokens.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub enum Tone {
-    #[default]
-    Primary,
-    Neutral,
-    Success,
-    Warning,
-    Destructive,
-}
-
-impl Tone {
-    pub const ALL: [Tone; 5] = [
-        Tone::Primary,
-        Tone::Neutral,
-        Tone::Success,
-        Tone::Warning,
-        Tone::Destructive,
-    ];
-}
+pub use crate::theme::Tone;
 
 pub use super::rules::{When, add_days, date_of, instant, midnight, next_day};
 

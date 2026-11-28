@@ -165,6 +165,40 @@ impl Tokens {
     }
 }
 
+/// A theme colour that marks what something signals, shared by components
+/// that colour items by meaning: calendar entries, timeline steps and spans,
+/// and image compare outlines.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum Tone {
+    #[default]
+    Primary,
+    Neutral,
+    Success,
+    Warning,
+    Destructive,
+}
+
+impl Tone {
+    pub const ALL: [Tone; 5] = [
+        Tone::Primary,
+        Tone::Neutral,
+        Tone::Success,
+        Tone::Warning,
+        Tone::Destructive,
+    ];
+
+    /// The colour the tone stands for in `tokens`.
+    pub fn colour(self, tokens: &Tokens) -> Color {
+        match self {
+            Tone::Primary => tokens.primary,
+            Tone::Neutral => tokens.muted_foreground,
+            Tone::Success => tokens.success,
+            Tone::Warning => tokens.warning,
+            Tone::Destructive => tokens.destructive,
+        }
+    }
+}
+
 /// The library's light theme.
 pub fn light() -> Theme {
     Config::light().build()
@@ -478,6 +512,21 @@ pub fn fade(color: Color, alpha: f32) -> Color {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_tone_has_its_own_colour_in_light_and_dark() {
+        for theme in [light(), dark()] {
+            let tokens = Tokens::of(&theme);
+            let colours: Vec<Color> = Tone::ALL.iter().map(|t| t.colour(&tokens)).collect();
+            for (i, a) in colours.iter().enumerate() {
+                for b in &colours[i + 1..] {
+                    assert_ne!(a, b);
+                }
+            }
+            assert_eq!(Tone::Destructive.colour(&tokens), tokens.destructive);
+        }
+        assert_eq!(Tone::default(), Tone::Primary);
+    }
 
     #[test]
     fn semibold_keeps_the_base_family() {

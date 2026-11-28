@@ -15,12 +15,13 @@ use iced::advanced::image::{self as core_image, Renderer as _};
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::widget::{Tree, Widget, tree};
 use iced::advanced::{Clipboard, Renderer as _, Shell, renderer};
-use iced::keyboard::key::Named;
+use iced::keyboard::{self, key::Named};
 use iced::widget::image;
 use iced::{
     Border, Color, Element, Event, Length, Point, Rectangle, Renderer, Size, Theme, mouse, touch,
 };
 
+use crate::focus;
 use crate::keys::{self, Chord, Keymap};
 use crate::theme::{Tokens, fade, mix, space};
 
@@ -61,23 +62,7 @@ impl Mode {
 }
 
 /// The colour of an outline.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub enum Tone {
-    #[default]
-    Primary,
-    Success,
-    Warning,
-    Destructive,
-}
-
-impl Tone {
-    pub const ALL: [Tone; 4] = [
-        Tone::Primary,
-        Tone::Success,
-        Tone::Warning,
-        Tone::Destructive,
-    ];
-}
+pub use crate::theme::Tone;
 
 /// A rectangle drawn over the images, in image pixels.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -115,6 +100,7 @@ pub struct ImageCompare<'a, Message> {
     height: Length,
     filter: image::FilterMethod,
     label: iced::widget::text::Fragment<'a>,
+    keymap: Keymap<Action>,
     on_divider: Option<Box<dyn Fn(f32) -> Message + 'a>>,
     on_hover: Option<Box<dyn Fn(Option<Point>) -> Message + 'a>>,
     on_press: Option<Box<dyn Fn(Point) -> Message + 'a>>,
@@ -132,6 +118,7 @@ impl<Message> std::fmt::Debug for ImageCompare<'_, Message> {
             .field("width", &self.width)
             .field("height", &self.height)
             .field("label", &self.label)
+            .field("keymap", &self.keymap)
             .field("draggable", &self.on_divider.is_some())
             .finish_non_exhaustive()
     }
@@ -162,6 +149,7 @@ pub fn single<'a, Message>(image: impl Into<image::Handle>) -> ImageCompare<'a, 
         height: Length::Shrink,
         filter: image::FilterMethod::Linear,
         label: "Image compare".into(),
+        keymap: default_keymap(),
         on_divider: None,
         on_hover: None,
         on_press: None,
@@ -230,9 +218,17 @@ impl<'a, Message> ImageCompare<'a, Message> {
         self
     }
 
-    /// Sent with the divider's new position while it is dragged.
+    /// Sent with the divider's new position while it is dragged, or where
+    /// a shortcut moves it.
     pub fn on_divider(mut self, on_divider: impl Fn(f32) -> Message + 'a) -> Self {
         self.on_divider = Some(Box::new(on_divider));
+        self
+    }
+
+    /// Replaces the [`default_keymap`] the compare resolves keys with while
+    /// it has keyboard focus or was the last thing pressed.
+    pub fn keymap(mut self, keymap: Keymap<Action>) -> Self {
+        self.keymap = keymap;
         self
     }
 
@@ -463,8 +459,9 @@ impl keys::Action for Action {
 /// | `Home` | [`Action::Start`] |
 /// | `End` | [`Action::End`] |
 ///
-/// Shortcuts are app-wide, so an app with several compares routes them to
-/// the one it considers current.
+/// The compare resolves them itself while its divider can be dragged and it
+/// has keyboard focus or was the last thing pressed. Pass a changed keymap
+/// with [`ImageCompare::keymap`].
 pub fn default_keymap() -> Keymap<Action> {
     Keymap::new()
         .bind(Chord::named(Named::ArrowLeft), Action::Left)
@@ -505,16 +502,6 @@ pub struct Style {
     pub handle_border_width: f32,
 }
 
-/// The colour of an outline tone.
-pub fn tone_colour(tokens: &Tokens, tone: Tone) -> Color {
-    match tone {
-        Tone::Primary => tokens.primary,
-        Tone::Success => tokens.success,
-        Tone::Warning => tokens.warning,
-        Tone::Destructive => tokens.destructive,
-    }
-}
-
 /// Resolves the colours of an image compare for the divider's status.
 pub fn style(tokens: &Tokens, status: Status) -> Style {
     let border = match status {
@@ -542,9 +529,20 @@ struct State {
     finger: Option<touch::Finger>,
     hovered: Option<Point>,
     near: bool,
+    focus: focus::State,
+    /// The last press landed on the compare, so its keys apply.
+    active: bool,
 }
 
 impl<Message> ImageCompare<'_, Message> {
+    /// Whether shortcuts move the divider: it can be dragged, and the
+    /// compare has keyboard focus or was the last thing pressed.
+    fn keys_apply(&self, state: &State, frames: &Frames) -> bool {
+        self.on_divider.is_some()
+            && self.divider_x(frames).is_some()
+            && (state.active || state.focus.is_focused())
+    }
+
     fn frames(&self, renderer: &Renderer, bounds: Rectangle) -> (Frames, Size) {
         let image = self.image_size(renderer);
         (frames(self.shown(), image, bounds, space::SM), image)
@@ -758,6 +756,11 @@ impl<Message> Widget<Message, Theme, Renderer> for ImageCompare<'_, Message> {
 
         // Images draw above quads within a layer, so marks go in their own.
         renderer.with_layer(bounds, |renderer| {
+            if state.focus.is_focused() {
+                // Drawn on the frame's edge, so the layer never clips it.
+                let target = frames.after.shrink(focus::RING_OUTSET);
+                focus::draw_ring(renderer, theme, target, 0.0);
+            }
             for frame in frames.all() {
                 for outline in &self.outlines {
                     let rect = from_image(outline.rect, frame, image);
@@ -769,7 +772,7 @@ impl<Message> Widget<Message, Theme, Renderer> for ImageCompare<'_, Message> {
                         clipped,
                         Color::TRANSPARENT,
                         Border {
-                            color: tone_colour(&tokens, outline.tone),
+                            color: outline.tone.colour(&tokens),
                             width: 2.0,
                             radius: 2.0.into(),
                         },
@@ -833,7 +836,34 @@ impl<Message> Widget<Message, Theme, Renderer> for ImageCompare<'_, Message> {
         let state = tree.state.downcast_mut::<State>();
         let (frames, image) = self.frames(renderer, layout.bounds());
         let before = state.dragging;
+        let keyed = (state.focus.is_focused(), state.active);
+        let _ = state.focus.update(event);
         match event {
+            Event::Mouse(mouse::Event::ButtonPressed(_)) => {
+                state.active = cursor.is_over(layout.bounds());
+            }
+            Event::Touch(touch::Event::FingerPressed { position, .. }) => {
+                state.active = layout.bounds().contains(*position);
+            }
+            _ => {}
+        }
+        if (state.focus.is_focused(), state.active) != keyed {
+            shell.request_redraw();
+        }
+        match event {
+            Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. })
+                if self.keys_apply(state, &frames) =>
+            {
+                if let Some(action) = self.keymap.resolve(key, *modifiers) {
+                    let divider = action.apply(self.divider);
+                    if let Some(on_divider) = &self.on_divider
+                        && divider != self.divider
+                    {
+                        shell.publish(on_divider(divider));
+                    }
+                    shell.capture_event();
+                }
+            }
             Event::Mouse(mouse::Event::CursorMoved { position }) => {
                 if state.dragging && state.finger.is_none() {
                     self.drag(&frames, position.x, shell);
@@ -927,16 +957,32 @@ impl<Message> Widget<Message, Theme, Renderer> for ImageCompare<'_, Message> {
         }
     }
 
+    #[cfg(not(feature = "icedwright"))]
+    fn operate(
+        &mut self,
+        tree: &mut Tree,
+        layout: Layout<'_>,
+        renderer: &Renderer,
+        operation: &mut dyn iced::advanced::widget::Operation,
+    ) {
+        let (frames, _) = self.frames(renderer, layout.bounds());
+        if self.on_divider.is_some() && self.divider_x(&frames).is_some() {
+            let state = tree.state.downcast_mut::<State>();
+            focus::report(operation, None, frames.after, &mut state.focus);
+        }
+    }
+
     #[cfg(feature = "icedwright")]
     fn operate(
         &mut self,
-        _tree: &mut Tree,
+        tree: &mut Tree,
         layout: Layout<'_>,
         renderer: &Renderer,
         operation: &mut dyn iced::advanced::widget::Operation,
     ) {
         use icedwright_probe::{Annotation, report, role};
 
+        let state = tree.state.downcast_mut::<State>();
         let bounds = layout.bounds();
         let (frames, _) = self.frames(renderer, bounds);
         const KIND: &str = "iced_cube::image_compare";
@@ -989,6 +1035,10 @@ impl<Message> Widget<Message, Theme, Renderer> for ImageCompare<'_, Message> {
                     divider.disabled(true)
                 }
             });
+            // After the divider, at the same bounds, so they merge.
+            if enabled {
+                focus::report(operation, None, frames.after, &mut state.focus);
+            }
         });
     }
 }
@@ -1177,14 +1227,7 @@ mod tests {
     }
 
     #[test]
-    fn every_tone_has_its_own_colour() {
-        let tokens = Tokens::of(&dark());
-        let colours: Vec<Color> = Tone::ALL.iter().map(|t| tone_colour(&tokens, *t)).collect();
-        for (i, a) in colours.iter().enumerate() {
-            for b in &colours[i + 1..] {
-                assert_ne!(a, b);
-            }
-        }
+    fn outlines_take_a_tone_and_default_to_primary() {
         let outline = Outline::new(Rectangle::default()).tone(Tone::Warning);
         assert_eq!(outline.tone, Tone::Warning);
         assert_eq!(Outline::new(Rectangle::default()).tone, Tone::Primary);

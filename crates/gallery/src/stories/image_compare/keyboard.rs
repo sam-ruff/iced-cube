@@ -1,13 +1,12 @@
 use iced::widget::image::Handle;
 use iced::widget::{column, text};
-use iced::{Element, Length, Subscription};
+use iced::{Element, Length};
 use iced_cube::data::image_compare::{self, Action};
-use iced_cube::keys::{self, Chord, Keymap};
+use iced_cube::keys::{Chord, Keymap};
 
 #[derive(Debug, Clone)]
 pub enum Message {
     Divider(f32),
-    Key(keys::Event),
 }
 
 #[derive(Debug)]
@@ -33,32 +32,25 @@ impl Default for Example {
 
 impl Example {
     pub fn update(&mut self, message: Message) {
-        match message {
-            Message::Divider(divider) => self.divider = divider,
-            Message::Key(key) => {
-                if let Some(action) = self.keymap.resolve_event(&key) {
-                    self.divider = action.apply(self.divider);
-                }
-            }
-        }
+        let Message::Divider(divider) = message;
+        self.divider = divider;
     }
 
     pub fn view(&self) -> Element<'_, Message> {
+        // The compare resolves its keys itself once it is pressed or
+        // reached with Tab.
         column![
             image_compare::image_compare(self.before.clone(), self.after.clone())
                 .divider(self.divider)
+                .keymap(self.keymap.clone())
                 .on_divider(Message::Divider),
-            text("Arrow keys move the divider, Home and End send it to the edges, and H and L move it too.")
+            text("Press the image, then arrow keys move the divider, Home and End send it to the edges, and H and L move it too.")
                 .size(14),
         ]
         .spacing(12)
         .width(Length::Fill)
         .max_width(400)
         .into()
-    }
-
-    pub fn subscription(&self) -> Subscription<Message> {
-        keys::subscription().map(Message::Key)
     }
 }
 

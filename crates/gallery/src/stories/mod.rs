@@ -1069,8 +1069,8 @@ crate::stories! {
     }
     TimelineKeyboard => timeline::keyboard {
         id: "timeline/keyboard", component: "timeline", title: "Keyboard shortcuts",
-        description: "Arrow, Page, Home and End keys through the default keymap, plus two added bindings.",
-        file: "timeline/keyboard.rs", height: 200, subscription: true,
+        description: "Once pressed or reached with Tab, arrow, Page, Home and End keys move through the steps, plus two added bindings.",
+        file: "timeline/keyboard.rs", height: 200,
     }
     TimelineDisabled => timeline::disabled {
         id: "timeline/disabled", component: "timeline", title: "Disabled",
@@ -1094,8 +1094,8 @@ crate::stories! {
     }
     ImageCompareKeyboard => image_compare::keyboard {
         id: "image-compare/keyboard", component: "image-compare", title: "Keyboard shortcuts",
-        description: "Arrow, Home and End keys move the divider through the default keymap, plus two added bindings.",
-        file: "image_compare/keyboard.rs", height: 280, subscription: true,
+        description: "Once pressed or reached with Tab, arrow, Home and End keys move the divider, plus two added bindings.",
+        file: "image_compare/keyboard.rs", height: 280,
     }
     ShowcaseSettings => showcase::settings {
         id: "showcase/settings", component: "showcase", title: "Preferences",

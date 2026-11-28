@@ -4,7 +4,9 @@
 //! show spans over ranges of steps, such as tasks that ran across several.
 //!
 //! The app owns the current step. Pressing or dragging along the track, or
-//! a shortcut resolved through [`default_keymap`], picks another one.
+//! a shortcut from [`default_keymap`], picks another one. Shortcuts act
+//! only while the timeline has keyboard focus (Tab reaches it) or was the
+//! last thing pressed, so several on one screen never fight over keys.
 
 use std::borrow::Cow;
 
@@ -13,13 +15,14 @@ use iced::advanced::text as core_text;
 use iced::advanced::widget::{Tree, Widget, tree};
 use iced::advanced::{Clipboard, Shell, renderer};
 use iced::alignment::Vertical;
-use iced::keyboard::key::Named;
+use iced::keyboard::{self, key::Named};
 use iced::widget::text::{self, LineHeight, Shaping, Wrapping};
 use iced::{
     Border, Color, Element, Event, Length, Pixels, Point, Rectangle, Renderer, Size, Theme, mouse,
     touch,
 };
 
+use crate::focus;
 use crate::keys::{self, Chord, Keymap};
 use crate::theme::{self, Tokens, fade, mix, radius, space, text_size};
 
@@ -39,23 +42,7 @@ const TICK_WIDTH: f32 = 2.0;
 const BAR_HEIGHT: f32 = 8.0;
 
 /// What a step or span signals.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub enum Tone {
-    #[default]
-    Neutral,
-    Success,
-    Warning,
-    Destructive,
-}
-
-impl Tone {
-    pub const ALL: [Tone; 4] = [
-        Tone::Neutral,
-        Tone::Success,
-        Tone::Warning,
-        Tone::Destructive,
-    ];
-}
+pub use crate::theme::Tone;
 
 /// A run of steps in a lane, from `start` to `end` inclusive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -119,6 +106,7 @@ pub struct Timeline<'a, Message> {
     label_width: f32,
     width: Length,
     name: text::Fragment<'a>,
+    keymap: Keymap<Action>,
     on_select: Option<Box<dyn Fn(usize) -> Message + 'a>>,
 }
 
@@ -131,6 +119,7 @@ impl<Message> std::fmt::Debug for Timeline<'_, Message> {
             .field("label_width", &self.label_width)
             .field("width", &self.width)
             .field("name", &self.name)
+            .field("keymap", &self.keymap)
             .field("enabled", &self.on_select.is_some())
             .finish()
     }
@@ -150,6 +139,7 @@ pub fn timeline<'a, Message>(
         label_width: LABEL_WIDTH,
         width: Length::Fill,
         name: Cow::Borrowed("Timeline"),
+        keymap: default_keymap(),
         on_select: None,
     }
 }
@@ -185,9 +175,16 @@ impl<'a, Message> Timeline<'a, Message> {
     }
 
     /// Sets the message sent with the step under the pointer while
-    /// pressing or dragging.
+    /// pressing or dragging, or the step a shortcut moves to.
     pub fn on_select(mut self, on_select: impl Fn(usize) -> Message + 'a) -> Self {
         self.on_select = Some(Box::new(on_select));
+        self
+    }
+
+    /// Replaces the [`default_keymap`] the timeline resolves keys with
+    /// while it has keyboard focus or was the last thing pressed.
+    pub fn keymap(mut self, keymap: Keymap<Action>) -> Self {
+        self.keymap = keymap;
         self
     }
 
@@ -347,8 +344,8 @@ impl keys::Action for Action {
 /// | `Home` | [`Action::First`] |
 /// | `End` | [`Action::Last`] |
 ///
-/// Shortcuts are app-wide, so an app with several timelines routes them to
-/// the one it considers current.
+/// The timeline resolves them itself while it has keyboard focus or was the
+/// last thing pressed. Pass a changed keymap with [`Timeline::keymap`].
 pub fn default_keymap() -> Keymap<Action> {
     Keymap::new()
         .bind(Chord::named(Named::ArrowLeft), Action::Previous)
@@ -395,16 +392,6 @@ pub struct Style {
     pub tone_alpha: f32,
 }
 
-/// The colour of a tone.
-pub fn tone_colour(tokens: &Tokens, tone: Tone) -> Color {
-    match tone {
-        Tone::Neutral => tokens.muted_foreground,
-        Tone::Success => tokens.success,
-        Tone::Warning => tokens.warning,
-        Tone::Destructive => tokens.destructive,
-    }
-}
-
 /// Resolves the colours of a timeline for a status.
 pub fn style(tokens: &Tokens, status: Status) -> Style {
     let border = match status {
@@ -445,6 +432,9 @@ struct State {
     hovered: bool,
     finger: Option<touch::Finger>,
     last: Option<usize>,
+    focus: focus::State,
+    /// The last press landed on the timeline, so its keys apply.
+    active: bool,
 }
 
 impl<Message> Timeline<'_, Message> {
@@ -470,6 +460,18 @@ impl<Message> Timeline<'_, Message> {
             return Status::Hovered;
         }
         Status::Active
+    }
+}
+
+/// The track row with room for the playhead, which focus reports and the
+/// ring surrounds.
+fn focus_target(track: Rectangle) -> Rectangle {
+    let middle = track.center_y();
+    Rectangle {
+        x: track.x - PLAYHEAD_RADIUS,
+        y: middle - PLAYHEAD_RADIUS,
+        width: track.width + PLAYHEAD_RADIUS * 2.0,
+        height: PLAYHEAD_RADIUS * 2.0,
     }
 }
 
@@ -561,6 +563,9 @@ impl<Message> Widget<Message, Theme, Renderer> for Timeline<'_, Message> {
             style.rail,
             radius::FULL,
         );
+        if state.focus.is_focused() {
+            focus::draw_ring(renderer, theme, focus_target(track), radius::FULL);
+        }
 
         for (index, lane) in self.lanes.iter().enumerate() {
             let row = Rectangle {
@@ -603,7 +608,7 @@ impl<Message> Widget<Message, Theme, Renderer> for Timeline<'_, Message> {
                         width: (right - left).max(BAR_HEIGHT),
                         height: BAR_HEIGHT,
                     },
-                    fade(tone_colour(&tokens, span.tone), style.tone_alpha),
+                    fade(span.tone.colour(&tokens), style.tone_alpha),
                     radius::FULL,
                 );
             }
@@ -625,7 +630,7 @@ impl<Message> Widget<Message, Theme, Renderer> for Timeline<'_, Message> {
                     width: TICK_WIDTH,
                     height: tall,
                 },
-                fade(tone_colour(&tokens, *tone), style.tone_alpha),
+                fade(tone.colour(&tokens), style.tone_alpha),
                 0.0,
             );
         }
@@ -690,27 +695,47 @@ impl<Message> Widget<Message, Theme, Renderer> for Timeline<'_, Message> {
             width: track.width + PLAYHEAD_RADIUS * 2.0,
             ..bounds
         };
-        let before = (state.dragging, state.hovered);
+        let before = (
+            state.dragging,
+            state.hovered,
+            state.focus.is_focused(),
+            state.active,
+        );
         state.hovered = cursor.is_over(bounds);
+        let _ = state.focus.update(event);
         match event {
-            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
-                let Some(position) = cursor.position_over(pressable) else {
-                    return;
-                };
-                state.dragging = true;
-                state.last = None;
-                self.select(state, position.x, track, shell);
-                shell.capture_event();
+            Event::Mouse(mouse::Event::ButtonPressed(button)) => {
+                let position = cursor.position_over(pressable);
+                state.active = position.is_some();
+                if let (mouse::Button::Left, Some(position)) = (button, position) {
+                    state.dragging = true;
+                    state.last = None;
+                    self.select(state, position.x, track, shell);
+                    shell.capture_event();
+                }
             }
             Event::Touch(touch::Event::FingerPressed { id, position }) => {
-                if state.dragging || !pressable.contains(*position) {
-                    return;
+                state.active = pressable.contains(*position);
+                if state.active && !state.dragging {
+                    state.dragging = true;
+                    state.finger = Some(*id);
+                    state.last = None;
+                    self.select(state, position.x, track, shell);
+                    shell.capture_event();
                 }
-                state.dragging = true;
-                state.finger = Some(*id);
-                state.last = None;
-                self.select(state, position.x, track, shell);
-                shell.capture_event();
+            }
+            Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. })
+                if state.active || state.focus.is_focused() =>
+            {
+                if let Some(action) = self.keymap.resolve(key, *modifiers) {
+                    let next = action.apply(self.current, self.steps.len());
+                    if let Some(on_select) = &self.on_select
+                        && next != self.current
+                    {
+                        shell.publish(on_select(next));
+                    }
+                    shell.capture_event();
+                }
             }
             Event::Mouse(mouse::Event::CursorMoved { position })
                 if state.dragging && state.finger.is_none() =>
@@ -740,7 +765,13 @@ impl<Message> Widget<Message, Theme, Renderer> for Timeline<'_, Message> {
             }
             _ => {}
         }
-        if (state.dragging, state.hovered) != before {
+        let after = (
+            state.dragging,
+            state.hovered,
+            state.focus.is_focused(),
+            state.active,
+        );
+        if after != before {
             shell.request_redraw();
         }
     }
@@ -765,31 +796,39 @@ impl<Message> Widget<Message, Theme, Renderer> for Timeline<'_, Message> {
         mouse::Interaction::None
     }
 
-    #[cfg(feature = "icedwright")]
     fn operate(
         &mut self,
-        _tree: &mut Tree,
+        tree: &mut Tree,
         layout: Layout<'_>,
         _renderer: &Renderer,
         operation: &mut dyn iced::advanced::widget::Operation,
     ) {
-        use icedwright_probe::{Annotation, report, role};
-
-        let track = track_bounds(layout.bounds(), self.labels());
-        let last = self.steps.len().saturating_sub(1) as f64;
+        let target = focus_target(track_bounds(layout.bounds(), self.labels()));
         let enabled = self.on_select.is_some();
-        report(operation, track, || {
-            let annotation = Annotation::new()
-                .role(role::Slider)
-                .name(self.name.to_string())
-                .range(self.current as f64, 0.0..=last)
-                .component("iced_cube::timeline");
-            if enabled {
-                annotation
-            } else {
-                annotation.disabled(true)
-            }
-        });
+        #[cfg(feature = "icedwright")]
+        {
+            use icedwright_probe::{Annotation, report, role};
+
+            let last = self.steps.len().saturating_sub(1) as f64;
+            report(operation, target, || {
+                let annotation = Annotation::new()
+                    .role(role::Slider)
+                    .name(self.name.to_string())
+                    .range(self.current as f64, 0.0..=last)
+                    .component("iced_cube::timeline");
+                if enabled {
+                    annotation
+                } else {
+                    annotation.disabled(true)
+                }
+            });
+        }
+        // Reported after the annotation, at the same bounds, so a recorder
+        // merges the two into one node.
+        if enabled && !self.steps.is_empty() {
+            let state = tree.state.downcast_mut::<State>();
+            focus::report(operation, None, target, &mut state.focus);
+        }
     }
 }
 
@@ -951,18 +990,6 @@ mod tests {
             resolve(&keymap, Chord::named(Named::End)),
             Some(Action::Last)
         );
-    }
-
-    #[test]
-    fn every_tone_has_its_own_colour() {
-        let tokens = Tokens::of(&light());
-        let colours: Vec<Color> = Tone::ALL.iter().map(|t| tone_colour(&tokens, *t)).collect();
-        for (i, a) in colours.iter().enumerate() {
-            for b in &colours[i + 1..] {
-                assert_ne!(a, b);
-            }
-        }
-        assert_eq!(tone_colour(&tokens, Tone::Destructive), tokens.destructive);
     }
 
     #[test]

@@ -178,6 +178,76 @@ fn a_narrow_timeline_keeps_its_height_and_still_scrubs() {
     );
 }
 
+mod support;
+
+fn focused_view(current: &usize) -> Element<'_, Message> {
+    iced::widget::container(timeline::timeline(STEPS, *current).on_select(Message::Step))
+        .width(WIDTH)
+        .into()
+}
+
+fn step(current: &mut usize, Message::Step(step): Message) {
+    *current = step;
+}
+
+fn key(named: iced::keyboard::key::Named) -> iced::keyboard::Key {
+    iced::keyboard::Key::Named(named)
+}
+
+#[test]
+fn keys_act_only_after_the_timeline_is_pressed() {
+    use iced::keyboard::key::Named;
+
+    let mut ui = support::Harness::new(2, focused_view, step);
+    assert!(!ui.tap(key(Named::ArrowRight)), "not pressed yet");
+    assert_eq!(ui.state, 2);
+
+    ui.click(Point::new(step_x(2), TRACK_HEIGHT / 2.0));
+    assert!(ui.tap(key(Named::ArrowRight)));
+    assert_eq!(ui.state, 3);
+    ui.tap(key(Named::End));
+    assert_eq!(ui.state, 4);
+
+    // A press elsewhere hands the keys back to the rest of the app.
+    ui.click(Point::new(step_x(2), 150.0));
+    assert!(!ui.tap(key(Named::Home)));
+    assert_eq!(ui.state, 4);
+}
+
+#[test]
+fn tab_focus_also_gives_the_timeline_its_keys() {
+    use iced::keyboard::key::Named;
+
+    let mut ui = support::Harness::new(0, focused_view, step);
+    ui.focus_next();
+    assert!(ui.tap(key(Named::ArrowRight)));
+    assert_eq!(ui.state, 1);
+}
+
+#[test]
+fn a_changed_keymap_is_used() {
+    use iced::keyboard::key::Named;
+    use iced_cube::Chord;
+
+    fn view(current: &usize) -> Element<'_, Message> {
+        let keymap = timeline::default_keymap()
+            .unbind(&Chord::named(Named::ArrowRight))
+            .bind(Chord::character('l'), Action::Next);
+        iced::widget::container(
+            timeline::timeline(STEPS, *current)
+                .keymap(keymap)
+                .on_select(Message::Step),
+        )
+        .width(WIDTH)
+        .into()
+    }
+    let mut ui = support::Harness::new(0, view, step);
+    ui.focus_next();
+    assert!(!ui.tap(key(Named::ArrowRight)));
+    ui.tap(iced::keyboard::Key::Character("l".into()));
+    assert_eq!(ui.state, 1);
+}
+
 #[cfg(feature = "icedwright")]
 #[path = "support/semantic.rs"]
 mod semantic;
@@ -191,7 +261,7 @@ fn the_timeline_reports_itself_as_a_slider_over_its_steps() {
         .into();
     assert_eq!(
         semantic::yaml(element),
-        "- slider \"Steps\" [value=2] [min=0] [max=4]\n"
+        "- slider \"Steps\" [focused=false] [focusable] [value=2] [min=0] [max=4]\n"
     );
     let disabled: Element<'_, Message> = timeline::timeline(STEPS, 0).into();
     assert_eq!(

@@ -27,14 +27,16 @@ api:
     description: "Overrides the width. Timelines fill the available width by default, and are as tall as their track and lanes."
   - name: "timeline::default_keymap()"
     description: "The default shortcuts as a Keymap<Action>. Bind, unbind or clear chords to change them."
+  - name: ".keymap(keymap)"
+    description: "Replaces the default keymap the timeline resolves keys with while it has focus or was last pressed."
   - name: "action.apply(current, count)"
     description: "The step after an Action (Previous, Next, PageBack, PageForward, First or Last), kept within the steps. Send it through your on_select message."
   - name: "timeline::index_at(x, width, count) / position_of(index, width, count)"
     description: "The pure geometry behind the track: the step nearest a point, and where a step sits."
 ---
 
-Tones come from the theme: neutral steps use the muted foreground, and success, warning and destructive steps use the matching theme colours, drawn a little taller so problems stand out in a long run.
+Tones are the theme's shared `Tone`, the same one calendar entries and image compare outlines use: neutral steps use the muted foreground, and primary, success, warning and destructive steps use the matching theme colours, drawn a little taller so they stand out in a long run.
 
 Steps are spread evenly across the track, so a timeline with thousands of steps still fits, though individual ticks merge. Pair it with a list of the steps when the reader needs to pick one exactly.
 
-Timelines do not take keyboard focus, so shortcuts are app-wide. With several on screen, the app decides which one is current and applies the resolved action to its step.
+Shortcuts act only while the timeline has keyboard focus (Tab reaches it and draws a ring) or was the last thing pressed, so several on one screen never fight over the arrow keys. A press anywhere else hands the keys back.
