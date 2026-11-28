@@ -69,6 +69,9 @@ pub mod primitives;
 mod shaped;
 #[cfg(any(feature = "dialog", feature = "sidebar", feature = "toast"))]
 mod solid;
+#[cfg(feature = "icedwright")]
+#[cfg_attr(docsrs, doc(cfg(feature = "icedwright")))]
+pub mod testing;
 pub mod theme;
 #[cfg(any(feature = "calendar", feature = "toast"))]
 mod ticker;

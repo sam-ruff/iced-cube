@@ -847,6 +847,7 @@ where
             .is_open()
             .then(|| panel(state, on_event.as_deref(), width));
         let anchored = anchored(trigger)
+            .kind("iced_cube::dropdown_menu")
             .content(panel)
             .placement(placement)
             .fit_height(true)
@@ -909,6 +910,7 @@ where
                 // outside presses through to it. Without room on either
                 // side of its row, the submenu drops below or above the row.
                 anchored(row)
+                    .kind("iced_cube::dropdown_menu")
                     .content(Some(level(state, children, depth + 1, on_event, width)))
                     .placement(
                         Placement::new(Side::Right, Align::Start)

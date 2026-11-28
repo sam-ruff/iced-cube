@@ -949,6 +949,7 @@ where
         };
         let on_focus = on_event.clone();
         anchored(surface)
+            .kind("iced_cube::command")
             .dismiss_keys([])
             .on_focus(move |focused| on_focus(Event::Focus(focused)))
             .on_key(move |key| {

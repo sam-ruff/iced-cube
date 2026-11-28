@@ -605,6 +605,7 @@ where
         let content = annotate_field(content, report, KIND);
 
         anchored(content)
+            .kind("iced_cube::multi_combobox")
             .content(list)
             .placement(Placement::new(Side::Bottom, Align::Start))
             .match_width(true)

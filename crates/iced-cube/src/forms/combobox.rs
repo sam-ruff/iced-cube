@@ -657,6 +657,7 @@ where
         );
 
         anchored(field)
+            .kind("iced_cube::combobox")
             .content(list)
             .placement(Placement::new(Side::Bottom, Align::Start))
             .match_width(true)

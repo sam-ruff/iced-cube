@@ -155,6 +155,7 @@ impl<'a, Message: Clone + 'a> From<Popover<'a, Message>> for Element<'a, Message
             panel
         });
         anchored(trigger)
+            .kind("iced_cube::popover")
             .content(panel)
             .placement(placement)
             .pass_through(true)

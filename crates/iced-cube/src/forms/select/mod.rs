@@ -472,6 +472,8 @@ where
                 fit_height: max_rows.is_some(),
                 closes_itself: true,
                 pass_through,
+                #[cfg(feature = "icedwright")]
+                kind: KIND,
                 ..Behaviour::default()
             },
             editable,

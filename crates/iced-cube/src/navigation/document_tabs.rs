@@ -1009,6 +1009,7 @@ where
             .pressed(open)
             .on_press_maybe(toggle);
         let mut overflow = anchored(trigger)
+            .kind("iced_cube::document_tabs")
             .content(open.then(|| overflow_panel(state, on_event.as_deref())))
             .placement(Placement::new(Side::Bottom, Align::End))
             .fit_height(true)

@@ -23,7 +23,7 @@ thread-pool = ["iced/thread-pool"]
 tokio = ["iced/tokio"]
 # Components describe themselves to icedwright tests and read its clock. Enable it from
 # dev-dependencies only, so release builds compile none of it.
-icedwright = ["dep:icedwright-probe"]
+icedwright = ["dep:icedwright-probe", "dep:icedwright-locator", "dep:icedwright-semantics"]
 
 full = [
     "primitives",
@@ -185,7 +185,9 @@ calendar = [
 
 [dependencies]
 iced = { version = "0.14.0", default-features = false, features = ["svg", "advanced"] }
+icedwright-locator = { git = "https://github.com/sam-ruff/icedwright", optional = true }
 icedwright-probe = { git = "https://github.com/sam-ruff/icedwright", features = ["semantics"], optional = true }
+icedwright-semantics = { git = "https://github.com/sam-ruff/icedwright", optional = true }
 jiff = { version = "1.0.1", features = ["js"], optional = true }
 lucide-static-svg = "=1.48.0"
 num-traits = { version = "0.2.19", optional = true }

@@ -749,6 +749,7 @@ where
         )
     });
     let floating = anchored(anchor)
+        .kind("iced_cube::menubar")
         .content(panel)
         .placement(Placement::new(Side::Bottom, Align::Start))
         .dismiss_keys([]);
