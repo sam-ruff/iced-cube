@@ -87,6 +87,22 @@
         requestAnimationFrame(() => requestAnimationFrame(() => notify({ type: "ready" })));
       }).observe(document.body, { childList: true });
 
+      // With ?state=1 the gallery writes its state and the last ping a test
+      // sent on the root after every update. They are passed on a frame
+      // later, once the frame showing them is drawn, so a test that hears its
+      // ping back knows everything it did before has been handled and drawn.
+      const root = document.documentElement;
+      new MutationObserver(() => {
+        const state = { value: root.dataset.state ?? "", ping: root.dataset.ping ?? "" };
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => {
+            root.dataset.drawnState = state.value;
+            root.dataset.drawnPing = state.ping;
+            notify({ type: "state", ...state });
+          }),
+        );
+      }).observe(root, { attributeFilter: ["data-state", "data-ping"] });
+
       try {
         const module = await WebAssembly.compileStreaming(fetch(new URL("../wasm/gallery_bg.wasm", import.meta.url)));
         notify({ type: "fetched" });

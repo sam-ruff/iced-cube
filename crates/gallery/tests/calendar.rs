@@ -493,6 +493,26 @@ fn the_header_changes_the_view_and_the_period() {
     }
 }
 
+// The browser tests read the fingerprint to tell whether a story changed.
+#[test]
+fn the_fingerprint_follows_the_story() {
+    use iced_cube::data::calendar::{next_button_id, today_button_id};
+
+    let mut gallery = open("calendar/month");
+    let press = |gallery: &mut Gallery, id: iced::widget::Id| {
+        step(gallery, |ui| {
+            let _ = ui.click(id);
+        });
+    };
+    press(&mut gallery, today_button_id());
+    let june = gallery.fingerprint();
+    assert_eq!(gallery.fingerprint(), june, "reading it changes nothing");
+
+    press(&mut gallery, next_button_id());
+    assert_shows(&gallery, &["July 2026"]);
+    assert_ne!(gallery.fingerprint(), june);
+}
+
 #[test]
 fn missed_reminders_are_flagged_dismissed_and_snoozed() {
     let mut gallery = open("calendar/missed");

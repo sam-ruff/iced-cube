@@ -10,9 +10,11 @@ const BOOT_TIMEOUT_MS = 20_000;
 const mock = import.meta.env.PUBLIC_PREVIEW_MODE === "mock";
 const previewUrl = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/preview/index.html`;
 const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
+/** Browser tests open a page with `?preview-state` so previews report their state. */
+const reportsState = new URLSearchParams(location.search).has("preview-state");
 
 type Frame = HTMLElement;
-type PreviewMessage = { type?: string; back?: boolean; height?: unknown };
+type PreviewMessage = { type?: string; back?: boolean; height?: unknown; value?: unknown; ping?: unknown };
 
 const frames = [...document.querySelectorAll<Frame>("[data-story]")].filter((frame) => !frame.dataset["bound"]);
 const wanted = new Set<Frame>();
@@ -66,7 +68,8 @@ function mount(frame: Frame): void {
   const iframe = document.createElement("iframe");
   iframe.title = `Live preview: ${title(frame)}`;
   const wheel = frame.dataset["wheel"] === "true" ? "&wheel=1" : "";
-  iframe.src = `${previewUrl}?story=${encodeURIComponent(story)}&theme=${currentTheme()}${wheel}`;
+  const state = reportsState ? "&state=1" : "";
+  iframe.src = `${previewUrl}?story=${encodeURIComponent(story)}&theme=${currentTheme()}${wheel}${state}`;
   iframe.loading = "eager";
   const timer = window.setTimeout(() => fail(frame), FETCH_TIMEOUT_MS);
 
@@ -81,6 +84,8 @@ function unmount(frame: Frame): void {
   window.clearTimeout(entry.timer);
   entry.iframe.remove();
   mounted.delete(frame);
+  delete frame.dataset["state"];
+  delete frame.dataset["ping"];
   setStatus(frame, "static", "Static preview");
 }
 
@@ -141,6 +146,11 @@ window.addEventListener("message", (event: MessageEvent<PreviewMessage>) => {
       if (Number.isFinite(base)) frame.style.height = `${frameHeight(base, event.data.height)}px`;
       break;
     }
+    case "state":
+      // What the story drew last, and the last ping a test sent it.
+      frame.dataset["state"] = String(event.data.value ?? "");
+      frame.dataset["ping"] = String(event.data.ping ?? "");
+      break;
     case "search":
       document.querySelector<HTMLElement>("[data-search-open]")?.click();
       break;

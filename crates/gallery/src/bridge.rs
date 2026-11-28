@@ -8,13 +8,17 @@ use iced::Subscription;
 
 use crate::app::ThemeChoice;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
     Theme(ThemeChoice),
-    /// Tab reached the gallery unused, so focus should leave the preview,
-    /// backwards with Shift.
-    TabOut {
+    /// A browser test asks to hear `value` back once everything sent
+    /// before it has been handled and drawn.
+    Ping(String),
+    /// Tab was pressed, backwards with Shift. When no widget `used` it,
+    /// focus should leave the preview.
+    Tab {
         back: bool,
+        used: bool,
     },
 }
 
@@ -37,22 +41,22 @@ pub fn tab_out(event: &iced::Event) -> Option<bool> {
 
 /// Parses a posted message into an [`Event`].
 pub fn parse(kind: &str, value: &str) -> Option<Event> {
-    if kind != "theme" {
-        return None;
+    match kind {
+        "theme" => ThemeChoice::parse(value).map(Event::Theme),
+        "ping" => Some(Event::Ping(value.to_owned())),
+        _ => None,
     }
-    ThemeChoice::parse(value).map(Event::Theme)
 }
 
-/// Theme changes from the page, and Tab presses no widget used. A dialog
-/// keeps Tab for its buttons; anywhere else Tab leaves the preview.
+/// Theme changes from the page, and Tab presses with whether a widget used
+/// them. A dialog keeps Tab for its buttons; anywhere else Tab leaves the
+/// preview.
 pub fn subscription() -> Subscription<Event> {
     Subscription::batch([
         messages(),
         iced::event::listen_with(|event, status, _| {
-            if status == iced::event::Status::Captured {
-                return None;
-            }
-            tab_out(&event).map(|back| Event::TabOut { back })
+            let used = status == iced::event::Status::Captured;
+            tab_out(&event).map(|back| Event::Tab { back, used })
         }),
     ])
 }
@@ -97,6 +101,17 @@ pub fn report_exit(back: bool) {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn report_exit(_back: bool) {}
+
+/// Writes the story's state and the last ping handled on the preview
+/// page's root element, as `data-state` and `data-ping`. The preview page
+/// passes them on once the frame showing them is drawn.
+#[cfg(target_arch = "wasm32")]
+pub fn report_state(fingerprint: &str, ping: &str) {
+    web::mark_state(fingerprint, ping);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn report_state(_fingerprint: &str, _ping: &str) {}
 
 /// The value [`report_theme`] posts.
 pub fn theme_value(choice: Option<ThemeChoice>) -> &'static str {
@@ -184,6 +199,17 @@ mod web {
         let _ = parent.post_message(&message, "*");
     }
 
+    pub fn mark_state(fingerprint: &str, ping: &str) {
+        let Some(root) = web_sys::window()
+            .and_then(|window| window.document())
+            .and_then(|page| page.document_element())
+        else {
+            return;
+        };
+        let _ = root.set_attribute("data-state", fingerprint);
+        let _ = root.set_attribute("data-ping", ping);
+    }
+
     pub fn post(kind: &str, value: &str) {
         let Some(parent) = web_sys::window().and_then(|window| window.parent().ok().flatten())
         else {
@@ -263,5 +289,11 @@ mod tests {
     fn ignores_unknown_kinds_and_values() {
         assert_eq!(parse("resize", "dark"), None);
         assert_eq!(parse("theme", "sepia"), None);
+    }
+
+    #[test]
+    fn parses_pings_with_any_value() {
+        assert_eq!(parse("ping", "7"), Some(Event::Ping(String::from("7"))));
+        assert_eq!(parse("ping", ""), Some(Event::Ping(String::new())));
     }
 }
