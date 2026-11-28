@@ -584,7 +584,7 @@ pub fn timer<A>(state: &State<A>) -> Subscription<Event> {
     if !state.needs_tick() {
         return Subscription::none();
     }
-    crate::ticker::every(TICK).map(|_| Event::Tick(Instant::now()))
+    crate::ticker::every(TICK).map(Event::Tick)
 }
 
 /// The widget id of a toast's close button, for tests and focus.
