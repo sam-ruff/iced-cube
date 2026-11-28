@@ -4,9 +4,12 @@ const port = 4322;
 
 export default defineConfig({
   testDir: "tests/e2e",
-  timeout: 60_000,
+  // Generous limits so that many browsers booting wasm at once on a
+  // software renderer still pass. No retries: a flaky test is a bug.
+  timeout: 240_000,
+  expect: { timeout: 30_000 },
   fullyParallel: true,
-  retries: process.env["CI"] ? 1 : 0,
+  retries: 0,
   reporter: process.env["CI"] ? "line" : "list",
   use: {
     baseURL: `http://localhost:${port}/iced-cube/`,

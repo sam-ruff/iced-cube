@@ -1,18 +1,29 @@
 use gallery::app::Mode;
 use gallery::{FONT, FONT_FILES, Gallery, ThemeChoice};
 
+/// How the gallery was asked to start.
+struct Launch {
+    mode: Mode,
+    story: Option<String>,
+    theme: ThemeChoice,
+    reports_state: bool,
+}
+
 fn main() -> iced::Result {
     #[cfg(target_arch = "wasm32")]
     console_error_panic_hook::set_once();
 
     iced_cube::theme::set_font(FONT);
-    let (mode, story, theme) = launch_options();
+    let launch = launch_options();
 
     FONT_FILES
         .into_iter()
         .fold(
             iced::application(
-                move || Gallery::new(mode, story.as_deref(), theme),
+                move || {
+                    Gallery::new(launch.mode, launch.story.as_deref(), launch.theme)
+                        .reporting_state(launch.reports_state)
+                },
                 Gallery::update,
                 Gallery::view,
             ),
@@ -25,9 +36,9 @@ fn main() -> iced::Result {
         .run()
 }
 
-/// Reads `?story=<id>&theme=<light|dark>` from the page URL.
+/// Reads `?story=<id>&theme=<light|dark>&state=1` from the page URL.
 #[cfg(target_arch = "wasm32")]
-fn launch_options() -> (Mode, Option<String>, ThemeChoice) {
+fn launch_options() -> Launch {
     let params = web_sys::window()
         .and_then(|window| window.location().search().ok())
         .and_then(|search| web_sys::UrlSearchParams::new_with_str(&search).ok());
@@ -37,12 +48,17 @@ fn launch_options() -> (Mode, Option<String>, ThemeChoice) {
         .and_then(|value| ThemeChoice::parse(&value))
         .unwrap_or_default();
 
-    (Mode::Single, get("story"), theme)
+    Launch {
+        mode: Mode::Single,
+        story: get("story"),
+        theme,
+        reports_state: get("state").is_some_and(|value| value == "1"),
+    }
 }
 
 /// Reads `[story-id] [--dark]` from the command line.
 #[cfg(not(target_arch = "wasm32"))]
-fn launch_options() -> (Mode, Option<String>, ThemeChoice) {
+fn launch_options() -> Launch {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let theme = if args.iter().any(|arg| arg == "--dark") {
         ThemeChoice::Dark
@@ -50,5 +66,10 @@ fn launch_options() -> (Mode, Option<String>, ThemeChoice) {
         ThemeChoice::Light
     };
     let story = args.into_iter().find(|arg| !arg.starts_with("--"));
-    (Mode::Browser, story, theme)
+    Launch {
+        mode: Mode::Browser,
+        story,
+        theme,
+        reports_state: false,
+    }
 }

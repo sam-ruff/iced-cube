@@ -1,4 +1,5 @@
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+import { handled, live, picture, visit } from "./support/preview";
 
 const STORIES = [
   "calendar/month",
@@ -15,49 +16,9 @@ const STORIES = [
   "calendar/triggers",
 ];
 
-// Several wasm previews booting at once on a software renderer can take
-// well over a minute, so every wait here allows for a loaded machine.
-test.describe.configure({ timeout: 240_000 });
-
 async function noHorizontalScroll(page: Page): Promise<void> {
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(0);
-}
-
-/** Scrolls a story's frame into view and waits for its wasm app to draw. */
-async function live(page: Page, story: string): Promise<Locator> {
-  const frame = page.locator(`[data-story="${story}"]`).first();
-  await frame.scrollIntoViewIfNeeded();
-  await expect(frame).toHaveClass(/live/, { timeout: 120_000 });
-  return frame;
-}
-
-/** What the frame looks like now, for telling whether the app redrew. */
-async function picture(frame: Locator): Promise<string> {
-  return (await frame.screenshot()).toString("base64");
-}
-
-/** Waits until the frame has stopped changing, and returns how it looks. */
-async function settled(frame: Locator): Promise<string> {
-  let last = await picture(frame);
-  await expect
-    .poll(
-      async () => {
-        const now = await picture(frame);
-        const same = now === last;
-        last = now;
-        return same;
-      },
-      { timeout: 60_000, intervals: [250] },
-    )
-    .toBe(true);
-  return last;
-}
-
-/** Waits for the frame to look different from `before`, then to settle. */
-async function changedFrom(frame: Locator, before: string): Promise<string> {
-  await expect.poll(async () => (await picture(frame)) !== before, { timeout: 60_000 }).toBe(true);
-  return settled(frame);
 }
 
 test("the calendar page shows every example, the form's API and the keymap", async ({ page }) => {
@@ -136,7 +97,7 @@ test("the Markdown version of the calendar page carries the form's example and n
 
 test("every calendar example boots in the browser", async ({ page }) => {
   test.slow();
-  await page.goto("docs/components/calendar/");
+  await visit(page, "docs/components/calendar/");
   for (const story of STORIES) {
     const frame = await live(page, story);
     await expect(frame.locator("iframe"), story).toHaveAttribute("title", /Live preview/);
@@ -146,15 +107,15 @@ test("every calendar example boots in the browser", async ({ page }) => {
   await noHorizontalScroll(page);
 });
 
-// The app draws to a canvas, so these read the preview as a picture: it
-// changes when the form opens, and again when the entry is on the week.
+// The previews report their state and hand back a ping once everything
+// before it is handled and drawn, so each step waits for exactly that.
 test("dragging across the live week opens the entry form, and Enter saves it", async ({ page, isMobile }) => {
   test.skip(isMobile, "a finger scrolls the hours; dragging needs a mouse");
-  await page.goto("docs/components/calendar/");
+  await visit(page, "docs/components/calendar/");
   const frame = await live(page, "calendar/create");
   const box = await frame.boundingBox();
   if (!box) throw new Error("no preview frame");
-  const week = await settled(frame);
+  const week = await handled(frame);
 
   // Down the right-hand side, clear of both entries, in Sunday's column.
   const x = box.x + box.width - 60;
@@ -163,51 +124,51 @@ test("dragging across the live week opens the entry form, and Enter saves it", a
   await page.mouse.move(x, box.y + 270, { steps: 4 });
   await page.mouse.move(x, box.y + 300, { steps: 4 });
   await page.mouse.up();
-  const form = await changedFrom(frame, week);
+  const form = await handled(frame);
+  expect(form, "the form opened").not.toBe(week);
 
   // The dialog puts focus in the title.
   await page.keyboard.type("Retro");
-  const typed = await changedFrom(frame, form);
+  const typed = await handled(frame);
+  expect(typed, "the title was typed").not.toBe(form);
   await page.keyboard.press("Enter");
-  const saved = await changedFrom(frame, typed);
+  const saved = await handled(frame);
+  expect(saved, "the entry was saved").not.toBe(typed);
   expect(saved).not.toBe(week);
-  expect(saved).not.toBe(form);
 
   // Restarting the preview puts the week back as it was.
   const root = page.locator("[data-preview-root]").filter({ has: frame });
   await root.locator("[data-reset]").click();
-  await expect(frame).toHaveClass(/live/, { timeout: 120_000 });
-  await expect.poll(async () => (await settled(frame)) === week, { timeout: 120_000 }).toBe(true);
+  await live(page, "calendar/create");
+  expect(await handled(frame)).toBe(week);
 });
 
 test("Escape closes the entry form without adding anything", async ({ page, isMobile }) => {
   test.skip(isMobile, "needs a mouse and a keyboard");
-  await page.goto("docs/components/calendar/");
+  await visit(page, "docs/components/calendar/");
   const frame = await live(page, "calendar/create");
   const box = await frame.boundingBox();
   if (!box) throw new Error("no preview frame");
+  const week = await handled(frame);
 
-  // Park the pointer where it will end up, so hover looks the same after.
   const x = box.x + box.width - 60;
-  await page.mouse.move(x, box.y + 300);
-  const week = await settled(frame);
-
   await page.mouse.move(x, box.y + 240);
   await page.mouse.down();
   await page.mouse.move(x, box.y + 300, { steps: 6 });
   await page.mouse.up();
-  const form = await changedFrom(frame, week);
+  const form = await handled(frame);
+  expect(form, "the form opened").not.toBe(week);
 
   // The first Escape leaves the title, the second closes the dialog.
   await page.keyboard.press("Escape");
   await page.keyboard.press("Escape");
-  const closed = await changedFrom(frame, form);
-  expect(closed).not.toBe(form);
+  const closed = await handled(frame);
+  expect(closed, "the form closed").not.toBe(form);
 });
 
 test("the header of a live calendar moves to the next month and Today comes back", async ({ page, isMobile }) => {
   test.skip(isMobile, "the header lays out differently on a phone");
-  await page.goto("docs/components/calendar/");
+  await visit(page, "docs/components/calendar/");
   const frame = await live(page, "calendar/month");
   const box = await frame.boundingBox();
   if (!box) throw new Error("no preview frame");
@@ -218,14 +179,16 @@ test("the header of a live calendar moves to the next month and Today comes back
   const today = { x: box.x + 60, y: box.y + 42 };
   const next = { x: box.x + 160, y: box.y + 42 };
   await page.mouse.click(today.x, today.y);
-  const june = await settled(frame);
+  const juneState = await handled(frame);
+  const june = await picture(frame);
 
   await page.mouse.click(next.x, next.y);
-  const july = await changedFrom(frame, june);
+  expect(await handled(frame), "moved to July").not.toBe(juneState);
+  expect(await picture(frame)).not.toBe(june);
 
   await page.mouse.click(today.x, today.y);
-  await changedFrom(frame, july);
-  await expect.poll(async () => (await picture(frame)) === june, { timeout: 60_000 }).toBe(true);
+  await handled(frame);
+  expect(await picture(frame)).toBe(june);
 });
 
 test("the calendar pages fit a phone", async ({ page, isMobile }) => {
@@ -235,7 +198,7 @@ test("the calendar pages fit a phone", async ({ page, isMobile }) => {
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
     await noHorizontalScroll(page);
   }
-  await page.goto("docs/components/calendar/");
+  await visit(page, "docs/components/calendar/");
   const frame = await live(page, "calendar/month");
   const box = await frame.boundingBox();
   const viewport = page.viewportSize();

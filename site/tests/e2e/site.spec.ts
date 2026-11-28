@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { BOOT_MS, HANDLED_MS, handled, live, visit } from "./support/preview";
 
 async function noHorizontalScroll(page: Page): Promise<void> {
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
@@ -30,7 +31,7 @@ test("component page shows the preview tab first and switches to code", async ({
 test("live preview boots the wasm app and reports ready", async ({ page }) => {
   await page.goto("docs/components/button/");
   const frame = page.locator("[data-story]").first();
-  await expect(frame).toHaveClass(/live/, { timeout: 30_000 });
+  await expect(frame).toHaveClass(/live/, { timeout: BOOT_MS });
   await expect(frame.locator("iframe")).toHaveAttribute("title", /Live preview/);
 });
 
@@ -54,7 +55,7 @@ test("standalone previews follow the selected theme", async ({ page }) => {
   await link.click();
   const popup = await popupOpened;
   await expect(popup.locator("html")).toHaveAttribute("data-theme", "dark");
-  await expect(popup.locator("canvas")).toBeVisible({ timeout: 30_000 });
+  await expect(popup.locator("canvas")).toBeVisible({ timeout: BOOT_MS });
   await popup.close();
 
   await page.locator("[data-theme-toggle]").click();
@@ -63,9 +64,17 @@ test("standalone previews follow the selected theme", async ({ page }) => {
 
 test("live previews never exceed the concurrency cap", async ({ page }) => {
   await page.goto("docs/components/button/");
+  const scrolled = () => page.evaluate(() => scrollY);
   for (let y = 0; y < 6; y += 1) {
+    const before = await scrolled();
+    const bottom = await page.evaluate(() => document.documentElement.scrollHeight - innerHeight);
+    if (before >= bottom) break;
     await page.mouse.wheel(0, 600);
-    await page.waitForTimeout(150);
+    await expect.poll(scrolled).toBeGreaterThan(before);
+    // Two frames on, the observers have run for the new position.
+    await page.evaluate(
+      () => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))),
+    );
     expect(await page.locator("[data-story] iframe").count()).toBeLessThanOrEqual(8);
   }
 });
@@ -216,20 +225,18 @@ test("long lists take the wheel and touch inside their previews", async ({ page 
 // once nothing in the preview used it.
 test("an open alert dialog keeps Tab, and a closed one lets it leave", async ({ page, isMobile }) => {
   test.skip(isMobile, "needs a keyboard");
-  await page.goto("docs/components/dialog/");
-  const frame = page.locator('[data-story="dialog/destructive"]').first();
-  await frame.scrollIntoViewIfNeeded();
-  await expect(frame).toHaveClass(/live/, { timeout: 30_000 });
-  await page.waitForTimeout(1_000);
+  await visit(page, "docs/components/dialog/");
+  const frame = await live(page, "dialog/destructive");
   const box = await frame.boundingBox();
   if (!box) throw new Error("no preview frame");
-  // The story's trigger sits at the top left.
+  // The story opens with its dialog up; a click puts focus in the preview.
   await page.mouse.click(box.x + 80, box.y + 40);
+  await handled(frame);
   const focused = () => page.evaluate(() => document.activeElement?.tagName);
 
   await page.keyboard.press("Tab");
   await page.keyboard.press("Tab");
-  await page.waitForTimeout(300);
+  await handled(frame);
   expect(await focused()).toBe("IFRAME");
 
   await page.keyboard.press("Escape");
@@ -240,16 +247,14 @@ test("an open alert dialog keeps Tab, and a closed one lets it leave", async ({ 
 // Stat cards sit in one row on desktop and stack on a phone, so the frame
 // grows to the height the story reports.
 test("a preview whose cards wrap grows to fit them", async ({ page, isMobile }) => {
-  await page.goto("docs/components/card/");
-  const frame = page.locator('[data-story="card/stats"]').first();
-  await frame.scrollIntoViewIfNeeded();
-  await expect(frame).toHaveClass(/live/, { timeout: 30_000 });
+  await visit(page, "docs/components/card/");
+  const frame = await live(page, "card/stats");
 
   if (!isMobile) {
     await expect(frame).toHaveCSS("height", "280px");
     return;
   }
   await expect
-    .poll(async () => (await frame.boundingBox())?.height ?? 0, { timeout: 10_000 })
+    .poll(async () => (await frame.boundingBox())?.height ?? 0, { timeout: HANDLED_MS })
     .toBeGreaterThan(400);
 });

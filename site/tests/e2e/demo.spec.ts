@@ -1,4 +1,5 @@
 import { type Page, expect, test } from "@playwright/test";
+import { BOOT_MS } from "./support/preview";
 
 const LINUX = "iced-cube-demo-linux-x86_64.tar.gz";
 const WINDOWS = "iced-cube-demo-windows-x86_64.zip";
@@ -21,7 +22,7 @@ test("demo page boots the app with desktop downloads beside it", async ({ page }
   const frame = page.locator("iframe#demo");
   await expect(frame).toHaveAttribute("src", /story=showcase%2Fdemo/);
   await expect(frame).toHaveAttribute("allow", /clipboard-write/);
-  await expect(page.frameLocator("iframe#demo").locator("canvas")).toBeVisible({ timeout: 30_000 });
+  await expect(page.frameLocator("iframe#demo").locator("canvas")).toBeVisible({ timeout: BOOT_MS });
 
   const downloads = page.getByRole("navigation", { name: "Desktop downloads" });
   await expect(downloads.getByRole("link", { name: "Download the demo for Linux" })).toHaveAttribute(

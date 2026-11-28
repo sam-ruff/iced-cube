@@ -68,6 +68,10 @@ pub struct Gallery {
     selected: &'static str,
     story: AnyStory,
     needed_height: Option<f32>,
+    /// Whether every update tells the page the story's state, for tests.
+    reports_state: bool,
+    /// The last ping a browser test sent, handed back with the state.
+    ping: String,
 }
 
 impl Gallery {
@@ -83,6 +87,36 @@ impl Gallery {
             selected: meta.id,
             story: open(meta.id),
             needed_height: None,
+            reports_state: false,
+            ping: String::new(),
+        }
+    }
+
+    /// Reports the story's state and the last ping to the page now and
+    /// after every update, so browser tests can wait for the app to handle
+    /// their input rather than guess how long it takes.
+    pub fn reporting_state(mut self, reports: bool) -> Self {
+        self.reports_state = reports;
+        self.report();
+        self
+    }
+
+    /// A short value that changes whenever the open story's state does and
+    /// is the same whenever the story is back in a state it was in.
+    pub fn fingerprint(&self) -> String {
+        let mut hasher = std::hash::DefaultHasher::new();
+        std::hash::Hash::hash(&format!("{:?}", self.story), &mut hasher);
+        format!("{:016x}", std::hash::Hasher::finish(&hasher))
+    }
+
+    /// The last ping a browser test sent.
+    pub fn ping(&self) -> &str {
+        &self.ping
+    }
+
+    fn report(&self) {
+        if self.reports_state {
+            bridge::report_state(&self.fingerprint(), &self.ping);
         }
     }
 
@@ -101,6 +135,12 @@ impl Gallery {
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
+        let task = self.apply(message);
+        self.report();
+        task
+    }
+
+    fn apply(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Story(message) => return self.story.update(message).map(Message::Story),
             Message::Select(id) => {
@@ -109,7 +149,12 @@ impl Gallery {
             }
             Message::ToggleTheme => self.theme = self.theme.toggled(),
             Message::Host(bridge::Event::Theme(choice)) => self.theme = choice,
-            Message::Host(bridge::Event::TabOut { back }) => bridge::report_exit(back),
+            Message::Host(bridge::Event::Ping(value)) => self.ping = value,
+            Message::Host(bridge::Event::Tab { back, used }) => {
+                if !used {
+                    bridge::report_exit(back);
+                }
+            }
             Message::Measured(size) => {
                 let height = size.height + 2.0 * self.padding();
                 self.needed_height = Some(height);
@@ -256,6 +301,31 @@ mod tests {
         }
         let plain = Gallery::new(Mode::Single, Some("button/variants"), ThemeChoice::Light);
         assert_eq!(plain.padding(), STORY_PADDING);
+    }
+
+    #[test]
+    fn a_ping_is_kept_to_hand_back_and_leaves_the_story_alone() {
+        let mut gallery =
+            Gallery::new(Mode::Single, Some("dialog/destructive"), ThemeChoice::Light)
+                .reporting_state(true);
+        let before = gallery.fingerprint();
+        assert_eq!(gallery.ping(), "");
+        let _ = gallery.update(Message::Host(bridge::Event::Ping(String::from("3"))));
+        assert_eq!(gallery.ping(), "3");
+        assert_eq!(gallery.fingerprint(), before);
+    }
+
+    #[test]
+    fn the_fingerprint_changes_with_the_story_only() {
+        let mut gallery = Gallery::new(Mode::Browser, Some("button/variants"), ThemeChoice::Light);
+        let first = gallery.fingerprint();
+        assert_eq!(first.len(), 16);
+        let _ = gallery.update(Message::ToggleTheme);
+        assert_eq!(gallery.fingerprint(), first, "the theme is not the story");
+        let _ = gallery.update(Message::Select("calendar/month"));
+        assert_ne!(gallery.fingerprint(), first);
+        let _ = gallery.update(Message::Select("button/variants"));
+        assert_eq!(gallery.fingerprint(), first);
     }
 
     #[test]
