@@ -445,7 +445,9 @@ where
                 .filter(|_| !entry.disabled)
                 .map(|on_event| on_event(Event::Toggle(entry.id)));
             let position = Position::of(index, len);
-            toggle::button(
+            #[cfg(feature = "icedwright")]
+            let enabled = message.is_some();
+            let item = toggle::button(
                 entry.label.as_str(),
                 entry.icon,
                 pressed,
@@ -453,14 +455,23 @@ where
                 item_width,
                 message,
                 move |tokens, status| item_style(tokens, variant, position, pressed, status),
-            )
+            );
+            #[cfg(feature = "icedwright")]
+            let item = toggle::annotate(
+                item,
+                entry.label.as_str().into(),
+                pressed,
+                enabled,
+                "iced_cube::toggle_group",
+            );
+            item
         });
 
         let enabled = on_event.is_some();
         // Separate toggles wrap onto new lines on a narrow screen; attached
         // segments stay in one row, so keep outlined groups to a few short
         // items.
-        match variant {
+        let element: Element<'a, Message> = match variant {
             Variant::Default if shrink => row(items.map(natural)).spacing(space::XS).wrap().into(),
             Variant::Default => row(items).spacing(space::XS).width(width).into(),
             Variant::Outline => {
@@ -477,7 +488,13 @@ where
                     .style(move |theme: &Theme| group_style(&Tokens::of(theme), variant, enabled));
                 if shrink { natural(group) } else { group.into() }
             }
-        }
+        };
+        #[cfg(feature = "icedwright")]
+        let element = icedwright_probe::semantic(element)
+            .role(icedwright_probe::role::Group)
+            .component("iced_cube::toggle_group")
+            .into();
+        element
     }
 }
 

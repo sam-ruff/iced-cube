@@ -399,3 +399,28 @@ fn dragging_cancels_a_long_press() {
             .all(|message| !matches!(message, TouchMessage::Context(_)))
     );
 }
+
+#[cfg(feature = "icedwright")]
+#[path = "support/semantic.rs"]
+mod semantic;
+
+#[cfg(feature = "icedwright")]
+#[test]
+fn an_open_context_menu_reports_a_menu_owned_by_its_area() {
+    use icedwright_types::Role;
+
+    let state = opened_at(Point::new(20.0, 20.0));
+    let tree = semantic::Recorder::default().tree(view(&state));
+    let menu = tree
+        .iter()
+        .find(|node| node.role == Role::Menu)
+        .expect("the open menu is in the tree");
+    assert_eq!(
+        icedwright_semantics::yaml::write(&tree, menu.id, &Default::default()),
+        "- menu:\n  - scrollview:\n\
+         \x20   - menuitem \"Back\":\n      - text: Back\n\
+         \x20   - menuitem \"Forward\" [disabled]:\n      - text: Forward\n\
+         \x20   - menuitem \"Reload\":\n      - text: Reload\n"
+    );
+    assert!(tree.iter().any(|node| node.relations.owns == vec![menu.id]));
+}

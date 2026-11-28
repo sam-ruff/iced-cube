@@ -255,3 +255,15 @@ fn a_toolbar_without_messages_is_inert() {
     })]);
     assert!(ui.into_messages().next().is_none());
 }
+
+#[cfg(feature = "icedwright")]
+#[path = "support/semantic.rs"]
+mod semantic;
+
+#[cfg(feature = "icedwright")]
+#[test]
+fn the_bar_reports_a_toolbar() {
+    let state = state();
+    let yaml = semantic::yaml(view(&state));
+    assert!(yaml.starts_with("- toolbar:\n"), "{yaml}");
+}

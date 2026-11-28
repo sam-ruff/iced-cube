@@ -106,6 +106,26 @@ impl<'a> Progress<'a> {
 
 impl<'a, Message: 'a> From<Progress<'a>> for Element<'a, Message> {
     fn from(progress: Progress<'a>) -> Self {
+        #[cfg(feature = "icedwright")]
+        {
+            let name = progress.label.clone();
+            let value = format!("{}%", percentage(progress.value));
+            let mut annotated = icedwright_probe::semantic(render(progress))
+                .role(icedwright_probe::role::ProgressIndicator)
+                .value(value)
+                .component("iced_cube::progress");
+            if let Some(name) = name {
+                annotated = annotated.name(name);
+            }
+            annotated.into()
+        }
+        #[cfg(not(feature = "icedwright"))]
+        render(progress)
+    }
+}
+
+fn render<'a, Message: 'a>(progress: Progress<'a>) -> Element<'a, Message> {
+    {
         let variant = progress.variant;
         let bar = progress_bar(0.0..=1.0, progress.value)
             .length(progress.width)

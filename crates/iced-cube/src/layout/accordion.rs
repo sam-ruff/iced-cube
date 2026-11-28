@@ -298,6 +298,11 @@ fn section<'a, Message: Clone + 'a>(
     message: Option<Message>,
 ) -> Element<'a, Message> {
     let enabled = message.is_some();
+    #[cfg(feature = "icedwright")]
+    let (name, key) = (
+        title.clone(),
+        icedwright_probe::Key::from(format!("iced_cube::accordion/{title}")),
+    );
     let chevron = if open {
         crate::lucide!(ChevronUp)
     } else {
@@ -321,18 +326,36 @@ fn section<'a, Message: Clone + 'a>(
     .padding([space::MD, 0.0])
     .on_press_maybe(message)
     .style(|theme, status| style(&Tokens::of(theme), status));
+    #[cfg(feature = "icedwright")]
+    let header = {
+        let mut annotated = icedwright_probe::semantic(header)
+            .role(icedwright_probe::role::Button)
+            .name(name.clone())
+            .expanded(open)
+            .controls(key.clone())
+            .component("iced_cube::accordion");
+        if !enabled {
+            annotated = annotated.disabled(true);
+        }
+        annotated
+    };
 
     let mut body = column![header].width(Length::Fill);
     if open {
-        body = body.push(
-            container(content)
-                .padding(iced::Padding::ZERO.bottom(space::LG).right(space::XL))
-                .width(Length::Fill)
-                .style(|theme: &Theme| container::Style {
-                    text_color: Some(Tokens::of(theme).muted_foreground),
-                    ..container::Style::default()
-                }),
-        );
+        let panel = container(content)
+            .padding(iced::Padding::ZERO.bottom(space::LG).right(space::XL))
+            .width(Length::Fill)
+            .style(|theme: &Theme| container::Style {
+                text_color: Some(Tokens::of(theme).muted_foreground),
+                ..container::Style::default()
+            });
+        #[cfg(feature = "icedwright")]
+        let panel = icedwright_probe::semantic(panel)
+            .role(icedwright_probe::role::Region)
+            .name(name)
+            .key(key)
+            .component("iced_cube::accordion");
+        body = body.push(panel);
     }
     body.push(rule::horizontal(1).style(|theme: &Theme| {
         let tokens = Tokens::of(theme);

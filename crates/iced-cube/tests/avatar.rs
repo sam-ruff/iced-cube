@@ -75,3 +75,22 @@ fn avatars_keep_their_size_in_a_narrow_container() {
     let grace = ui.find("GH").expect("second").bounds();
     assert!(grace.x > ada.x + 10.0, "the group is not squeezed");
 }
+
+#[cfg(feature = "icedwright")]
+#[path = "support/semantic.rs"]
+mod semantic;
+
+#[cfg(feature = "icedwright")]
+#[test]
+fn avatars_report_images_named_after_their_people() {
+    let element: Element<'_, ()> = column![
+        avatar("Ada Lovelace").presence(Presence::Online),
+        avatar_group([avatar("Grace Hopper"), avatar("Linus")]),
+    ]
+    .into();
+    assert_eq!(
+        semantic::yaml(element),
+        "- img \"Ada Lovelace\" [prop:presence=\"online\"]:\n  - text: AL\n\
+         - group:\n  - img \"Grace Hopper\":\n    - text: GH\n  - img \"Linus\":\n    - text: L\n"
+    );
+}

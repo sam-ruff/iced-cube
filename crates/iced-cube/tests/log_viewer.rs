@@ -644,3 +644,28 @@ fn a_producer_thread_sends_entries_through_the_channel() {
         "only the lines in view are built"
     );
 }
+
+#[cfg(feature = "icedwright")]
+#[path = "support/semantic.rs"]
+mod semantic;
+
+#[cfg(feature = "icedwright")]
+#[test]
+fn lines_report_list_items_in_a_list() {
+    let state = sample();
+    let tree = semantic::Recorder::default().tree(view(&state));
+    let Some(list) = tree
+        .iter()
+        .find(|node| node.role == icedwright_types::Role::List)
+    else {
+        panic!("no list in the tree");
+    };
+    let items: Vec<_> = tree
+        .descendants(list.id)
+        .filter_map(|id| tree.get(id))
+        .filter(|node| node.role == icedwright_types::Role::ListItem)
+        .map(|node| (node.set.position, node.set.size))
+        .collect();
+    let expected: Vec<_> = (1..=5).map(|n| (Some(n), Some(5))).collect();
+    assert_eq!(items, expected);
+}

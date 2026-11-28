@@ -712,3 +712,45 @@ fn a_narrow_week_shows_one_day_under_a_strip_of_the_week() {
     assert!(fits(&mut ui, "Stand-up", PHONE.width), "the pressed day");
     assert!(!shows(&mut ui, "Design review"));
 }
+
+#[cfg(feature = "icedwright")]
+#[path = "support/semantic.rs"]
+mod semantic;
+
+#[cfg(feature = "icedwright")]
+#[test]
+fn every_view_reports_its_entries_as_buttons_in_a_calendar_region() {
+    for shown in [View::Week, View::Month, View::Agenda] {
+        let state = state(shown);
+        let tree = semantic::Recorder::default().tree(view(&state));
+        let Some(region) = tree
+            .iter()
+            .find(|node| node.role == icedwright_types::Role::Region)
+        else {
+            panic!("no calendar region in {shown:?}");
+        };
+        assert_eq!(region.name.as_deref(), Some("Calendar"), "{shown:?}");
+        let entries: Vec<_> = tree
+            .descendants(region.id)
+            .filter_map(|id| tree.get(id))
+            .filter(|node| node.kind.to_string() == "iced_cube::calendar")
+            .filter(|node| node.role == icedwright_types::Role::Button)
+            .filter_map(|node| node.name.clone())
+            .collect();
+        assert!(
+            entries.iter().any(|name| name == "Stand-up"),
+            "{shown:?}: {entries:?}"
+        );
+        let Some(review) = tree
+            .iter()
+            .find(|node| node.name.as_deref() == Some("Stand-up"))
+        else {
+            panic!("no entry in {shown:?}");
+        };
+        assert_eq!(
+            review.props.get("click-clock").map(String::as_str),
+            Some("probe"),
+            "{shown:?}"
+        );
+    }
+}

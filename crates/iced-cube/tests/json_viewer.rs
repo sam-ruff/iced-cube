@@ -534,3 +534,32 @@ fn a_large_document_renders_only_what_is_in_view() {
     assert!(ui.find("\"order 2999\"").is_err(), "far out of view");
     assert!(started.elapsed().as_secs() < 5, "{:?}", started.elapsed());
 }
+
+#[cfg(feature = "icedwright")]
+#[path = "support/semantic.rs"]
+mod semantic;
+
+#[cfg(feature = "icedwright")]
+#[test]
+fn members_report_tree_items_with_their_level() {
+    let state = State::new(json!({ "name": "Ada", "tags": ["ops"] }));
+    let tree = semantic::Recorder::default().tree(view(&state));
+    let Some(root) = tree
+        .iter()
+        .find(|node| node.role == icedwright_types::Role::Tree)
+    else {
+        panic!("no tree in the tree");
+    };
+    let yaml = icedwright_semantics::yaml::write(&tree, root.id, &Default::default());
+    let expected = r#"- tree:
+  - treeitem "name" [selected=false] [level=1] [prop:click-clock="probe"]:
+    - text: name
+    - text: ":"
+    - text: "\"Ada\""
+  - treeitem "tags" [expanded=false] [selected=false] [level=1] [prop:click-clock="probe"]:
+    - text: tags
+    - text: ":"
+    - text: "[1]"
+"#;
+    assert_eq!(yaml, expected);
+}

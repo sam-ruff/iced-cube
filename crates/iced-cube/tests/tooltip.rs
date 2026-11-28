@@ -286,3 +286,29 @@ fn keyboard_focus_shows_the_bubble_and_moves_with_it() -> Result<(), iced_test::
     );
     Ok(())
 }
+
+#[cfg(feature = "icedwright")]
+#[path = "support/semantic.rs"]
+mod semantic;
+
+#[cfg(feature = "icedwright")]
+#[test]
+fn the_trigger_carries_its_tooltip_and_the_open_bubble_is_reported() {
+    let view = || -> Element<'static, Message> {
+        tooltip(button("Save").on_press(Message::Save), "Save changes").into()
+    };
+    let mut recorder = semantic::Recorder::default();
+    let closed = "- button \"Save\" [focused=false] [focusable] \
+                  [description=\"Save changes\"] [tooltip=\"Save changes\"]:\n  - text: Save\n";
+    assert_eq!(recorder.yaml(view()), closed);
+    let at = Point::new(20.0, 16.0);
+    let _ = recorder.events(
+        view(),
+        mouse::Cursor::Available(at),
+        &[Event::Mouse(mouse::Event::CursorMoved { position: at })],
+    );
+    assert_eq!(
+        recorder.yaml(view()),
+        format!("{closed}- tooltip \"Save changes\":\n  - text: Save changes\n")
+    );
+}

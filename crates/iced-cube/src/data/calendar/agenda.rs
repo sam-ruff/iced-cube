@@ -251,11 +251,12 @@ fn rows<'a, Message: Clone + 'a>(
         if let Some(message) = send(on_event, Event::Press(selection)) {
             row = row.on_tap(message);
         }
-        rows = rows.push(
-            container(pressable(state, row, selection, on_event))
-                .id(entry_id(occurrence.entry, occurrence.start))
-                .width(Length::Fill),
-        );
+        let row = container(pressable(state, row, selection, on_event))
+            .id(entry_id(occurrence.entry, occurrence.start))
+            .width(Length::Fill);
+        #[cfg(feature = "icedwright")]
+        let row = super::parts::annotate_entry(row, entry.title(), selected, on_event.is_some());
+        rows = rows.push(row);
     }
     rows
 }

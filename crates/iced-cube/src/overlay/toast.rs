@@ -584,7 +584,7 @@ pub fn timer<A>(state: &State<A>) -> Subscription<Event> {
     if !state.needs_tick() {
         return Subscription::none();
     }
-    crate::ticker::every(TICK).map(|_| Event::Tick(Instant::now()))
+    crate::ticker::every(TICK).map(Event::Tick)
 }
 
 /// The widget id of a toast's close button, for tests and focus.
@@ -751,12 +751,35 @@ fn card<'a, Message: Clone + 'a>(
         .id(close_button_id(id)),
     );
 
-    solid(
+    let card = solid(
         container(content)
             .padding([space::MD, space::LG])
             .width(Length::Fill)
             .style(move |theme| style(&Tokens::of(theme), variant)),
-    )
+    );
+    #[cfg(feature = "icedwright")]
+    let card = {
+        use icedwright_probe::{Semantic, role, semantic};
+
+        fn finish<'a, Message: 'a, R: role::RoleKind>(
+            annotated: Semantic<'a, Message, Theme, iced::Renderer, R>,
+            toast: &'a Toast,
+        ) -> Element<'a, Message> {
+            let annotated = annotated
+                .name(toast.title.as_str())
+                .component("iced_cube::toast");
+            match &toast.description {
+                Some(description) => annotated.description(description.as_str()).into(),
+                None => annotated.into(),
+            }
+        }
+
+        match variant {
+            Variant::Destructive => finish(semantic(card).role(role::Alert), toast),
+            Variant::Default | Variant::Success => finish(semantic(card).role(role::Status), toast),
+        }
+    };
+    card
 }
 
 /// How far past its edges a toast button takes presses: a 32 pixel button becomes 48 tall and

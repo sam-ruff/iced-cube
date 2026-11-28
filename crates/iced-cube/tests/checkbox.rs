@@ -77,3 +77,30 @@ fn every_state_renders_its_label() {
         assert!(ui.find("Label").is_ok(), "{state:?}");
     }
 }
+
+#[cfg(feature = "icedwright")]
+#[path = "support/semantic.rs"]
+mod semantic;
+
+#[cfg(feature = "icedwright")]
+#[test]
+fn checkboxes_report_checked_mixed_and_disabled() {
+    let element: Element<'_, Message> = column![
+        checkbox(true).label("Terms").on_toggle(Message::Terms),
+        checkbox(CheckState::Indeterminate)
+            .label("All")
+            .on_toggle(Message::All),
+        checkbox(false).label("Newsletter"),
+    ]
+    .into();
+    assert_eq!(
+        semantic::yaml(element),
+        r#"- checkbox "Terms" [checked] [focused=false] [focusable]
+- text: Terms
+- checkbox "All" [checked=mixed] [focused=false] [focusable]
+- text: All
+- checkbox "Newsletter" [disabled] [checked=false]
+- text: Newsletter
+"#
+    );
+}

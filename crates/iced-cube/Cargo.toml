@@ -21,6 +21,9 @@ x11 = ["iced/x11"]
 wayland = ["iced/wayland"]
 thread-pool = ["iced/thread-pool"]
 tokio = ["iced/tokio"]
+# Components describe themselves to icedwright tests and read its clock. Enable it from
+# dev-dependencies only, so release builds compile none of it.
+icedwright = ["dep:icedwright-probe", "dep:icedwright-locator", "dep:icedwright-semantics"]
 
 full = [
     "primitives",
@@ -72,6 +75,8 @@ data = [
     "virtual-list",
     "selectable-text",
     "calendar",
+    "timeline",
+    "image-compare",
 ]
 
 button = ["iced/advanced"]
@@ -157,6 +162,8 @@ virtual-list = ["iced/advanced", "context-menu", "scroll-area"]
 log-viewer = ["virtual-list", "button", "context-menu", "icon-button", "input", "toggle-group"]
 rich-text-editor = ["iced/advanced", "input", "dep:unicode-segmentation"]
 selectable-text = ["iced/advanced"]
+timeline = ["iced/advanced"]
+image-compare = ["iced/advanced", "iced/image-without-codecs"]
 formatting-toolbar = [
     "rich-text-editor",
     "toolbar",
@@ -182,6 +189,9 @@ calendar = [
 
 [dependencies]
 iced = { version = "0.14.0", default-features = false, features = ["svg", "advanced"] }
+icedwright-locator = { git = "https://github.com/sam-ruff/icedwright", optional = true }
+icedwright-probe = { git = "https://github.com/sam-ruff/icedwright", features = ["semantics"], optional = true }
+icedwright-semantics = { git = "https://github.com/sam-ruff/icedwright", optional = true }
 jiff = { version = "1.0.1", features = ["js"], optional = true }
 lucide-static-svg = "=1.48.0"
 num-traits = { version = "0.2.19", optional = true }
@@ -192,6 +202,10 @@ unicode-segmentation = { version = "1.13.3", optional = true }
 futures = "0.3.34"
 iced = { version = "0.14.0", default-features = false, features = ["svg", "advanced", "tiny-skia"] }
 iced_test = "0.14.0"
+icedwright-probe = { git = "https://github.com/sam-ruff/icedwright", features = ["control"] }
+icedwright-protocol = { git = "https://github.com/sam-ruff/icedwright" }
+icedwright-semantics = { git = "https://github.com/sam-ruff/icedwright", features = ["collect"] }
+icedwright-types = { git = "https://github.com/sam-ruff/icedwright" }
 jiff = { version = "1.0.1", features = ["tzdb-bundle-always"] }
 png = "0.18.1"
 

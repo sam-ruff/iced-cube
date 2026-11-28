@@ -484,7 +484,7 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for Surface<'_, Message> {
         let free = !shell.is_event_captured() && !claimed;
         let tracker = &mut state.tracker;
         let mut gesture = None;
-        let mut now = Instant::now();
+        let mut now = crate::time::now();
 
         match event {
             Event::Touch(touch::Event::FingerPressed { id, position }) => {

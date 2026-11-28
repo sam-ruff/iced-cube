@@ -320,24 +320,41 @@ impl<'a, Message: Clone + 'a> From<Pagination<'a, Message>> for Element<'a, Mess
         let state = *state;
         let on_event: Handler<'a, Message> = on_event.map(Rc::from);
 
-        if variant == Variant::Compact {
-            return compact(state, size, &on_event);
-        }
-        // Drops sibling pages until the row fits, then falls back to the
-        // compact layout, so a phone never cuts the control off.
-        responsive(move |available| {
-            let fits = (0..=siblings)
-                .rev()
-                .find(|&siblings| numbers_width(state, siblings, size) <= available.width);
-            match fits {
-                Some(siblings) => numbers(state, siblings, size, &on_event),
-                None => compact(state, size, &on_event),
-            }
-        })
-        .width(Length::Shrink)
-        .height(Length::Shrink)
-        .into()
+        let element = if variant == Variant::Compact {
+            compact(state, size, &on_event)
+        } else {
+            fitted(state, size, siblings, on_event)
+        };
+        #[cfg(feature = "icedwright")]
+        let element = icedwright_probe::semantic(element)
+            .role(icedwright_probe::role::Navigation)
+            .name("Pagination")
+            .component("iced_cube::pagination")
+            .into();
+        element
     }
+}
+
+/// Drops sibling pages until the row fits, then falls back to the compact
+/// layout, so a phone never cuts the control off.
+fn fitted<'a, Message: Clone + 'a>(
+    state: State,
+    size: Size,
+    siblings: usize,
+    on_event: Handler<'a, Message>,
+) -> Element<'a, Message> {
+    responsive(move |available| {
+        let fits = (0..=siblings)
+            .rev()
+            .find(|&siblings| numbers_width(state, siblings, size) <= available.width);
+        match fits {
+            Some(siblings) => numbers(state, siblings, size, &on_event),
+            None => compact(state, size, &on_event),
+        }
+    })
+    .width(Length::Shrink)
+    .height(Length::Shrink)
+    .into()
 }
 
 /// The width of the numbered layout: two arrows, the page slots and the
@@ -370,7 +387,7 @@ fn numbers<'a, Message: Clone + 'a>(
 ) -> Element<'a, Message> {
     let height = size.metrics().height;
     let step = |glyph: Glyph, event: Event, enabled: bool| {
-        arrow(glyph, size, send(on_event, event, enabled))
+        arrow(glyph, event, size, send(on_event, event, enabled))
     };
 
     let mut controls = row![step(
@@ -402,7 +419,7 @@ fn compact<'a, Message: Clone + 'a>(
     on_event: &Handler<'a, Message>,
 ) -> Element<'a, Message> {
     let step = |glyph: Glyph, event: Event, enabled: bool| {
-        arrow(glyph, size, send(on_event, event, enabled))
+        arrow(glyph, event, size, send(on_event, event, enabled))
     };
     let label = text(format!("Page {} of {}", state.page, state.pages))
         .size(size.metrics().text)
@@ -424,6 +441,51 @@ fn compact<'a, Message: Clone + 'a>(
 
 /// A square button with a chevron, for moving by one page or to an end.
 fn arrow<'a, Message: Clone + 'a>(
+    glyph: Glyph,
+    event: Event,
+    size: Size,
+    message: Option<Message>,
+) -> Element<'a, Message> {
+    #[cfg(feature = "icedwright")]
+    let name = match event {
+        Event::First => "First page",
+        Event::Previous => "Previous page",
+        Event::Next => "Next page",
+        Event::Last => "Last page",
+        Event::Select(_) => "Page",
+    };
+    #[cfg(not(feature = "icedwright"))]
+    let _ = event;
+    #[cfg(feature = "icedwright")]
+    let enabled = message.is_some();
+    let element = arrow_button(glyph, size, message);
+    #[cfg(feature = "icedwright")]
+    let element = page_button(element, name.into(), false, enabled);
+    element
+}
+
+/// Reports a page control as a button.
+#[cfg(feature = "icedwright")]
+fn page_button<'a, Message: 'a>(
+    element: Element<'a, Message>,
+    name: String,
+    current: bool,
+    enabled: bool,
+) -> Element<'a, Message> {
+    let mut annotated = icedwright_probe::semantic(element)
+        .role(icedwright_probe::role::Button)
+        .name(name)
+        .component("iced_cube::pagination");
+    if current {
+        annotated = annotated.current(true);
+    }
+    if !enabled {
+        annotated = annotated.disabled(true);
+    }
+    annotated.into()
+}
+
+fn arrow_button<'a, Message: Clone + 'a>(
     glyph: Glyph,
     size: Size,
     message: Option<Message>,
@@ -468,13 +530,18 @@ fn number<'a, Message: Clone + 'a>(
     let label = text(page.to_string())
         .size(metrics.text)
         .wrapping(text::Wrapping::None);
-    widget::button(container(label).center(Length::Fill))
+    #[cfg(feature = "icedwright")]
+    let enabled = message.is_some();
+    let element: Element<'a, Message> = widget::button(container(label).center(Length::Fill))
         .width(Length::Fixed(number_width(page, size)))
         .height(Length::Fixed(metrics.height))
         .padding(0)
         .on_press_maybe(message)
         .style(move |theme, status| page_style(&Tokens::of(theme), current, status))
-        .into()
+        .into();
+    #[cfg(feature = "icedwright")]
+    let element = page_button(element, format!("Page {page}"), current, enabled);
+    element
 }
 
 /// The ellipsis that stands in for pages left out.

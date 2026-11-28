@@ -2050,6 +2050,10 @@ where
             })
             .clip(true)
             .style(|theme| frame_style(&Tokens::of(theme)));
+        #[cfg(feature = "icedwright")]
+        let frame = icedwright_probe::semantic(frame)
+            .role(icedwright_probe::role::Table)
+            .component("iced_cube::property_grid");
 
         let mut parts = column![].spacing(space::SM);
         if self.toolbar {
@@ -2193,13 +2197,42 @@ where
     fn lines(&self, range: Range<usize>, names: f32) -> Element<'a, Message> {
         let entries = self.entries.get(range).unwrap_or_default();
         column(entries.iter().map(|entry| match entry {
-            Entry::Category(name) => self.heading(name),
+            Entry::Category(name) => {
+                let row = self.heading(name);
+                #[cfg(feature = "icedwright")]
+                let row = icedwright_probe::semantic(row)
+                    .role(icedwright_probe::role::Row)
+                    .name(name.clone())
+                    .expanded(self.state.is_expanded(name))
+                    .component("iced_cube::property_grid")
+                    .into();
+                row
+            }
             Entry::Property(id) => {
                 let row = self.property(*id, names);
-                match &self.menu {
+                let row = match &self.menu {
                     Some(menu) => menu.wrap(*id, row),
                     None => row,
-                }
+                };
+                #[cfg(feature = "icedwright")]
+                let row = match self.state.property(*id) {
+                    Some(property) => {
+                        let mut annotated = icedwright_probe::semantic(row)
+                            .role(icedwright_probe::role::Row)
+                            .name(property.name.clone())
+                            .click_clock(icedwright_probe::ClickClock::Probe)
+                            .component("iced_cube::property_grid");
+                        if property.disabled || self.on_event.is_none() {
+                            annotated = annotated.disabled(true);
+                        }
+                        if property.is_modified() {
+                            annotated = annotated.prop("modified", "true");
+                        }
+                        annotated.into()
+                    }
+                    None => row,
+                };
+                row
             }
         }))
         .into()
@@ -2304,12 +2337,22 @@ where
             .width(names)
             .height(Length::Fill)
             .align_y(Alignment::Center);
+        #[cfg(feature = "icedwright")]
+        let name = icedwright_probe::semantic(name)
+            .role(icedwright_probe::role::RowHeader)
+            .name(property.name.as_str())
+            .component("iced_cube::property_grid");
 
         let handle = self.handle();
         let value = container(self.value(property))
             .width(Length::Fill)
             .height(Length::Fill)
             .align_y(Alignment::Center);
+        #[cfg(feature = "icedwright")]
+        let value = icedwright_probe::semantic(value)
+            .role(icedwright_probe::role::Cell)
+            .name(display(&property.value))
+            .component("iced_cube::property_grid");
 
         let reset: Element<'a, Message> = match &on_event {
             Some(on_event) if state.can_reset(id) => {
@@ -2317,6 +2360,11 @@ where
                 let button = mouse_area(container(icon).center(RESET_WIDTH))
                     .on_press(on_event(Event::Reset(id)))
                     .interaction(mouse::Interaction::Pointer);
+                #[cfg(feature = "icedwright")]
+                let button = icedwright_probe::semantic(button)
+                    .role(icedwright_probe::role::Button)
+                    .name("Reset to default")
+                    .component("iced_cube::property_grid");
                 tooltip(button, "Reset to default").into()
             }
             _ => Space::new().width(RESET_WIDTH).into(),

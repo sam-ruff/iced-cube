@@ -106,8 +106,23 @@ impl<'a, V, Message: Clone + 'a> From<Radio<'a, V, Message>> for Element<'a, Mes
             .on_select
             .clone()
             .map(|message| Box::new(move || message.clone()) as Box<dyn Fn() -> Message + 'a>);
-        let circle = focusable(circle, on_activate, Ring::around(radius::FULL));
-
+        let circle: Element<'a, Message> =
+            focusable(circle, on_activate, Ring::around(radius::FULL)).into();
+        // The circle carries the annotation, so the focus it reports is the
+        // radio's. The label is its name.
+        #[cfg(feature = "icedwright")]
+        let circle: Element<'a, Message> = {
+            use icedwright_probe::{role, semantic};
+            let mut annotated = semantic(circle)
+                .role(role::RadioButton)
+                .name(radio.label.clone())
+                .checked(selected)
+                .component("iced_cube::radio");
+            if radio.on_select.is_none() {
+                annotated = annotated.disabled(true);
+            }
+            annotated.into()
+        };
         let label = text(radio.label)
             .size(text_size::SM)
             .style(move |theme: &Theme| text::Style {
@@ -194,14 +209,20 @@ where
             Element::from(radio)
         });
 
-        match group.direction {
+        let element: Element<'a, Message> = match group.direction {
             Direction::Vertical => column(radios).spacing(spacing::MD).into(),
             Direction::Horizontal => row(radios)
                 .spacing(spacing::XL)
                 .align_y(Alignment::Center)
                 .wrap()
                 .into(),
-        }
+        };
+        #[cfg(feature = "icedwright")]
+        let element = icedwright_probe::semantic(element)
+            .role(icedwright_probe::role::RadioGroup)
+            .component("iced_cube::radio_group")
+            .into();
+        element
     }
 }
 

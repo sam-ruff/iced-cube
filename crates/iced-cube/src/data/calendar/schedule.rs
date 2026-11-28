@@ -861,7 +861,7 @@ pub fn timer<K>(scheduler: &Scheduler<K>, entries: &Entries) -> Subscription<Tim
 /// Ticks every [`TICK`] with the current time, for keeping a calendar's
 /// "today" and now line up to date.
 pub fn clock() -> Subscription<Timestamp> {
-    crate::ticker::every(TICK).map(|_| Timestamp::now())
+    crate::ticker::every(TICK).map(|_| crate::time::timestamp())
 }
 
 #[cfg(test)]

@@ -1710,16 +1710,54 @@ where
                 background: Some(Background::Color(Tokens::of(theme).border)),
                 ..container::Style::default()
             });
-        let header = widget::column![container(header).height(HEADER_HEIGHT), divider];
+        let header = container(header).height(HEADER_HEIGHT);
+        // The column grips count double clicks through iced's click counter.
+        #[cfg(feature = "icedwright")]
+        let header = icedwright_probe::semantic(header)
+            .role(icedwright_probe::role::Row)
+            .click_clock(icedwright_probe::ClickClock::Probe)
+            .component("iced_cube::data_table");
+        let header = widget::column![header, divider];
 
-        container(self.table_body(header.into(), lengths))
+        let table = container(self.table_body(header.into(), lengths))
             .width(Length::Fill)
             .clip(true)
-            .style(|theme| frame_style(&Tokens::of(theme)))
-            .into()
+            .style(|theme| frame_style(&Tokens::of(theme)));
+        #[cfg(feature = "icedwright")]
+        let table = {
+            let mut annotated = icedwright_probe::semantic(table)
+                .role(icedwright_probe::role::Table)
+                .component("iced_cube::data_table");
+            if self.loading {
+                annotated = annotated.busy(true);
+            }
+            annotated
+        };
+        table.into()
     }
 
     fn header_cell(&self, column: &Column<Row>, width: Length) -> Element<'a, Message> {
+        let cell = self.header_content(column, width);
+        #[cfg(feature = "icedwright")]
+        let cell = {
+            let mut annotated = icedwright_probe::semantic(cell)
+                .role(icedwright_probe::role::ColumnHeader)
+                .name(column.header.clone())
+                .component("iced_cube::data_table");
+            if column.sortable {
+                let sort = match self.state.sort() {
+                    Some((id, Direction::Ascending)) if id == column.id => "ascending",
+                    Some((id, Direction::Descending)) if id == column.id => "descending",
+                    _ => "none",
+                };
+                annotated = annotated.prop("sort", sort);
+            }
+            annotated.into()
+        };
+        cell
+    }
+
+    fn header_content(&self, column: &Column<Row>, width: Length) -> Element<'a, Message> {
         let state = self.state;
         let align = column.align.horizontal();
         let label = ellipsis(column.header.clone())
@@ -1808,7 +1846,7 @@ where
                     .iter()
                     .zip(range)
                     .map(|(&index, position)| {
-                        view.table_row(index, position + 1 == count, &lengths)
+                        view.table_row(index, position, position + 1 == count, &lengths)
                     }),
             )
             .into()
@@ -1871,7 +1909,13 @@ where
         ellipsis(column.text(row)).align_x(align).into()
     }
 
-    fn table_row(&self, index: usize, last: bool, lengths: &[Length]) -> Element<'a, Message> {
+    fn table_row(
+        &self,
+        index: usize,
+        position: usize,
+        last: bool,
+        lengths: &[Length],
+    ) -> Element<'a, Message> {
         let state = self.state;
         let Some(row_data) = state.rows.get(index) else {
             return Space::new().into();
@@ -1882,14 +1926,18 @@ where
             cells = cells.push(container(self.checkbox_for(&key)).center_x(CHECK_WIDTH));
         }
         for (column, length) in state.visible_columns().into_iter().zip(lengths) {
-            cells = cells.push(
-                container(self.content_for(column, row_data, column.align.horizontal()))
-                    .width(*length)
-                    .clip(true)
-                    .padding([0.0, space::SM])
-                    .align_x(column.align.horizontal())
-                    .center_y(Length::Fill),
-            );
+            let cell = container(self.content_for(column, row_data, column.align.horizontal()))
+                .width(*length)
+                .clip(true)
+                .padding([0.0, space::SM])
+                .align_x(column.align.horizontal())
+                .center_y(Length::Fill);
+            #[cfg(feature = "icedwright")]
+            let cell = icedwright_probe::semantic(cell)
+                .role(icedwright_probe::role::Cell)
+                .name(column.text(row_data))
+                .component("iced_cube::data_table");
+            cells = cells.push(cell);
         }
         if self.row_actions {
             cells = cells.push(container(self.actions_for(&key)).center_x(ACTIONS_WIDTH));
@@ -1910,7 +1958,28 @@ where
                 }
             },
         );
-        self.finish_row(body, key)
+        #[cfg(feature = "icedwright")]
+        let selected = state.is_selectable().then(|| state.is_selected(&key));
+        let row = self.finish_row(body, key);
+        #[cfg(feature = "icedwright")]
+        let row = {
+            let at = state.page_range().start + position + 1;
+            let mut annotated = icedwright_probe::semantic(row)
+                .role(icedwright_probe::role::Row)
+                .position(
+                    u32::try_from(at).unwrap_or(u32::MAX),
+                    u32::try_from(state.filtered_len()).unwrap_or(u32::MAX),
+                )
+                .click_clock(icedwright_probe::ClickClock::Probe)
+                .component("iced_cube::data_table");
+            if let Some(selected) = selected {
+                annotated = annotated.selected(selected);
+            }
+            annotated.into()
+        };
+        #[cfg(not(feature = "icedwright"))]
+        let _ = position;
+        row
     }
 
     /// Adds the press and double click messages and the context menu.

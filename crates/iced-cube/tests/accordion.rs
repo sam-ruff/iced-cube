@@ -69,3 +69,19 @@ fn headers_without_a_handler_are_disabled() {
     ui.click("Shipping").expect("Shipping header is rendered");
     assert_eq!(ui.into_messages().count(), 0);
 }
+
+#[cfg(feature = "icedwright")]
+#[path = "support/semantic.rs"]
+mod semantic;
+
+#[cfg(feature = "icedwright")]
+#[test]
+fn headers_report_expanded_buttons_controlling_their_regions() {
+    let state = State::new(Mode::Single).with_open(1);
+    assert_eq!(
+        semantic::yaml(view(&state)),
+        "- button \"Shipping\" [expanded]:\n  - text: Shipping\n\
+         - region \"Shipping\":\n  - text: Ships in two days.\n\
+         - button \"Returns\" [expanded=false]:\n  - text: Returns\n"
+    );
+}

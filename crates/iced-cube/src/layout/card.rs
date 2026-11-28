@@ -80,6 +80,8 @@ impl<'a, Message> Card<'a, Message> {
 impl<'a, Message: 'a> From<Card<'a, Message>> for Element<'a, Message> {
     fn from(card: Card<'a, Message>) -> Self {
         let has_header = card.has_header();
+        #[cfg(feature = "icedwright")]
+        let (name, about) = (card.title.clone(), card.description.clone());
         let mut sections = column![].spacing(space::LG).width(Length::Fill);
 
         if has_header {
@@ -100,12 +102,26 @@ impl<'a, Message: 'a> From<Card<'a, Message>> for Element<'a, Message> {
         }
 
         // Content wider than the card is cut at the border, not drawn over it.
-        container(sections)
+        let element: Element<'a, Message> = container(sections)
             .padding(space::XL)
             .width(card.width)
             .clip(true)
             .style(|theme| style(&Tokens::of(theme)))
-            .into()
+            .into();
+        #[cfg(feature = "icedwright")]
+        let element = {
+            let mut annotated = icedwright_probe::semantic(element)
+                .role(icedwright_probe::role::Region)
+                .component("iced_cube::card");
+            if let Some(name) = name {
+                annotated = annotated.name(name);
+            }
+            if let Some(about) = about {
+                annotated = annotated.description(about);
+            }
+            annotated.into()
+        };
+        element
     }
 }
 

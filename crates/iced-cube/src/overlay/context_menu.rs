@@ -467,6 +467,7 @@ where
             }),
         };
         let mut anchored = anchored(Element::new(area))
+            .kind("iced_cube::context_menu")
             .content(panel)
             .placement(placement(state.position()))
             .fit_height(true)

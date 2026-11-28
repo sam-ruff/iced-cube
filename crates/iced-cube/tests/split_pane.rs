@@ -85,3 +85,18 @@ fn vertical_splits_drag_along_y_within_their_limits() {
     let ratio = state.ratio();
     assert!((ratio - 199.0 / 299.0).abs() < 0.01, "{ratio}");
 }
+
+#[cfg(feature = "icedwright")]
+#[path = "support/semantic.rs"]
+mod semantic;
+
+#[cfg(feature = "icedwright")]
+#[test]
+fn the_handle_reports_a_splitter_with_its_position() {
+    let state = State::new(0.25);
+    assert_eq!(
+        semantic::yaml(view(&state, Axis::Horizontal)),
+        "- separator [focused=false] [focusable] [value=25] [min=0] [max=100]\n\
+         - text: Editor\n- text: Preview\n"
+    );
+}

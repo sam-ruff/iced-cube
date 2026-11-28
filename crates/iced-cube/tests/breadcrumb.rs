@@ -119,3 +119,25 @@ fn a_long_trail_wraps_rather_than_squeezing_its_labels() {
         assert!(bounds.x + bounds.width <= 160.5, "{label} stays inside");
     }
 }
+
+#[cfg(feature = "icedwright")]
+#[path = "support/semantic.rs"]
+mod semantic;
+
+#[cfg(feature = "icedwright")]
+#[test]
+fn a_trail_reports_navigation_with_links_and_the_current_crumb() {
+    let element: Element<'_, Message> = breadcrumb(trail())
+        .max_items(3)
+        .on_expand(Message::Expand)
+        .into();
+    // A link draws its label twice, once for the hovered look.
+    assert_eq!(
+        semantic::yaml(element),
+        "- navigation \"Breadcrumb\":\n  - list:\n\
+         \x20   - link \"Home\" [current=false]:\n      - text: Home\n      - text: Home\n\
+         \x20   - button \"Show path\"\n\
+         \x20   - link \"Pages\" [current=false]:\n      - text: Pages\n      - text: Pages\n\
+         \x20   - link \"Pricing\" [current]:\n      - text: Pricing\n"
+    );
+}

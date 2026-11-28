@@ -616,3 +616,51 @@ fn a_disabled_table_does_not_resize() {
     drag(&mut ui, from, Point::new(400.0, from.y));
     assert_eq!(events(ui), []);
 }
+
+#[cfg(feature = "icedwright")]
+#[path = "support/semantic.rs"]
+mod semantic;
+
+#[cfg(feature = "icedwright")]
+#[test]
+fn the_grid_reports_a_table_of_rows_and_cells() {
+    let state = state(2).with_sort("amount", iced_cube::data::data_table::Direction::Descending);
+    let element: Element<'_, Message> = data_table(&state)
+        .toolbar(false)
+        .on_event(Message::Table)
+        .into();
+    let tree = semantic::Recorder::default().tree(element);
+    let Some(table) = tree
+        .iter()
+        .find(|node| node.role == icedwright_types::Role::Table)
+    else {
+        panic!("no table in the tree");
+    };
+    let yaml = icedwright_semantics::yaml::write(&tree, table.id, &Default::default());
+    // The header row is reported after the body rows, as the table has
+    // always operated them.
+    let expected = r#"- table:
+  - row [position=1] [set-size=2] [prop:click-clock="probe"]:
+    - cell "user2@example.com":
+      - text: user2@example.com
+    - cell "Failed":
+      - text: Failed
+    - cell "$20.00":
+      - text: $20.00
+  - row [position=2] [set-size=2] [prop:click-clock="probe"]:
+    - cell "user1@example.com":
+      - text: user1@example.com
+    - cell "Pending":
+      - text: Pending
+    - cell "$10.00":
+      - text: $10.00
+  - row [prop:click-clock="probe"]:
+    - columnheader "Email" [prop:sort="none"]:
+      - text: Email
+    - columnheader "Status" [prop:sort="none"]:
+      - text: Status
+    - columnheader "Amount" [prop:sort="descending"]:
+      - text: Amount
+"#;
+    assert_eq!(yaml, expected);
+}

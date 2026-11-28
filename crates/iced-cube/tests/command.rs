@@ -288,3 +288,35 @@ fn producer_thread_streams_results_and_stale_ones_are_dropped() {
         .collect();
     assert_eq!(files, ["report.pdf", "reports.csv", "repo.zip"]);
 }
+
+#[cfg(feature = "icedwright")]
+#[path = "support/semantic.rs"]
+mod semantic;
+
+#[cfg(feature = "icedwright")]
+#[test]
+fn the_command_reports_a_combobox_controlling_its_options() {
+    use icedwright_types::Role;
+
+    let state = sample();
+    let tree = semantic::Recorder::default().tree(view(&state));
+    let combobox = tree
+        .iter()
+        .find(|node| node.role == Role::ComboBox)
+        .expect("the search field");
+    let list = tree
+        .iter()
+        .find(|node| node.role == Role::ListBox)
+        .expect("the results");
+    assert_eq!(combobox.relations.controls, vec![list.id]);
+    assert_eq!(
+        icedwright_semantics::yaml::write(&tree, list.id, &Default::default()),
+        "- listbox:\n  - text: Suggestions\n\
+         \x20 - option \"Calendar\" [selected=false]:\n    - text: Calendar\n\
+         \x20 - option \"Search emoji\" [selected=false]:\n    - text: Search emoji\n\
+         \x20 - option \"Calculator\" [disabled] [selected=false]:\n    - text: Calculator\n\
+         \x20 - text: Settings\n\
+         \x20 - option \"Profile\" [selected=false]:\n    - text: Profile\n    - text: Ctrl+P\n\
+         \x20 - option \"Billing\" [selected=false]:\n    - text: Billing\n    - text: Ctrl+B\n"
+    );
+}

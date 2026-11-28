@@ -29,6 +29,7 @@
 #[cfg(any(feature = "button", feature = "toggle", feature = "tooltip"))]
 mod after_touch;
 pub mod application;
+pub mod click;
 pub mod data;
 #[cfg(feature = "input")]
 mod editing;
@@ -38,9 +39,11 @@ mod fit;
 #[cfg(any(
     feature = "button",
     feature = "checkbox",
+    feature = "image-compare",
     feature = "radio",
     feature = "select",
     feature = "switch",
+    feature = "timeline",
     feature = "toggle"
 ))]
 mod focus;
@@ -68,9 +71,26 @@ pub mod primitives;
 mod shaped;
 #[cfg(any(feature = "dialog", feature = "sidebar", feature = "toast"))]
 mod solid;
+#[cfg(feature = "icedwright")]
+#[cfg_attr(docsrs, doc(cfg(feature = "icedwright")))]
+pub mod testing;
 pub mod theme;
 #[cfg(any(feature = "calendar", feature = "toast"))]
 mod ticker;
+#[cfg(any(
+    feature = "calendar",
+    feature = "data-table",
+    feature = "document-tabs",
+    feature = "json-viewer",
+    feature = "property-grid",
+    feature = "rich-text-editor",
+    feature = "selectable-text",
+    feature = "tappable",
+    feature = "tooltip",
+    feature = "tree",
+    feature = "virtual-list"
+))]
+mod time;
 
 pub use icon::{Glyph, Icon};
 pub use keys::{Chord, Keymap};
@@ -90,12 +110,16 @@ pub use application::toolbar;
 pub use data::calendar;
 #[cfg(feature = "data-table")]
 pub use data::data_table;
+#[cfg(feature = "image-compare")]
+pub use data::image_compare;
 #[cfg(feature = "json-viewer")]
 pub use data::json_viewer;
 #[cfg(feature = "log-viewer")]
 pub use data::log_viewer;
 #[cfg(feature = "property-grid")]
 pub use data::property_grid;
+#[cfg(feature = "timeline")]
+pub use data::timeline;
 #[cfg(feature = "tree")]
 pub use data::tree;
 #[cfg(feature = "virtual-list")]

@@ -482,3 +482,32 @@ fn links_take_the_primary_colour() -> Result<(), Error> {
     );
     Ok(())
 }
+
+#[cfg(feature = "icedwright")]
+#[path = "support/semantic.rs"]
+mod semantic;
+
+#[cfg(feature = "icedwright")]
+#[test]
+fn the_editor_reports_a_multiline_text_box_with_its_clocks() {
+    let note = note(Content::with_text("Hello"));
+    let tree = semantic::Recorder::default().tree(view(&note));
+    assert_eq!(
+        semantic::write(&tree),
+        "- textbox [focused=false] [multiline] [focusable] [prop:caret-clock=\"probe\"] \
+         [prop:click-clock=\"probe\"]: Hello\n"
+    );
+    let editor = tree
+        .iter()
+        .find(|node| node.role == icedwright_types::Role::TextBox);
+    let props = editor.map(|node| {
+        (
+            node.props.get("click-clock").cloned(),
+            node.props.get("caret-clock").cloned(),
+        )
+    });
+    assert_eq!(
+        props,
+        Some((Some("probe".to_owned()), Some("probe".to_owned())))
+    );
+}

@@ -61,3 +61,20 @@ fn value_label_is_rendered() {
     assert!(ui.find("Volume").is_ok());
     assert!(ui.find("42").is_ok());
 }
+
+#[cfg(feature = "icedwright")]
+#[path = "support/semantic.rs"]
+mod semantic;
+
+#[cfg(feature = "icedwright")]
+#[test]
+fn a_slider_reports_its_value_in_its_range() {
+    let element: Element<'_, Message> = slider(0..=100, 42u8)
+        .label("Volume")
+        .on_change(Message::Volume)
+        .into();
+    assert_eq!(
+        semantic::yaml(element),
+        "- text: Volume\n- slider \"Volume\" [value=42] [min=0] [max=100]\n"
+    );
+}

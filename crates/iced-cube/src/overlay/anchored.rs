@@ -361,6 +361,9 @@ pub(crate) struct Behaviour<'a, Message> {
     pub(crate) on_key: Option<OnKey<'a, Message>>,
     pub(crate) on_anchor_press: Option<Message>,
     pub(crate) on_focus: Option<OnFocus<'a, Message>>,
+    /// The component kind the anchor and panel report to icedwright.
+    #[cfg(feature = "icedwright")]
+    pub(crate) kind: &'static str,
 }
 
 type OnFocus<'a, Message> = Box<dyn Fn(bool) -> Message + 'a>;
@@ -381,6 +384,8 @@ impl<Message> Default for Behaviour<'_, Message> {
             on_key: None,
             on_anchor_press: None,
             on_focus: None,
+            #[cfg(feature = "icedwright")]
+            kind: "iced_cube::anchored",
         }
     }
 }
@@ -416,6 +421,18 @@ pub(crate) struct State {
     /// The side such a panel opened on. It stays there while open, so a
     /// list that shrinks as it is filtered does not jump across the anchor.
     pub(crate) side: Option<Side>,
+    /// Links the anchor to its panel for icedwright, made on first use.
+    #[cfg(feature = "icedwright")]
+    key: Option<icedwright_probe::Key>,
+}
+
+#[cfg(feature = "icedwright")]
+impl State {
+    pub(crate) fn key(&mut self) -> icedwright_probe::Key {
+        self.key
+            .get_or_insert_with(icedwright_probe::Key::unique)
+            .clone()
+    }
 }
 
 /// An anchor with a panel floating next to it. Convert it into an
@@ -452,6 +469,23 @@ pub fn anchored<'a, Message>(anchor: impl Into<Element<'a, Message>>) -> Anchore
 }
 
 impl<'a, Message> Anchored<'a, Message> {
+    /// The component kind the anchor and panel report to icedwright tests,
+    /// such as `"my_app::picker"` for a component built on this one. Does
+    /// nothing without the `icedwright` feature.
+    #[cfg(feature = "icedwright")]
+    pub fn kind(mut self, kind: &'static str) -> Self {
+        self.behaviour.kind = kind;
+        self
+    }
+
+    /// The component kind the anchor and panel report to icedwright tests,
+    /// such as `"my_app::picker"` for a component built on this one. Does
+    /// nothing without the `icedwright` feature.
+    #[cfg(not(feature = "icedwright"))]
+    pub fn kind(self, _kind: &'static str) -> Self {
+        self
+    }
+
     /// The floating panel. `None` keeps it closed.
     pub fn content(mut self, content: Option<Element<'a, Message>>) -> Self {
         self.content = content;
@@ -628,6 +662,28 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for Anchored<'_, Message> 
         renderer: &Renderer,
         operation: &mut dyn Operation,
     ) {
+        #[cfg(feature = "icedwright")]
+        {
+            let state = tree.state.downcast_mut::<State>();
+            let shown = self.content.is_some() && (!self.behaviour.closes_itself || state.open);
+            if shown {
+                let key = state.key();
+                let kind = self.behaviour.kind;
+                icedwright_probe::report(operation, layout.bounds(), || {
+                    icedwright_probe::Annotation::new()
+                        .owns(key)
+                        .component(kind)
+                });
+                let anchor = &mut self.anchor;
+                let child = &mut tree.children[0];
+                operation.traverse(&mut |operation| {
+                    anchor
+                        .as_widget_mut()
+                        .operate(child, layout, renderer, operation);
+                });
+                return;
+            }
+        }
         self.anchor
             .as_widget_mut()
             .operate(&mut tree.children[0], layout, renderer, operation);
@@ -948,6 +1004,22 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, Renderer> for Floating<'_,
         let Some(panel) = layout.children().next() else {
             return;
         };
+        #[cfg(feature = "icedwright")]
+        {
+            let key = self.state.key();
+            let kind = self.behaviour.kind;
+            icedwright_probe::report(operation, panel.bounds(), || {
+                icedwright_probe::Annotation::new().key(key).component(kind)
+            });
+            let content = &mut self.content;
+            let tree = &mut *self.tree;
+            operation.traverse(&mut |operation| {
+                content
+                    .as_widget_mut()
+                    .operate(tree, panel, renderer, operation);
+            });
+        }
+        #[cfg(not(feature = "icedwright"))]
         self.content
             .as_widget_mut()
             .operate(self.tree, panel, renderer, operation);

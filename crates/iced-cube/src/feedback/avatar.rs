@@ -137,12 +137,16 @@ pub struct Avatar {
     size: Size,
     shape: Shape,
     presence: Option<Presence>,
+    #[cfg(feature = "icedwright")]
+    name: String,
 }
 
 /// Creates an avatar showing the [`initials`] of `name`. A name with no
 /// letters shows a person icon instead.
 pub fn avatar(name: impl AsRef<str>) -> Avatar {
     Avatar {
+        #[cfg(feature = "icedwright")]
+        name: name.as_ref().to_owned(),
         initials: initials(name.as_ref()),
         image: None,
         icon: None,
@@ -214,6 +218,23 @@ impl<'a, Message: 'a> From<Avatar> for Element<'a, Message> {
     }
 }
 
+/// Reports an avatar as an image named after its person.
+#[cfg(feature = "icedwright")]
+fn annotate<'a, Message: 'a>(
+    element: Element<'a, Message>,
+    name: String,
+    presence: Option<Presence>,
+) -> Element<'a, Message> {
+    let mut annotated = icedwright_probe::semantic(element)
+        .role(icedwright_probe::role::Image)
+        .name(name)
+        .component("iced_cube::avatar");
+    if let Some(presence) = presence {
+        annotated = annotated.prop("presence", format!("{presence:?}").to_lowercase());
+    }
+    annotated.into()
+}
+
 /// Draws an avatar, with a ring in the background colour when it overlaps
 /// others in a group.
 fn render<'a, Message: 'a>(avatar: Avatar, ring: bool) -> Element<'a, Message> {
@@ -247,12 +268,20 @@ fn render<'a, Message: 'a>(avatar: Avatar, ring: bool) -> Element<'a, Message> {
         .padding(ring_width)
         .style(move |theme: &Theme| style(&Tokens::of(theme), shape, diameter, ring));
 
+    #[cfg(feature = "icedwright")]
+    let annotate = {
+        let (name, presence) = (avatar.name, avatar.presence);
+        move |element| annotate(element, name, presence)
+    };
+    #[cfg(not(feature = "icedwright"))]
+    let annotate = |element| element;
+
     // The outer container shrinks to its fixed-size content, so `natural`
     // keeps the avatar whole in a narrower parent.
     let Some(presence) = avatar.presence else {
-        return natural(container(face));
+        return annotate(natural(container(face)));
     };
-    natural(container(
+    annotate(natural(container(
         Stack::with_children([
             face.into(),
             container(dot(presence, metrics.dot))
@@ -262,7 +291,7 @@ fn render<'a, Message: 'a>(avatar: Avatar, ring: bool) -> Element<'a, Message> {
         ])
         .width(side)
         .height(side),
-    ))
+    )))
 }
 
 fn dot<'a, Message: 'a>(presence: Presence, diameter: f32) -> Element<'a, Message> {
@@ -424,9 +453,15 @@ impl<'a, Message: 'a> From<AvatarGroup> for Element<'a, Message> {
                 .padding(Padding::ZERO.left(step * index as f32))
                 .into()
         });
-        natural(container(
+        let element = natural(container(
             Stack::with_children(layers).width(width).height(side),
-        ))
+        ));
+        #[cfg(feature = "icedwright")]
+        let element = icedwright_probe::semantic(element)
+            .role(icedwright_probe::role::Group)
+            .component("iced_cube::avatar_group")
+            .into();
+        element
     }
 }
 

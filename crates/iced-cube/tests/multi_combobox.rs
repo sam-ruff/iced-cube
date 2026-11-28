@@ -262,3 +262,40 @@ fn chips_wrap_in_a_narrow_container() {
     assert!(lines.len() > 1, "wrapped onto {} lines", lines.len());
     assert_eq!(field.width, 200.0);
 }
+
+#[cfg(feature = "icedwright")]
+#[path = "support/semantic.rs"]
+mod semantic;
+
+#[cfg(feature = "icedwright")]
+#[test]
+fn a_multi_combobox_reports_its_options_as_selected_when_chosen() {
+    let mut state = State::new(PEOPLE);
+    let _ = state.update(Event::Open);
+    let _ = state.update(Event::Input("a".into()));
+    let _ = state.update(Event::Activate(0));
+    let _ = state.update(Event::Open);
+    assert_eq!(
+        semantic::yaml(view(&state)),
+        r#"- combobox "Add guests..." [expanded] [placeholder="Add guests..."]:
+  - /value: ""
+  - group "Ada":
+    - text: Ada
+    - button "Remove Ada"
+  - textbox [focused=false] [focusable]: Add guests...
+  - listbox:
+    - option "Ada" [selected]:
+      - text: Ada
+    - option "Alan" [selected=false]:
+      - text: Alan
+    - option "Grace" [selected=false]:
+      - text: Grace
+    - option "Katherine" [selected=false]:
+      - text: Katherine
+    - option "Linus" [selected=false]:
+      - text: Linus
+    - option "Margaret" [selected=false]:
+      - text: Margaret
+"#
+    );
+}

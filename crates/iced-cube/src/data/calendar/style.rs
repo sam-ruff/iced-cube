@@ -9,13 +9,7 @@ use crate::theme::{Tokens, fade, mix, on, radius};
 
 /// The colour a [`Tone`] stands for.
 pub fn tone(tokens: &Tokens, tone: Tone) -> Color {
-    match tone {
-        Tone::Primary => tokens.primary,
-        Tone::Neutral => tokens.muted_foreground,
-        Tone::Success => tokens.success,
-        Tone::Warning => tokens.warning,
-        Tone::Destructive => tokens.destructive,
-    }
+    tone.colour(tokens)
 }
 
 /// The colours of an entry, as a bar in the month or a block in the day.

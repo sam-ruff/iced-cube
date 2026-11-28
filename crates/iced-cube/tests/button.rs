@@ -149,3 +149,17 @@ fn every_variant_and_size_renders() {
         }
     }
 }
+
+#[cfg(feature = "icedwright")]
+#[path = "support/semantic.rs"]
+mod semantic;
+
+#[cfg(feature = "icedwright")]
+#[test]
+fn buttons_report_their_role_name_and_disabled_state() {
+    assert_eq!(
+        semantic::yaml(view(false)),
+        "- button \"Save\" [focused=false] [focusable]:\n  - text: Save\n\
+         - button \"Delete\" [disabled]:\n  - text: Delete\n"
+    );
+}

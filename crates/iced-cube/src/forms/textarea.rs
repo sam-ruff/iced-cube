@@ -199,6 +199,8 @@ impl<'a, Message: Clone + 'a> From<Textarea<'a, Message>> for Element<'a, Messag
         if textarea.height == Length::Shrink {
             editor = editor.min_height(textarea.min_height);
         }
+        #[cfg(feature = "icedwright")]
+        let placeholder = textarea.placeholder.clone();
         if let Some(placeholder) = textarea.placeholder {
             editor = editor.placeholder(placeholder);
         }
@@ -233,10 +235,31 @@ impl<'a, Message: Clone + 'a> From<Textarea<'a, Message>> for Element<'a, Messag
 
         // iced's editor reads only the mouse, so taps and drags are
         // translated for it.
-        touch_clicks(container(editor).width(textarea.width))
+        let element: Element<'a, Message> = touch_clicks(container(editor).width(textarea.width))
             .scroll(true)
             .line_height(text_size::SM * LINE_HEIGHT)
-            .into()
+            .into();
+        #[cfg(feature = "icedwright")]
+        let element = {
+            use icedwright_probe::{CaretClock, role, semantic};
+            let mut annotated = semantic(element)
+                .role(role::TextBox)
+                .multiline(true)
+                .value(textarea.content.text())
+                .caret_clock(CaretClock::Iced)
+                .component("iced_cube::textarea");
+            if let Some(placeholder) = placeholder {
+                annotated = annotated.placeholder(placeholder);
+            }
+            if !enabled {
+                annotated = annotated.disabled(true);
+            }
+            if invalid {
+                annotated = annotated.invalid(true);
+            }
+            annotated.into()
+        };
+        element
     }
 }
 

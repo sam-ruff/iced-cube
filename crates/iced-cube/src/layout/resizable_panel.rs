@@ -1188,6 +1188,24 @@ impl Memory {
     }
 
     /// The line of each handle, after every panel but the last.
+    /// Where each handle sits, as a percentage of the panels' total length.
+    #[cfg(feature = "icedwright")]
+    fn shares(&self) -> Vec<f32> {
+        let total: f32 = self.slots.iter().map(|(_, length)| length).sum();
+        if total <= 0.0 {
+            return vec![0.0; self.slots.len().saturating_sub(1)];
+        }
+        let count = self.slots.len().saturating_sub(1);
+        self.slots
+            .iter()
+            .take(count)
+            .scan(0.0, |before, (_, length)| {
+                *before += length;
+                Some((*before / total * 100.0).round())
+            })
+            .collect()
+    }
+
     fn lines(&self, bounds: Rectangle) -> Vec<Rectangle> {
         let count = self.slots.len().saturating_sub(1);
         self.slots
@@ -1331,9 +1349,22 @@ impl<Message> Widget<Message, Theme, Renderer> for ResizablePanel<'_, Message> {
         let memory = state.downcast_mut::<Memory>();
         let lines = memory.lines(layout.bounds());
         let id = self.id.as_ref();
+        #[cfg(feature = "icedwright")]
+        let shares = memory.shares();
         operation.traverse(&mut |operation| {
             for (index, (handle, line)) in memory.handles.iter_mut().zip(&lines).enumerate() {
                 let id = id.filter(|_| index == 0);
+                // Reported just before the focusable so the two merge.
+                #[cfg(feature = "icedwright")]
+                {
+                    let share = shares.get(index).copied().unwrap_or_default();
+                    icedwright_probe::report(operation, *line, || {
+                        icedwright_probe::Annotation::new()
+                            .role(icedwright_probe::role::Splitter)
+                            .range(f64::from(share), 0.0..=100.0)
+                            .component("iced_cube::resizable_panel")
+                    });
+                }
                 operation.focusable(id, *line, handle);
             }
             for ((pane, tree), layout) in self

@@ -437,3 +437,40 @@ fn a_wide_window_caps_the_width_and_centres_it() -> Result<(), iced_test::Error>
     assert!(title.x > size.width / 2.0 - 210.0 - 1.0, "{title:?}");
     Ok(())
 }
+
+#[cfg(feature = "icedwright")]
+#[path = "support/semantic.rs"]
+mod semantic;
+
+#[cfg(feature = "icedwright")]
+#[test]
+fn toasts_report_a_status_or_an_alert_for_errors() {
+    use icedwright_types::Role;
+
+    let mut state = State::default();
+    let _ = state.push(toast("Saved").description("All changes are stored."));
+    let _ = state.push(toast("Upload failed").variant(Variant::Destructive));
+    let tree = semantic::Recorder::default().tree(view(&state));
+    let reported: Vec<_> = tree
+        .iter()
+        .filter(|node| matches!(node.role, Role::Status | Role::Alert))
+        .map(|node| {
+            (
+                node.role,
+                node.name.clone().unwrap_or_default(),
+                node.description.clone(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        reported,
+        [
+            (
+                Role::Status,
+                "Saved".to_owned(),
+                Some("All changes are stored.".to_owned())
+            ),
+            (Role::Alert, "Upload failed".to_owned(), None),
+        ]
+    );
+}

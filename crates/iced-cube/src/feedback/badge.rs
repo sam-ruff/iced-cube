@@ -65,6 +65,8 @@ impl Badge<'_> {
 impl<'a, Message: 'a> From<Badge<'a>> for Element<'a, Message> {
     fn from(badge: Badge<'a>) -> Self {
         let variant = badge.variant;
+        #[cfg(feature = "icedwright")]
+        let name = badge.label.clone();
 
         let mut content = row![].spacing(4).align_y(Alignment::Center);
         if let Some(glyph) = badge.icon {
@@ -78,11 +80,18 @@ impl<'a, Message: 'a> From<Badge<'a>> for Element<'a, Message> {
                 .wrapping(text::Wrapping::None),
         );
 
-        natural(
+        let element = natural(
             container(content)
                 .padding(Padding::from([2.0, 10.0]))
                 .style(move |theme| style(&Tokens::of(theme), variant)),
-        )
+        );
+        #[cfg(feature = "icedwright")]
+        let element = icedwright_probe::semantic(element)
+            .role(icedwright_probe::role::Status)
+            .name(name)
+            .component("iced_cube::badge")
+            .into();
+        element
     }
 }
 

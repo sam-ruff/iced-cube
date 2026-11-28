@@ -525,3 +525,46 @@ fn the_description_wraps_and_grows() {
     assert!(body.y + body.height < below.y, "nothing is cut off");
     assert!(body.x + body.width <= WIDTH);
 }
+
+#[cfg(feature = "icedwright")]
+#[path = "support/semantic.rs"]
+mod semantic;
+
+#[cfg(feature = "icedwright")]
+#[test]
+fn the_grid_reports_rows_of_names_and_values() {
+    let state = State::new([
+        read_only(1, "Id", "rect-1"),
+        number(2, "Width", 120.0).category("Layout").default(100.0),
+    ]);
+    let element: Element<'_, Message> = property_grid(&state)
+        .toolbar(false)
+        .on_event(Message::Grid)
+        .into();
+    let tree = semantic::Recorder::default().tree(element);
+    let Some(table) = tree
+        .iter()
+        .find(|node| node.role == icedwright_types::Role::Table)
+    else {
+        panic!("no table in the tree");
+    };
+    let yaml = icedwright_semantics::yaml::write(&tree, table.id, &Default::default());
+    let expected = r#"- table:
+  - row "Id" [prop:click-clock="probe"]:
+    - rowheader "Id":
+      - text: Id
+    - cell "rect-1":
+      - text: rect-1
+  - row "Layout" [expanded]:
+    - text: Layout
+    - text: 1
+  - row "Width" [prop:click-clock="probe"] [prop:modified="true"]:
+    - rowheader "Width":
+      - text: Width
+    - cell "120":
+      - text: 120
+    - button "Reset to default" [description="Reset to default"] [tooltip="Reset to default"]
+  - text: Select a property to see its description.
+"#;
+    assert_eq!(yaml, expected);
+}

@@ -58,3 +58,29 @@ fn every_label_state_renders() {
         assert!(ui.find("Name").is_ok(), "{state:?}");
     }
 }
+
+#[cfg(feature = "icedwright")]
+#[path = "support/semantic.rs"]
+mod semantic;
+
+#[cfg(feature = "icedwright")]
+#[test]
+fn a_field_labels_and_describes_its_control() {
+    let element: Element<'_, Message> = field("Email", input("you@example.com", "ada@"))
+        .description("We never share it.")
+        .error("Enter a whole address.")
+        .required(true)
+        .into();
+    let tree = semantic::Recorder::default().tree(element);
+    assert_eq!(
+        semantic::write(&tree),
+        r#"- text "Email":
+  - /value: Email *
+  - text: Email
+  - text: "*"
+- textbox "Email" [disabled] [focused=false] [required] [invalid] [focusable] [description="We never share it. Enter a whole address."] [placeholder="you@example.com"] [prop:caret-clock="iced"]: ada@
+- text: We never share it.
+- text: Enter a whole address.
+"#
+    );
+}

@@ -12,8 +12,8 @@
 ))]
 use std::rc::Rc;
 
+use crate::click::{self, Click};
 use iced::advanced::layout::{self, Layout};
-use iced::advanced::mouse::{Click, click};
 use iced::advanced::overlay;
 use iced::advanced::renderer::{self, Quad};
 use iced::advanced::widget::operation::Focusable;
@@ -1040,7 +1040,12 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for Pressable<'_, Message>
                     return;
                 };
                 shell.publish(on_press(press.modifiers));
-                let click = Click::new(position, mouse::Button::Left, press.last_click);
+                let click = Click::new(
+                    position,
+                    mouse::Button::Left,
+                    press.last_click,
+                    crate::time::now(),
+                );
                 press.last_click = Some(click);
                 if click.kind() == click::Kind::Double
                     && let Some(message) = &self.on_double_click

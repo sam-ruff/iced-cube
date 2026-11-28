@@ -18,6 +18,8 @@ pub mod data_table;
     feature = "tree"
 ))]
 pub(crate) mod ellipsis;
+#[cfg(feature = "image-compare")]
+pub mod image_compare;
 #[cfg(any(
     feature = "data-table",
     feature = "json-viewer",
@@ -44,6 +46,8 @@ pub mod property_grid;
 mod rows;
 #[cfg(feature = "selectable-text")]
 pub mod selectable_text;
+#[cfg(feature = "timeline")]
+pub mod timeline;
 #[cfg(feature = "tree")]
 pub mod tree;
 #[cfg(feature = "virtual-list")]
@@ -53,6 +57,8 @@ pub mod virtual_list;
 pub use calendar::{Calendar, calendar};
 #[cfg(feature = "data-table")]
 pub use data_table::{DataTable, data_table};
+#[cfg(feature = "image-compare")]
+pub use image_compare::{ImageCompare, image_compare};
 #[cfg(feature = "json-viewer")]
 pub use json_viewer::{JsonViewer, json_viewer};
 #[cfg(feature = "log-viewer")]
@@ -61,6 +67,8 @@ pub use log_viewer::{LogViewer, log_viewer};
 pub use property_grid::{PropertyGrid, property_grid};
 #[cfg(feature = "selectable-text")]
 pub use selectable_text::{SelectableText, SelectionArea, selectable_text, selection_area};
+#[cfg(feature = "timeline")]
+pub use timeline::{Timeline, timeline};
 #[cfg(feature = "tree")]
 pub use tree::{Tree, tree};
 #[cfg(feature = "virtual-list")]

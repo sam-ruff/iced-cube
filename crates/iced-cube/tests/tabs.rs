@@ -103,3 +103,23 @@ fn tabs_without_a_handler_are_disabled() {
     ui.click("Password").expect("Password tab is rendered");
     assert_eq!(ui.into_messages().count(), 0);
 }
+
+#[cfg(feature = "icedwright")]
+#[path = "support/semantic.rs"]
+mod semantic;
+
+#[cfg(feature = "icedwright")]
+#[test]
+fn tabs_report_a_tab_list_with_the_selection() {
+    let state = state();
+    for variant in Variant::ALL {
+        assert_eq!(
+            semantic::yaml(view(&state, variant)),
+            "- tablist:\n  - scrollview:\n\
+             \x20   - tab \"Account\" [selected]:\n      - text: Account\n\
+             \x20   - tab \"Password\" [selected=false]:\n      - text: Password\n\
+             \x20   - tab \"Billing\" [disabled] [selected=false]:\n      - text: Billing\n",
+            "{variant:?}"
+        );
+    }
+}

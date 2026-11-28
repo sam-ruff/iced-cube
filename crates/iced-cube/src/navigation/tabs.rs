@@ -283,7 +283,7 @@ where
             item(tab, variant, selected, message)
         });
 
-        match variant {
+        let list: Element<'a, Message> = match variant {
             Variant::Underline => column![
                 sideways(row(items).spacing(space::XS)),
                 rule::horizontal(1).style(|theme: &Theme| rule::Style {
@@ -300,7 +300,13 @@ where
                 .width(width.unwrap_or(Length::Shrink))
                 .style(move |theme| list_style(&Tokens::of(theme), variant))
                 .into(),
-        }
+        };
+        #[cfg(feature = "icedwright")]
+        let list = icedwright_probe::semantic(list)
+            .role(icedwright_probe::role::TabList)
+            .component("iced_cube::tabs")
+            .into();
+        list
     }
 }
 
@@ -341,20 +347,33 @@ fn item<'a, Id, Message: Clone + 'a>(
         .on_press_maybe(message)
         .style(move |theme, status| style(&Tokens::of(theme), variant, selected, status));
 
-    if variant == Variant::Pills {
-        return natural(button);
-    }
-
-    natural(
-        column![
-            button,
-            container(iced::widget::space())
-                .width(Length::Fill)
-                .height(2)
-                .style(move |theme| indicator_style(&Tokens::of(theme), selected)),
-        ]
-        .width(Length::Shrink),
-    )
+    let element = if variant == Variant::Pills {
+        natural(button)
+    } else {
+        natural(
+            column![
+                button,
+                container(iced::widget::space())
+                    .width(Length::Fill)
+                    .height(2)
+                    .style(move |theme| indicator_style(&Tokens::of(theme), selected)),
+            ]
+            .width(Length::Shrink),
+        )
+    };
+    #[cfg(feature = "icedwright")]
+    let element = {
+        let mut annotated = icedwright_probe::semantic(element)
+            .role(icedwright_probe::role::Tab)
+            .name(tab.label.as_str())
+            .selected(selected)
+            .component("iced_cube::tabs");
+        if !enabled {
+            annotated = annotated.disabled(true);
+        }
+        annotated.into()
+    };
+    element
 }
 
 fn foreground(tokens: &Tokens, selected: bool, status: Status) -> Color {

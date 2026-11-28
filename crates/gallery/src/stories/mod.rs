@@ -26,6 +26,7 @@ pub mod dropdown_menu;
 pub mod fab;
 pub mod formatting_toolbar;
 pub mod icon_button;
+pub mod image_compare;
 pub mod input;
 pub mod json_viewer;
 pub mod label;
@@ -55,6 +56,7 @@ pub mod tabs;
 pub mod tappable;
 pub mod textarea;
 pub mod theme;
+pub mod timeline;
 pub mod toast;
 pub mod toggle;
 pub mod toggle_group;
@@ -1054,6 +1056,46 @@ crate::stories! {
         id: "calendar/triggers", component: "calendar", title: "Custom triggers",
         description: "Rules built from base parts: changes to entries, a reminder limited to a tag, one that repeats before a single entry, and one for when an entry ends. Each carries the app's own key.",
         file: "calendar/triggers.rs", height: 480,
+    }
+    TimelineDefault => timeline::default {
+        id: "timeline/default", component: "timeline", title: "Default",
+        description: "Steps coloured by outcome, with a playhead that follows a press or a drag.",
+        file: "timeline/default.rs", height: 160,
+    }
+    TimelineLanes => timeline::lanes {
+        id: "timeline/lanes", component: "timeline", title: "Lanes",
+        description: "Labelled lanes under the track show work that ran across several steps.",
+        file: "timeline/lanes.rs", height: 200,
+    }
+    TimelineKeyboard => timeline::keyboard {
+        id: "timeline/keyboard", component: "timeline", title: "Keyboard shortcuts",
+        description: "Once pressed or reached with Tab, arrow, Page, Home and End keys move through the steps, plus two added bindings.",
+        file: "timeline/keyboard.rs", height: 200,
+    }
+    TimelineDisabled => timeline::disabled {
+        id: "timeline/disabled", component: "timeline", title: "Disabled",
+        description: "A timeline without a message only shows progress.",
+        file: "timeline/disabled.rs", height: 160,
+    }
+    ImageCompareSlider => image_compare::slider {
+        id: "image-compare/slider", component: "image-compare", title: "Slider",
+        description: "The before image left of a divider that is dragged across the after image.",
+        file: "image_compare/slider.rs", height: 320,
+    }
+    ImageCompareModes => image_compare::modes {
+        id: "image-compare/modes", component: "image-compare", title: "Modes",
+        description: "Side by side, slider and overlay, with the overlay's opacity on a slider.",
+        file: "image_compare/modes.rs", height: 420,
+    }
+    ImageCompareOutlines => image_compare::outlines {
+        id: "image-compare/outlines", component: "image-compare", title: "Outlines and pointer",
+        description: "One image with outlined regions, reporting the pixel under the pointer and picking a region on a press.",
+        file: "image_compare/outlines.rs", height: 340,
+    }
+    ImageCompareKeyboard => image_compare::keyboard {
+        id: "image-compare/keyboard", component: "image-compare", title: "Keyboard shortcuts",
+        description: "Once pressed or reached with Tab, arrow, Home and End keys move the divider, plus two added bindings.",
+        file: "image_compare/keyboard.rs", height: 280,
     }
     ShowcaseSettings => showcase::settings {
         id: "showcase/settings", component: "showcase", title: "Preferences",

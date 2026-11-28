@@ -147,7 +147,12 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for Pressable<'_, Message>
         };
         let clicks = tree.state.downcast_mut::<Clicks>();
         if let Some(position) = pressed_at {
-            clicks.last = Some(click(clicks.last, position, Instant::now(), self.interval));
+            clicks.last = Some(click(
+                clicks.last,
+                position,
+                crate::time::now(),
+                self.interval,
+            ));
         }
         let double = clicks
             .last

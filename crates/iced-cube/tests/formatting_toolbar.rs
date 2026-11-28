@@ -229,3 +229,28 @@ fn a_narrow_toolbar_moves_buttons_into_more() {
     let shown = narrow.state.formatting.toolbar().visible();
     assert!(shown < all && shown >= 4, "{shown} of {all}");
 }
+
+#[cfg(feature = "icedwright")]
+#[path = "support/semantic.rs"]
+mod semantic;
+
+#[cfg(feature = "icedwright")]
+#[test]
+fn the_bar_reports_a_toolbar_holding_the_size_menu() {
+    let state = formatting_toolbar::State::new();
+    let element: Element<'_, Message> = formatting_toolbar(&state).on_event(Message::Format).into();
+    let tree = semantic::Recorder::default().tree(element);
+    let Some(bar) = tree
+        .iter()
+        .find(|node| node.role == icedwright_types::Role::Toolbar)
+    else {
+        panic!("no toolbar in the tree");
+    };
+    assert_eq!(bar.name.as_deref(), Some("Formatting"));
+    assert!(
+        tree.descendants(bar.id)
+            .filter_map(|id| tree.get(id))
+            .any(|node| node.role == icedwright_types::Role::Button),
+        "the size menu's trigger is a button inside the bar"
+    );
+}

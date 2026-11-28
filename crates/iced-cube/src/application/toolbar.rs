@@ -889,7 +889,7 @@ where
         ));
     }
 
-    container(
+    let bar: Element<'a, Message> = container(
         row(children)
             .spacing(GAP)
             .align_y(Alignment::Center)
@@ -898,7 +898,13 @@ where
     .padding(PADDING)
     .width(Length::Fill)
     .style(|theme| bar_style(&Tokens::of(theme)))
-    .into()
+    .into();
+    #[cfg(feature = "icedwright")]
+    let bar = icedwright_probe::semantic(bar)
+        .role(icedwright_probe::role::Toolbar)
+        .component("iced_cube::toolbar")
+        .into();
+    bar
 }
 
 fn item_button<'a, Id, Message>(

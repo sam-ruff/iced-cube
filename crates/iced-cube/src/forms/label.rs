@@ -192,21 +192,98 @@ impl<'a, Message: 'a> From<Field<'a, Message>> for Element<'a, Message> {
             field.label
         };
 
-        let helper = |content: text::Fragment<'a>, tone: fn(&Tokens) -> Color| {
-            text(content)
-                .size(text_size::XS)
-                .style(move |theme| text::Style {
-                    color: Some(tone(&Tokens::of(theme))),
-                })
-        };
+        #[cfg(feature = "icedwright")]
+        return described(
+            field.width,
+            label,
+            field.control,
+            field.description,
+            field.error,
+        );
 
-        let content: Column<'a, Message> = column![label, field.control]
-            .push(field.description.map(|d| helper(d, description_colour)))
-            .push(field.error.map(|e| helper(e, error_colour)))
-            .spacing(space::SM)
-            .width(field.width);
-        content.into()
+        #[cfg(not(feature = "icedwright"))]
+        {
+            let content: Column<'a, Message> = column![label, field.control]
+                .push(field.description.map(|d| helper(d, description_colour)))
+                .push(field.error.map(|e| helper(e, error_colour)))
+                .spacing(space::SM)
+                .width(field.width);
+            content.into()
+        }
     }
+}
+
+/// Helper text below a control, in the colour `tone` picks.
+fn helper<'a>(content: text::Fragment<'a>, tone: fn(&Tokens) -> Color) -> text::Text<'a> {
+    text(content)
+        .size(text_size::XS)
+        .style(move |theme| text::Style {
+            color: Some(tone(&Tokens::of(theme))),
+        })
+}
+
+/// Lays out a field with the label naming the control, the helper text
+/// describing it, and the control required or invalid to match.
+#[cfg(feature = "icedwright")]
+fn described<'a, Message: 'a>(
+    width: Length,
+    label: Label<'a>,
+    control: Element<'a, Message>,
+    description: Option<text::Fragment<'a>>,
+    error: Option<text::Fragment<'a>>,
+) -> Element<'a, Message> {
+    use icedwright_probe::{Key, role, semantic};
+
+    const KIND: &str = "iced_cube::field";
+
+    let helper = |content: text::Fragment<'a>, tone: fn(&Tokens) -> Color, key: &Key| {
+        semantic(helper(content.clone(), tone))
+            .role(role::Text)
+            .name(content)
+            .key(key.clone())
+            .component(KIND)
+    };
+
+    let label_key = Key::unique();
+    let control_key = Key::unique();
+    // Named directly, so the required marker stays out of the name.
+    let mut annotated = semantic(control)
+        .name(label.text.clone())
+        .key(control_key.clone())
+        .labelled_by(label_key.clone())
+        .component(KIND);
+    if label.required {
+        annotated = annotated.required(true);
+    }
+    if error.is_some() {
+        annotated = annotated.invalid(true);
+    }
+    let mut helpers = Vec::new();
+    for (content, tone) in [
+        (description, description_colour as fn(&Tokens) -> Color),
+        (error, error_colour),
+    ] {
+        let Some(content) = content else {
+            continue;
+        };
+        let key = Key::unique();
+        annotated = annotated.described_by(key.clone());
+        helpers.push(helper(content, tone, &key));
+    }
+    let name = label.text.clone();
+    let label = semantic(label)
+        .role(role::Text)
+        .name(name)
+        .key(label_key)
+        .label_for(control_key)
+        .component(KIND);
+
+    let mut content: Column<'a, Message> =
+        column![label, annotated].spacing(space::SM).width(width);
+    for helper in helpers {
+        content = content.push(helper);
+    }
+    content.into()
 }
 
 /// Label colour for a state.

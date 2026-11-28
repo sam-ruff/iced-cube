@@ -901,6 +901,14 @@ where
 
         let on_event: Option<Rc<dyn Fn(Event<Id>) -> Message + 'a>> = on_event.map(Rc::from);
         let list = list(state, &empty, loading, on_event.as_deref());
+        #[cfg(feature = "icedwright")]
+        let key = icedwright_probe::Key::unique();
+        #[cfg(feature = "icedwright")]
+        let list: Element<'a, Message> = icedwright_probe::semantic(list)
+            .role(icedwright_probe::role::ListBox)
+            .key(key.clone())
+            .component("iced_cube::command")
+            .into();
         let list = container(list).height(if height == Length::Shrink {
             Length::Shrink
         } else {
@@ -911,8 +919,19 @@ where
                 as Box<dyn Fn(String) -> Message + 'a>
         });
 
+        let search = search_field(&placeholder, &state.query, id, on_input, shortcuts);
+        #[cfg(feature = "icedwright")]
+        let search: Element<'a, Message> = icedwright_probe::semantic(search)
+            .role(icedwright_probe::role::ComboBox)
+            .name(placeholder.clone())
+            .placeholder(placeholder.clone())
+            .value(state.query.as_str())
+            .expanded(true)
+            .controls(key)
+            .component("iced_cube::command")
+            .into();
         let surface = container(column![
-            search_field(&placeholder, &state.query, id, on_input, shortcuts),
+            search,
             container(widget::space())
                 .width(Length::Fill)
                 .height(1)
@@ -930,6 +949,7 @@ where
         };
         let on_focus = on_event.clone();
         anchored(surface)
+            .kind("iced_cube::command")
             .dismiss_keys([])
             .on_focus(move |focused| on_focus(Event::Focus(focused)))
             .on_key(move |key| {
@@ -1035,7 +1055,21 @@ fn list<'a, Id, Message: Clone + 'a>(
             hint: item.shortcut.as_deref(),
             ..Parts::label(&item.label)
         };
-        children.push(menu::item(parts, status, item.destructive, messages));
+        let row = menu::item(parts, status, item.destructive, messages);
+        #[cfg(feature = "icedwright")]
+        let row = {
+            let annotated = icedwright_probe::semantic(row)
+                .role(icedwright_probe::role::ListOption)
+                .name(item.label.as_str())
+                .selected(status == RowStatus::Highlighted)
+                .component("iced_cube::command");
+            if enabled {
+                annotated.into()
+            } else {
+                annotated.disabled(true).into()
+            }
+        };
+        children.push(row);
     }
 
     if children.is_empty() {

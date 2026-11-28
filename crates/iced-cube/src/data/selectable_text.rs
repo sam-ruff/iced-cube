@@ -592,8 +592,39 @@ where
         operation: &mut dyn Operation,
     ) {
         let state = tree.state.downcast_mut::<State<Link>>();
-        operation.text(None, layout.bounds(), &state.text);
-        operation.custom(None, layout.bounds(), &mut state.body);
+        #[cfg(feature = "icedwright")]
+        {
+            let size = self
+                .size
+                .unwrap_or_else(|| text::Renderer::default_size(_renderer));
+            let body = &state.body;
+            icedwright_probe::report(operation, layout.bounds(), || {
+                let (lines, carets) = geometry(body);
+                let annotation = icedwright_probe::Annotation::new()
+                    .text_size(size)
+                    .text_geometry(carets.into_iter().map(|(at, point)| (at, point.into())))
+                    .component("iced_cube::selectable_text");
+                if lines > 1 {
+                    annotation
+                        .role(icedwright_probe::role::Paragraph)
+                        .to_static()
+                } else {
+                    annotation.role(icedwright_probe::role::Text).to_static()
+                }
+            });
+            // Nests the text under the annotation for recorders.
+            let text = &state.text;
+            let body = &mut state.body;
+            operation.traverse(&mut |operation| {
+                operation.text(None, layout.bounds(), text);
+                operation.custom(None, layout.bounds(), body);
+            });
+        }
+        #[cfg(not(feature = "icedwright"))]
+        {
+            operation.text(None, layout.bounds(), &state.text);
+            operation.custom(None, layout.bounds(), &mut state.body);
+        }
     }
 
     fn update(
@@ -1108,7 +1139,7 @@ impl<'a, Message> SelectionArea<'a, Message> {
             return;
         };
         let state = tree.state.downcast_mut::<AreaState>();
-        let now = Instant::now();
+        let now = crate::time::now();
         let count = click_count(state.last_click, position, now, self.double_click);
         state.last_click = Some(Click {
             position,
@@ -1171,7 +1202,7 @@ impl<'a, Message> SelectionArea<'a, Message> {
             return;
         }
         if now.is_some() || state.last_pull.is_none() {
-            state.last_pull = now.or_else(|| Some(Instant::now()));
+            state.last_pull = now.or_else(|| Some(crate::time::now()));
         }
         // The next frame scrolls further and moves the selection with it.
         shell.request_redraw();
@@ -1423,8 +1454,48 @@ impl<Message> Widget<Message, Theme, Renderer> for SelectionArea<'_, Message> {
 
 impl<'a, Message: 'a> From<SelectionArea<'a, Message>> for Element<'a, Message> {
     fn from(area: SelectionArea<'a, Message>) -> Self {
-        Element::new(area)
+        let element = Element::new(area);
+        #[cfg(feature = "icedwright")]
+        let element = icedwright_probe::semantic(element)
+            .role(icedwright_probe::role::Document)
+            .component("iced_cube::selection_area")
+            .into();
+        element
     }
+}
+
+/// The number of laid out lines, and the caret top at the start and end of
+/// every glyph, as byte offsets into the whole text and points relative to
+/// the text's corner.
+#[cfg(feature = "icedwright")]
+fn geometry(body: &Body) -> (usize, Vec<(usize, Point)>) {
+    let Some(buffer) = body.paragraph.shaped() else {
+        return (0, Vec::new());
+    };
+    let mut starts = Vec::with_capacity(buffer.lines.len());
+    let mut offset = 0;
+    for line in &buffer.lines {
+        starts.push(offset);
+        offset += line.text().len() + 1;
+    }
+    let mut lines = 0;
+    let mut carets: Vec<(usize, Point)> = Vec::new();
+    for run in buffer.layout_runs() {
+        lines += 1;
+        let start = starts.get(run.line_i).copied().unwrap_or_default();
+        for glyph in run.glyphs {
+            carets.push((start + glyph.start, Point::new(glyph.x, run.line_top)));
+            carets.push((
+                start + glyph.end,
+                Point::new(glyph.x + glyph.w, run.line_top),
+            ));
+        }
+    }
+    // The first caret at an offset wins, so a glyph's start beats the end of
+    // the glyph before it on a new line.
+    carets.sort_by_key(|(at, _)| *at);
+    carets.dedup_by_key(|(at, _)| *at);
+    (lines, carets)
 }
 
 #[cfg(test)]

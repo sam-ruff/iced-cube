@@ -32,7 +32,7 @@ use crate::icon::opaque;
 use crate::primitives::scroll_area;
 use crate::theme::{self, Tokens, mix, radius, space, text_size};
 use iced::advanced::svg::Renderer as _;
-use iced::time::{Duration, Instant};
+use iced::time::Duration;
 
 /// The step drags snap to, in minutes.
 pub const SNAP_MINUTES: u16 = 15;
@@ -618,11 +618,17 @@ fn hours<'a, Message: Clone + 'a>(
                 let time = block_label(&block, days.len() > 1, time_zone);
                 lines = lines.push(ellipsis(time).size(11.0, LINE).colour(colour));
             }
-            children.push(
-                container(lines)
-                    .id(entry_id(block.occurrence.entry, block.occurrence.start))
-                    .into(),
+            let block_view: Element<'a, Message> = container(lines)
+                .id(entry_id(block.occurrence.entry, block.occurrence.start))
+                .into();
+            #[cfg(feature = "icedwright")]
+            let block_view = super::parts::annotate_entry(
+                block_view,
+                entry.title(),
+                look.selected,
+                on_event.is_some(),
             );
+            children.push(block_view);
             placed.push(Placed {
                 day,
                 block,
@@ -958,7 +964,7 @@ struct Memory {
 impl Memory {
     /// Counts a press at `point`, and whether it completes a double one.
     fn count(&mut self, point: Point, interval: Duration) -> bool {
-        let click = click(self.click, point, Instant::now(), interval);
+        let click = click(self.click, point, crate::time::now(), interval);
         // A double press starts the count again.
         self.click = (click.count == 1).then_some(click);
         click.count == 2

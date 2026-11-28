@@ -641,6 +641,7 @@ where
         let on_list = on_event.clone();
         let on_key = on_event.clone();
         let body = anchored(list.on_event(move |event| on_list(Event::Command(event))))
+            .kind("iced_cube::command_palette")
             .dismiss_keys([])
             .on_key(move |key| state.key_event(&keymap, key).map(&*on_key));
         palette.body(body).on_dismiss(on_event(Event::Close)).into()

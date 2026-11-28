@@ -198,3 +198,27 @@ fn without_on_dismiss_only_the_app_closes_it() {
     click_at(&mut ui, Point::new(900.0, 700.0));
     assert!(messages(ui).is_empty());
 }
+
+#[cfg(feature = "icedwright")]
+#[path = "support/semantic.rs"]
+mod semantic;
+
+#[cfg(feature = "icedwright")]
+#[test]
+fn an_open_popover_reports_a_dialog_owned_by_its_trigger() {
+    use icedwright_types::Role;
+
+    let tree = semantic::Recorder::default().tree(view(true, true));
+    let panel = tree
+        .iter()
+        .find(|node| node.role == Role::Dialog)
+        .expect("the open panel is in the tree");
+    assert_eq!(
+        icedwright_semantics::yaml::write(&tree, panel.id, &Default::default()),
+        "- dialog:\n  - text: Dimensions\n  - text: Apply\n"
+    );
+    assert!(
+        tree.iter()
+            .any(|node| node.relations.owns == vec![panel.id])
+    );
+}

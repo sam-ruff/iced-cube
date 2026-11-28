@@ -523,6 +523,11 @@ impl<'a, Message: Clone + 'a> From<FormattingToolbar<'a, Message>> for Element<'
         )
         .width(Length::Fill)
         .style(|theme| toolbar::bar_style(&Tokens::of(theme)));
+        #[cfg(feature = "icedwright")]
+        let bar = icedwright_probe::semantic(bar)
+            .role(icedwright_probe::role::Toolbar)
+            .name("Formatting")
+            .component("iced_cube::formatting_toolbar");
 
         let Some(address) = &state.link else {
             return bar.into();

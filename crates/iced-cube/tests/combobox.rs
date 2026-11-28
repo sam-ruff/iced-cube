@@ -294,3 +294,39 @@ fn picking_moves_the_caret_to_the_end() {
         "typing after a pick continues from the end"
     );
 }
+
+#[cfg(feature = "icedwright")]
+#[path = "support/semantic.rs"]
+mod semantic;
+
+#[cfg(feature = "icedwright")]
+#[test]
+fn a_combobox_reports_its_value_and_its_open_list() {
+    let mut state = State::new(FRUITS).with_selected(&"Grape");
+    assert_eq!(
+        semantic::yaml(view(&state)),
+        r#"- combobox "Search fruit..." [expanded=false] [placeholder="Search fruit..."]:
+  - /value: Grape
+  - textbox [focused=false] [focusable]: Grape
+"#
+    );
+    let _ = state.update(Event::Open);
+    assert_eq!(
+        semantic::yaml(view(&state)),
+        r#"- combobox "Grape" [expanded] [placeholder="Grape"]:
+  - /value: ""
+  - textbox [focused=false] [focusable]: Grape
+  - listbox:
+    - option "Apple" [selected=false]:
+      - text: Apple
+    - option "Banana" [selected=false]:
+      - text: Banana
+    - option "Blueberry" [selected=false]:
+      - text: Blueberry
+    - option "Cherry" [selected=false]:
+      - text: Cherry
+    - option "Grape" [selected]:
+      - text: Grape
+"#
+    );
+}

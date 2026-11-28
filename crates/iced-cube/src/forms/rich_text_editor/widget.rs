@@ -1,9 +1,9 @@
 //! The editor widget: draws the laid out blocks and turns input into
 //! [`Action`]s for the app.
 
+use crate::click::{self, Click};
 use iced::advanced::clipboard::Kind;
 use iced::advanced::layout::{self, Layout};
-use iced::advanced::mouse::click::{self, Click};
 use iced::advanced::text::{self, Paragraph as _, Renderer as _, Text};
 use iced::advanced::widget::{Operation, Tree, Widget, operation, tree};
 use iced::advanced::{Clipboard, InputMethod, Shell, input_method, renderer};
@@ -40,7 +40,7 @@ struct Focus {
 
 impl Focus {
     fn now() -> Self {
-        let now = Instant::now();
+        let now = crate::time::now();
         Self {
             updated_at: now,
             now,
@@ -163,6 +163,31 @@ impl<'a, Message> Editor<'a, Message> {
             shortcuts,
             keymap,
         }
+    }
+
+    /// A multiline text box holding the plain text, with the clocks its
+    /// clicks and caret follow.
+    #[cfg(feature = "icedwright")]
+    fn annotation(&self) -> icedwright_probe::Annotation<'static, icedwright_probe::role::TextBox> {
+        use icedwright_probe::{Annotation, CaretClock, ClickClock, role};
+        let mut annotation = Annotation::new()
+            .role(role::TextBox)
+            .multiline(true)
+            .value(self.content.text())
+            .text_size(self.text_size)
+            .click_clock(ClickClock::Probe)
+            .caret_clock(CaretClock::Probe)
+            .component("iced_cube::rich_text_editor");
+        if let Some(placeholder) = &self.placeholder {
+            annotation = annotation.placeholder(placeholder.clone());
+        }
+        if self.on_action.is_none() {
+            annotation = annotation.disabled(true);
+        }
+        if self.invalid {
+            annotation = annotation.invalid(true);
+        }
+        annotation
     }
 
     fn status(
@@ -430,7 +455,12 @@ impl<'a, Message> Editor<'a, Message> {
             shell.capture_event();
             return;
         }
-        let click = Click::new(position, mouse::Button::Left, state.last_click);
+        let click = Click::new(
+            position,
+            mouse::Button::Left,
+            state.last_click,
+            crate::time::now(),
+        );
         let action = match click.kind() {
             click::Kind::Single if state.modifiers.shift() => Action::Select(Motion::To(at)),
             click::Kind::Single => Action::Move(Motion::To(at)),
@@ -730,6 +760,16 @@ impl<Message> Widget<Message, Theme, Renderer> for Editor<'_, Message> {
         operation: &mut dyn Operation,
     ) {
         let state = tree.state.downcast_mut::<State>();
+        #[cfg(feature = "icedwright")]
+        {
+            icedwright_probe::report(operation, layout.bounds(), || self.annotation());
+            // The focus nests under the annotation, which takes its state.
+            let id = self.id.as_ref();
+            operation.traverse(&mut |operation| {
+                operation.focusable(id, layout.bounds(), state);
+            });
+        }
+        #[cfg(not(feature = "icedwright"))]
         operation.focusable(self.id.as_ref(), layout.bounds(), state);
     }
 

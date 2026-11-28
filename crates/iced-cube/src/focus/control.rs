@@ -148,6 +148,19 @@ impl<Message> Widget<Message, Theme, Renderer> for Focus<'_, Message> {
             let state = tree.state.downcast_mut::<State>();
             report(operation, self.id.as_ref(), layout.bounds(), state);
         }
+        // Under icedwright the content nests under the focus report, so the
+        // recorder folds the focus into the control's annotation.
+        #[cfg(feature = "icedwright")]
+        if self.on_activate.is_some() {
+            let content = &mut self.content;
+            let child = &mut tree.children[0];
+            operation.traverse(&mut |operation| {
+                content
+                    .as_widget_mut()
+                    .operate(child, layout, renderer, operation);
+            });
+            return;
+        }
         self.content
             .as_widget_mut()
             .operate(&mut tree.children[0], layout, renderer, operation);

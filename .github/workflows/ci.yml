@@ -37,6 +37,8 @@ jobs:
         run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
       - name: Test
         run: cargo test --locked --workspace
+      - name: Test icedwright annotations
+        run: cargo test --locked -p iced-cube --features icedwright
       - name: Upload changed snapshots
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

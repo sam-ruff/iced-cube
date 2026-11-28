@@ -293,3 +293,30 @@ fn a_clearable_field_keeps_focus_as_the_button_appears() {
     ui.type_text("c");
     assert_eq!(ui.state.value, "c");
 }
+
+#[cfg(feature = "icedwright")]
+#[path = "support/semantic.rs"]
+mod semantic;
+
+#[cfg(feature = "icedwright")]
+#[test]
+fn inputs_report_value_placeholder_and_states() {
+    let element: Element<'_, Message> = column![
+        input("Your name", "Ada")
+            .on_input(Message::Name)
+            .clearable(Message::Clear),
+        input("Search", "").invalid(true),
+        input("Password", "secret")
+            .secure(true)
+            .on_input(Message::Name),
+    ]
+    .into();
+    assert_eq!(
+        semantic::yaml(element),
+        r#"- textbox "Your name" [focused=false] [focusable] [placeholder="Your name"] [prop:caret-clock="iced"]: Ada
+- button "Clear"
+- textbox "Search" [disabled] [focused=false] [invalid] [focusable] [placeholder="Search"] [prop:caret-clock="iced"]: ""
+- password "Password" [focused=false] [focusable] [placeholder="Password"] [prop:caret-clock="iced"]: ••••••
+"#
+    );
+}

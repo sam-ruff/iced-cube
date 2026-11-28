@@ -138,18 +138,29 @@ impl<'a, Message> Tooltip<'a, Message> {
 impl<'a, Message: 'a> From<Tooltip<'a, Message>> for Element<'a, Message> {
     fn from(tooltip: Tooltip<'a, Message>) -> Self {
         let size = label_size(&tooltip.label, tooltip.text_size);
+        #[cfg(feature = "icedwright")]
+        let label = tooltip.label.clone();
         let mut bubble = container(text(tooltip.label).size(size))
             .padding([space::XS + 2.0, space::MD])
             .style(|theme| style(&Tokens::of(theme)));
         if let Some(width) = tooltip.max_width {
             bubble = bubble.max_width(width);
         }
+        let bubble: Element<'a, Message> = bubble.into();
+        #[cfg(feature = "icedwright")]
+        let bubble = icedwright_probe::semantic(bubble)
+            .role(icedwright_probe::role::Tooltip)
+            .name(label.clone())
+            .component("iced_cube::tooltip")
+            .into();
 
         after_touch(Element::new(Tip {
             content: tooltip.content,
-            bubble: bubble.into(),
+            bubble,
             position: tooltip.position,
             delay: tooltip.delay,
+            #[cfg(feature = "icedwright")]
+            label,
         }))
     }
 }
@@ -271,6 +282,8 @@ struct Tip<'a, Message> {
     bubble: Element<'a, Message>,
     position: Position,
     delay: Duration,
+    #[cfg(feature = "icedwright")]
+    label: text::Fragment<'a>,
 }
 
 impl<Message> Tip<'_, Message> {
@@ -288,7 +301,7 @@ impl<Message> Tip<'_, Message> {
         ) {
             return;
         }
-        let now = Instant::now();
+        let now = crate::time::now();
         let over = cursor.position_over(layout.bounds());
 
         match (state.hover, over) {
@@ -302,8 +315,8 @@ impl<Message> Tip<'_, Message> {
                 shell.request_redraw_at(now + self.delay);
             }
             (Hover::Resting { .. }, None) => state.hover = Hover::Idle,
-            (Hover::Resting { at }, _) if at.elapsed() < self.delay => {
-                shell.request_redraw_at(now + self.delay - at.elapsed());
+            (Hover::Resting { at }, _) if now.saturating_duration_since(at) < self.delay => {
+                shell.request_redraw_at(at + self.delay);
             }
             (Hover::Resting { .. }, Some(position)) => {
                 state.hover = Hover::Open { cursor: position };
@@ -391,6 +404,13 @@ impl<Message> Widget<Message, Theme, Renderer> for Tip<'_, Message> {
         renderer: &Renderer,
         operation: &mut dyn Operation,
     ) {
+        #[cfg(feature = "icedwright")]
+        icedwright_probe::report(operation, layout.bounds(), || {
+            icedwright_probe::Annotation::new()
+                .tooltip(self.label.to_string())
+                .component("iced_cube::tooltip")
+        });
+        #[cfg(not(feature = "icedwright"))]
         operation.container(None, layout.bounds());
         operation.traverse(&mut |operation| {
             self.content.as_widget_mut().operate(
