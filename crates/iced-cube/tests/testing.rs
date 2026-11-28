@@ -5,16 +5,19 @@
     feature = "tabs",
     feature = "document-tabs",
     feature = "dropdown-menu",
-    feature = "virtual-list"
+    feature = "virtual-list",
+    feature = "timeline",
+    feature = "image-compare"
 ))]
 
 use iced::Element;
 use iced::widget::{button, column, text};
-use iced_cube::data::{tree, virtual_list};
+use iced_cube::data::{image_compare, timeline, tree, virtual_list};
 use iced_cube::navigation::{document_tabs, tabs};
 use iced_cube::overlay::dropdown_menu;
 use iced_cube::testing::{
-    ComponentLocator, DocumentTabs, Menu, ScrollTarget, Tabs, Tree, VirtualList,
+    ComponentLocator, DocumentTabs, ImageCompare, Menu, ScrollTarget, Tabs, Timeline, Tree,
+    VirtualList,
 };
 use icedwright_locator::{Locator, RoleKind, resolve};
 use icedwright_semantics::SemanticTree;
@@ -83,7 +86,7 @@ fn document_tabs_find_close_buttons_and_unsaved_tabs() {
 
     let strip = DocumentTabs::of_kind();
     assert_eq!(
-        name_of(&found, &strip.active()).as_deref(),
+        name_of(&found, &strip.selected()).as_deref(),
         Some("alpha.rs")
     );
     assert_eq!(
@@ -147,4 +150,33 @@ fn a_virtual_list_finds_rendered_rows_and_scrolls_to_others() {
         .map(|node| node.bounds.height)
         .expect("row bounds");
     assert_eq!(offset, 500.0 * height);
+}
+
+#[test]
+fn a_timeline_and_an_image_compare_find_their_parts() {
+    let picture = || iced::widget::image::Handle::from_rgba(2, 1, vec![128; 8]);
+    let element: Element<'_, usize> = column![
+        timeline::timeline([timeline::Tone::Neutral; 4], 2)
+            .label("Steps")
+            .on_select(|step| step),
+        image_compare::image_compare(picture(), picture())
+            .divider(0.25)
+            .on_divider(|_| 0),
+    ]
+    .into();
+    let found = semantic::Recorder::default().tree(element);
+
+    let steps = Timeline::of_kind();
+    assert_eq!(name_of(&found, &steps.slider()).as_deref(), Some("Steps"));
+
+    let compare = ImageCompare::of_kind();
+    assert_eq!(
+        name_of(&found, &compare.before()).as_deref(),
+        Some("Before")
+    );
+    assert_eq!(name_of(&found, &compare.after()).as_deref(), Some("After"));
+    assert_eq!(
+        name_of(&found, &compare.divider()).as_deref(),
+        Some("Divider")
+    );
 }

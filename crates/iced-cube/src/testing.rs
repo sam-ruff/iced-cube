@@ -152,8 +152,8 @@ impl DocumentTabs {
             .name(TextMatch::exact(format!("Close {name}")))
     }
 
-    /// The active tab.
-    pub fn active(&self) -> Locator<role::Tab> {
+    /// The selected, active tab.
+    pub fn selected(&self) -> Locator<role::Tab> {
         self.root.clone().get_by_role(role::Tab).selected(true)
     }
 
@@ -235,6 +235,56 @@ impl VirtualList {
             ordinal: row.scroll_ancestors.last().map(|scroll| scroll.ordinal),
             offset: index as f32 * row.bounds.height,
         })
+    }
+}
+
+component!(
+    /// A [`timeline`](mod@crate::data::timeline): one slider over its steps,
+    /// whose value is the current step.
+    Timeline,
+    "iced_cube::timeline",
+    Slider
+);
+
+impl Timeline {
+    /// The slider itself, for setting or reading the current step.
+    pub fn slider(&self) -> Locator<role::Slider> {
+        self.root.clone().into_role::<role::Slider>()
+    }
+}
+
+component!(
+    /// An [`image_compare`](mod@crate::data::image_compare): a group of the
+    /// before and after images and, in slider mode, the divider.
+    ImageCompare,
+    "iced_cube::image_compare",
+    Group
+);
+
+impl ImageCompare {
+    /// The before image, when one is shown.
+    pub fn before(&self) -> Locator<role::Image> {
+        self.image("Before")
+    }
+
+    /// The after image, or the only one.
+    pub fn after(&self) -> Locator<role::Image> {
+        self.image("After")
+    }
+
+    /// The divider, a splitter whose value runs from 0 to 100.
+    pub fn divider(&self) -> Locator<role::Splitter> {
+        self.root
+            .clone()
+            .get_by_role(role::Splitter)
+            .name(TextMatch::exact("Divider"))
+    }
+
+    fn image(&self, name: &str) -> Locator<role::Image> {
+        self.root
+            .clone()
+            .get_by_role(role::Image)
+            .name(TextMatch::exact(name))
     }
 }
 
