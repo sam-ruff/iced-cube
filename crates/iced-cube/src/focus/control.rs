@@ -144,26 +144,26 @@ impl<Message> Widget<Message, Theme, Renderer> for Focus<'_, Message> {
         renderer: &Renderer,
         operation: &mut dyn Operation,
     ) {
-        if self.on_activate.is_none() {
-            self.content.as_widget_mut().operate(
-                &mut tree.children[0],
-                layout,
-                renderer,
-                operation,
-            );
+        if self.on_activate.is_some() {
+            let state = tree.state.downcast_mut::<State>();
+            report(operation, self.id.as_ref(), layout.bounds(), state);
+        }
+        // Under icedwright the content nests under the focus report, so the
+        // recorder folds the focus into the control's annotation.
+        #[cfg(feature = "icedwright")]
+        if self.on_activate.is_some() {
+            let content = &mut self.content;
+            let child = &mut tree.children[0];
+            operation.traverse(&mut |operation| {
+                content
+                    .as_widget_mut()
+                    .operate(child, layout, renderer, operation);
+            });
             return;
         }
-        let state = tree.state.downcast_mut::<State>();
-        report(operation, self.id.as_ref(), layout.bounds(), state);
-        // Traversing nests the content under the focus report for operations
-        // that record the call structure.
-        let content = &mut self.content;
-        let child = &mut tree.children[0];
-        operation.traverse(&mut |operation| {
-            content
-                .as_widget_mut()
-                .operate(child, layout, renderer, operation);
-        });
+        self.content
+            .as_widget_mut()
+            .operate(&mut tree.children[0], layout, renderer, operation);
     }
 
     fn update(

@@ -729,17 +729,7 @@ impl<Message> Widget<Message, Theme, Renderer> for Rows<'_, Message> {
         operation.container(None, layout.bounds());
         let children: Vec<Layout<'_>> = layout.children().collect();
         let (rows_trees, header_trees) = tree.children.split_at_mut(1);
-        // The header goes first, as it is read and tabbed through first.
         operation.traverse(&mut |operation| {
-            if let (Some(header), Some(child), Some(header_tree)) = (
-                self.header.as_mut(),
-                children.get(1),
-                header_trees.first_mut(),
-            ) {
-                header
-                    .as_widget_mut()
-                    .operate(header_tree, *child, renderer, operation);
-            }
             if let (Some((_, element)), Some(child), Some(rows_tree)) = (
                 self.built.as_mut(),
                 children.first(),
@@ -748,6 +738,15 @@ impl<Message> Widget<Message, Theme, Renderer> for Rows<'_, Message> {
                 element
                     .as_widget_mut()
                     .operate(rows_tree, *child, renderer, operation);
+            }
+            if let (Some(header), Some(child), Some(header_tree)) = (
+                self.header.as_mut(),
+                children.get(1),
+                header_trees.first_mut(),
+            ) {
+                header
+                    .as_widget_mut()
+                    .operate(header_tree, *child, renderer, operation);
             }
         });
     }

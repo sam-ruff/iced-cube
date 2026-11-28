@@ -10,9 +10,9 @@ use iced_test::core::clipboard;
 use iced_test::core::renderer::Headless;
 use iced_test::renderer::Renderer;
 use iced_test::runtime::user_interface::{Cache, UserInterface};
-use icedwright_protocol::RawWindowInfo;
+use icedwright_protocol::{RawTree, RawWindowInfo};
 use icedwright_semantics::yaml::{self, YamlOptions};
-use icedwright_semantics::{SemanticTree, WindowId, collect};
+use icedwright_semantics::{SemanticTree, WindowId, collect, record};
 use icedwright_types::ScaleFactor;
 
 const WINDOW: Size = Size::new(800.0, 600.0);
@@ -67,20 +67,33 @@ impl Recorder {
     pub fn tree<'a, M>(&mut self, element: impl Into<Element<'a, M>>) -> SemanticTree {
         let cache = self.cache.take().unwrap_or_default();
         let mut ui = UserInterface::build(element.into(), WINDOW, cache, &mut self.renderer);
-        let info = RawWindowInfo {
-            id: WindowId(0),
-            title: String::new(),
-            size: icedwright_types::Size::new(WINDOW.width, WINDOW.height),
-            scale_factor: ScaleFactor::default(),
-        };
-        let tree = collect(&mut ui, &self.renderer, info);
+        let tree = collect(&mut ui, &self.renderer, window());
         self.cache = Some(ui.into_cache());
         tree
+    }
+
+    /// The raw operation calls `element` makes, before any inference: the
+    /// exact shape every operation sees.
+    pub fn raw<'a, M>(&mut self, element: impl Into<Element<'a, M>>) -> RawTree {
+        let cache = self.cache.take().unwrap_or_default();
+        let mut ui = UserInterface::build(element.into(), WINDOW, cache, &mut self.renderer);
+        let raw = record(&mut ui, &self.renderer, window());
+        self.cache = Some(ui.into_cache());
+        raw
     }
 
     /// The YAML of `element`'s tree, without bounds.
     pub fn yaml<'a, M>(&mut self, element: impl Into<Element<'a, M>>) -> String {
         write(&self.tree(element))
+    }
+}
+
+fn window() -> RawWindowInfo {
+    RawWindowInfo {
+        id: WindowId(0),
+        title: String::new(),
+        size: icedwright_types::Size::new(WINDOW.width, WINDOW.height),
+        scale_factor: ScaleFactor::default(),
     }
 }
 

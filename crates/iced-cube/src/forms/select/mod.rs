@@ -730,13 +730,18 @@ impl<Message> Picker<'_, Message> {
         }
         let state = tree.state.downcast_mut::<PickerState>();
         focus::report(operation, None, layout.bounds(), &mut state.focus);
-        // Traversing nests the field under the focus report for operations
-        // that record the call structure.
+        // Under icedwright the field nests under the focus report, so the
+        // recorder folds the focus into the select's annotation.
+        #[cfg(feature = "icedwright")]
         operation.traverse(&mut |operation| {
             field
                 .as_widget_mut()
                 .operate(field_tree, layout, renderer, operation);
         });
+        #[cfg(not(feature = "icedwright"))]
+        field
+            .as_widget_mut()
+            .operate(field_tree, layout, renderer, operation);
     }
 
     /// Opens the list with a fresh highlight on the selected option.
