@@ -18,6 +18,8 @@ pub mod data_table;
     feature = "tree"
 ))]
 pub(crate) mod ellipsis;
+#[cfg(feature = "image-compare")]
+pub mod image_compare;
 #[cfg(any(
     feature = "data-table",
     feature = "json-viewer",
@@ -55,6 +57,8 @@ pub mod virtual_list;
 pub use calendar::{Calendar, calendar};
 #[cfg(feature = "data-table")]
 pub use data_table::{DataTable, data_table};
+#[cfg(feature = "image-compare")]
+pub use image_compare::{ImageCompare, image_compare};
 #[cfg(feature = "json-viewer")]
 pub use json_viewer::{JsonViewer, json_viewer};
 #[cfg(feature = "log-viewer")]

@@ -108,6 +108,8 @@ pub use application::toolbar;
 pub use data::calendar;
 #[cfg(feature = "data-table")]
 pub use data::data_table;
+#[cfg(feature = "image-compare")]
+pub use data::image_compare;
 #[cfg(feature = "json-viewer")]
 pub use data::json_viewer;
 #[cfg(feature = "log-viewer")]

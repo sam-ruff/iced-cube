@@ -76,6 +76,7 @@ data = [
     "selectable-text",
     "calendar",
     "timeline",
+    "image-compare",
 ]
 
 button = ["iced/advanced"]
@@ -162,6 +163,7 @@ log-viewer = ["virtual-list", "button", "context-menu", "icon-button", "input", 
 rich-text-editor = ["iced/advanced", "input", "dep:unicode-segmentation"]
 selectable-text = ["iced/advanced"]
 timeline = ["iced/advanced"]
+image-compare = ["iced/advanced", "iced/image-without-codecs"]
 formatting-toolbar = [
     "rich-text-editor",
     "toolbar",

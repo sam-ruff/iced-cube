@@ -7,7 +7,7 @@ module: data::timeline
 imports: |
   use iced_cube::data::timeline::{self, Action, Span, Tone, lane};
 keywords: [scrubber, playhead, steps, trace, history, gantt, lanes]
-related: [slider]
+related: [slider, image-compare]
 hero: timeline/default
 stories: [timeline/default, timeline/lanes, timeline/keyboard, timeline/disabled]
 api:

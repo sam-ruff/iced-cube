@@ -26,6 +26,7 @@ pub mod dropdown_menu;
 pub mod fab;
 pub mod formatting_toolbar;
 pub mod icon_button;
+pub mod image_compare;
 pub mod input;
 pub mod json_viewer;
 pub mod label;
@@ -1075,6 +1076,26 @@ crate::stories! {
         id: "timeline/disabled", component: "timeline", title: "Disabled",
         description: "A timeline without a message only shows progress.",
         file: "timeline/disabled.rs", height: 160,
+    }
+    ImageCompareSlider => image_compare::slider {
+        id: "image-compare/slider", component: "image-compare", title: "Slider",
+        description: "The before image left of a divider that is dragged across the after image.",
+        file: "image_compare/slider.rs", height: 320,
+    }
+    ImageCompareModes => image_compare::modes {
+        id: "image-compare/modes", component: "image-compare", title: "Modes",
+        description: "Side by side, slider and overlay, with the overlay's opacity on a slider.",
+        file: "image_compare/modes.rs", height: 420,
+    }
+    ImageCompareOutlines => image_compare::outlines {
+        id: "image-compare/outlines", component: "image-compare", title: "Outlines and pointer",
+        description: "One image with outlined regions, reporting the pixel under the pointer and picking a region on a press.",
+        file: "image_compare/outlines.rs", height: 340,
+    }
+    ImageCompareKeyboard => image_compare::keyboard {
+        id: "image-compare/keyboard", component: "image-compare", title: "Keyboard shortcuts",
+        description: "Arrow, Home and End keys move the divider through the default keymap, plus two added bindings.",
+        file: "image_compare/keyboard.rs", height: 280, subscription: true,
     }
     ShowcaseSettings => showcase::settings {
         id: "showcase/settings", component: "showcase", title: "Preferences",
